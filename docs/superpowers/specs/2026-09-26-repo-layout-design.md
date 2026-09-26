@@ -35,11 +35,10 @@ non-test lines it is **1.6% auth**:
 | Observability — `session`, `sessionapi`, `observe`, `redact` | 5,368 |
 | **Auth** — `auth`, `bypass`, `contracts` | **882** |
 
-Shares are in `core/README.md`'s theme table, which is measured the same way and is the
-one place they are maintained.
+Shares are in `core/README.md`'s theme table, which is measured the same way.
 
 The docs compound it: they call it *"the shared auth library"* and enumerate it as
-*"validation, exchange, cache, bypass, spiffe, routing, auth, config…"* — the 1.7%
+*"validation, exchange, cache, bypass, spiffe, routing, auth, config…"* — the 1.6%
 listed first, the 32% omitted.
 
 Inside it, 29 top-level packages have the same flat-and-wide shape the root had,
@@ -114,7 +113,7 @@ Each name is taken from what the package's own doc comment says it does.
 
 | From | To | The package's own description |
 |---|---|---|
-| `authlib` | `core` | 1.7% auth; the module every binary and both external consumers import |
+| `authlib` | `core` | 1.6% auth; the module every binary and both external consumers import |
 | `shared` | `memstore` | "a generic, process-scoped, TTL key→value store… intentionally semantics-free". `memstore` also contrasts with `storage`, which is the cross-pod persistent one |
 | `runtimeutil` | `bootstrap` | "process-level helpers shared by the binaries… logging setup, the SIGUSR1 toggle, the health and stats servers" — process startup, not a "util" |
 | `contracts` | `capabilities` | "defines **capability interfaces** that protocol extensions implement" — its own words |
@@ -206,7 +205,7 @@ One PR, six commits, each independently reviewable:
 4. `storage/redis` → `core/storage/redis` — module path plus its own relative paths.
 5. Package renames — `memstore`, `bootstrap`, `capabilities`, `tlsconfig`, `cost/*`.
 6. Prose — rewrite the descriptions that call it "the shared auth library" and
-   enumerate the 1.7% while omitting the 32%.
+   enumerate the 1.6% while omitting the 32%.
 
 **As implemented: the six planned commits, plus fallout.** The six above all landed as
 planned; each piece of fallout deserved its own reviewable boundary rather than being

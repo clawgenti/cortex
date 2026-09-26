@@ -12,7 +12,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Take the top level from 10 directories to 7, rename `authlib` to `core` (it is 1.7% auth), and rename five internal packages to match what they do — without changing any published contract.
+**Goal:** Take the top level from 10 directories to 7, rename `authlib` to `core` (it is 1.6% auth), and rename five internal packages to match what they do — without changing any published contract.
 
 **Architecture:** Six commits, one per concern, so a 1,000-plus-reference rename can be reviewed piecewise. Each substitution matches the bare name without requiring a trailing slash, because the same class of pattern cost #1134 nine broken copy-paste blocks.
 
@@ -213,7 +213,7 @@ git mv storage/redis core/storage/redis && rmdir storage
 
 ### Task 6: Prose, and retire the migration script
 
-- [ ] **Step 1: Rewrite the descriptions that are now wrong.** The docs call it *"the shared auth library"* and enumerate *"validation, exchange, cache, bypass, spiffe, routing, auth, config, all listener implementations, all plugins"* — the 1.7% first, the 32% (cost, session, observability) absent. 168 markdown mentions outside the archive. Describe what `core/` contains.
+- [ ] **Step 1: Rewrite the descriptions that are now wrong.** The docs call it *"the shared auth library"* and enumerate *"validation, exchange, cache, bypass, spiffe, routing, auth, config, all listener implementations, all plugins"* — the 1.6% first, the 32% (cost, session, observability) absent. 168 markdown mentions outside the archive. Describe what `core/` contains.
 
 - [ ] **Step 2: `git rm scripts/layout-migrate.sh`.**
 
