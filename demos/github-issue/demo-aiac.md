@@ -1,4 +1,4 @@
-# AI Access Control (AIAC) Demo for GitHub Issue Agent with AuthBridge
+# AI Access Control (AIAC) Demo for GitHub Issue Agent with Cortex
 
 This demo showcases **AI based access control policy generation** integrated with
 **AuthBridge** and **Keycloak**. It demonstrates how natural language policy descriptions
@@ -297,7 +297,7 @@ ollama serve
 **For OpenAI or other cloud LLMs:**
 Ensure your API keys are properly configured in the agent's environment variables.
 
-### Step 7: Test the AuthBridge Flow
+### Step 7: Test the Cortex Flow
 
 Now test that the agent is properly secured with AuthBridge and can communicate with the GitHub tool.
 

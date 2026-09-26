@@ -1,7 +1,7 @@
-# GitHub Issue Agent Demo with AuthBridge
+# GitHub Issue Agent Demo with Cortex
 
 This demo shows the **GitHub Issue Agent** running with **AuthBridge** for transparent,
-zero-trust token management. AuthBridge provides automatic identity registration,
+zero-trust token management. Cortex provides automatic identity registration,
 inbound JWT validation, and outbound token exchange — all without changing the
 agent code.
 

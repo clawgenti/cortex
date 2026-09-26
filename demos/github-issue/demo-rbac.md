@@ -1,4 +1,4 @@
-# GitHub Issue Agent Demo with AuthBridge (Manual Deployment)
+# GitHub Issue Agent Demo with Cortex (Manual Deployment)
 
 This guide walks through deploying the **GitHub Issue Agent** with **AuthBridge**
 using `kubectl` commands exclusively. All resources — agent, tool, ConfigMaps, and
@@ -497,7 +497,7 @@ ollama serve
 
 ---
 
-## Step 8: Test the AuthBridge Flow
+## Step 8: Test the Cortex Flow
 
 These tests verify both **inbound** JWT validation and **outbound** token exchange
 end-to-end.
@@ -1021,7 +1021,7 @@ kubectl delete pod test-client -n team1 --ignore-not-found
 
 ---
 
-## How AuthBridge Changes the Original Demo
+## How Cortex Changes the Original Demo
 
 | Aspect | Original Demo | With AuthBridge |
 |--------|--------------|-----------------|

@@ -17,6 +17,14 @@ non-test lines, auth is **1.6%** of it:
 The remainder is transport, storage and integration glue — the table covers themes,
 not every package.
 
+**On the two names.** `Cortex` is the product; `AuthBridge` is the injected sidecar
+component, and it is still the correct word inside artifact identifiers — the
+`authbridge-*` binaries that import this module, the images they ship in, the
+`x-authbridge-*` headers they set, the `AUTHBRIDGE_*` env vars they read. None of those
+can be renamed from here: two of them are a CRD field and an annotation owned by
+`rossoctl/operator`. So in prose, say Cortex for the product and AuthBridge for the
+sidecar. The full frozen list is in [CLAUDE.md](../CLAUDE.md#naming-cortex-is-the-product-authbridge-is-the-sidecar).
+
 **It is not protocol-free.** An earlier version of this file claimed no gRPC and no
 Envoy dependency; that stopped being true when the listeners moved in. `listener/extproc`
 is an Envoy ext_proc gRPC server, and `core` has 20 direct dependencies including

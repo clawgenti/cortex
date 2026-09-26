@@ -1,4 +1,4 @@
-# Weather Agent Demo with AuthBridge
+# Weather Agent Demo with Cortex
 
 This guide walks through deploying the **Weather Service Agent** with **AuthBridge**
 using the **Rossoctl UI** for agent and tool deployment. Infrastructure setup

@@ -1,4 +1,4 @@
-# GitHub Issue Agent Demo with AuthBridge (UI Deployment)
+# GitHub Issue Agent Demo with Cortex (UI Deployment)
 
 This guide walks through deploying the **GitHub Issue Agent** with **AuthBridge**
 using the **Rossoctl UI** for agent and tool deployment. Infrastructure setup
@@ -113,7 +113,7 @@ This lets you demonstrate finer-grained authorization: a user with full access
 can see issues on all repositories, while a user with partial access can only
 see issues on public repositories.
 
-### Rossoctl version notes (UI import and AuthBridge)
+### Rossoctl version notes (UI import and Cortex)
 
 - **Outbound routes from the UI (Step 5, item 12):** The API must write `authproxy-routes`
   `routes.yaml` as a **YAML list** of route objects (same shape as

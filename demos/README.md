@@ -1,4 +1,4 @@
-# AuthBridge Demos
+# Cortex Demos
 
 This directory contains demo scenarios showing AuthBridge providing zero-trust
 authentication for Kubernetes agent workloads. Each demo progressively introduces
@@ -69,7 +69,7 @@ more AuthBridge capabilities.
 - `deploy_and_verify_advanced.sh` for reproducible CI-style verification (Keycloak
   exchange + MCP `initialize` without requiring a working LLM)
 
-### GitHub Issue Agent (Full AuthBridge Flow)
+### GitHub Issue Agent (Full Cortex Flow)
 - Deploy agent + tool via **Rossoctl UI** or **kubectl**
 - Keycloak configuration for token exchange (realm, clients, scopes)
 - Inbound JWT validation protecting the agent
