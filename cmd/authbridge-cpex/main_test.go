@@ -108,8 +108,9 @@ func TestCostLedgerInertClaim_NoLedgerOrAggregatorIsLinkedHere(t *testing.T) {
 	// ONE list, used for both the match below and the existence check after it. A
 	// match is the failure here, so zero hits is the pass — and a stale suffix
 	// produces zero hits too. Deriving both from this slice is what makes the
-	// existence check cover the matcher: an edit that blinds one blinds the other,
-	// so it cannot go quietly green. Two copies of these strings would not.
+	// existence check cover the matcher: an edit to THESE STRINGS blinds one and the
+	// other, so it cannot go quietly green. Two copies of them would not. Editing the
+	// match EXPRESSION below still can, which this does not claim to catch.
 	costPkgs := []string{"core/cost/ledger", "core/cost/usage"}
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, `"`)
