@@ -8,6 +8,8 @@ import (
 	"go/parser"
 	"go/token"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -108,6 +110,15 @@ func TestCostLedgerInertClaim_NoLedgerOrAggregatorIsLinkedHere(t *testing.T) {
 		if strings.HasSuffix(path, "/core/cost/ledger") || strings.HasSuffix(path, "/core/cost/usage") {
 			t.Errorf("main.go imports %s, so cost_ledger may no longer be inert in this binary — "+
 				"wire the block through and delete warnCostLedgerInert, or narrow its message", path)
+		}
+	}
+	// A match is the failure here, so zero hits is the pass — which is also what a
+	// STALE suffix produces. Pin the suffixes to real directories: if these packages
+	// move again, this fails loudly instead of the guard quietly never matching.
+	for _, pkg := range []string{"core/cost/ledger", "core/cost/usage"} {
+		if _, err := os.Stat(filepath.Join("..", "..", pkg)); err != nil {
+			t.Fatalf("this guard is written against %s, which does not exist — the suffix is "+
+				"stale and the check above can no longer fail: %v", pkg, err)
 		}
 	}
 }

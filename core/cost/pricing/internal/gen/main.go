@@ -10,8 +10,8 @@
 //
 // Writes two files, both committed:
 //
-//   - pricing/bundled.go, the generated table.
-//   - pricing/testdata/model_prices.snapshot.json, the Anthropic-provider subset
+//   - cost/pricing/bundled.go, the generated table.
+//   - cost/pricing/testdata/model_prices.snapshot.json, the Anthropic-provider subset
 //     of the upstream map. The golden test regenerates from this snapshot and
 //     compares, so it proves the checked-in table matches its source without
 //     needing a network — and catches a hand-edit to either file.

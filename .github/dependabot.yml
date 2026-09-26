@@ -38,7 +38,7 @@ updates:
       # cmd/*/Dockerfile moved to 1.27 (they set GOWORK=off but not
       # GOTOOLCHAIN, so they would silently download the 1.27 toolchain
       # mid-build rather than fail). core uses three symbols from
-      # core/schemas, so v1.8 buys nothing today.
+      # bifrost's core/schemas, so v1.8 buys nothing today.
       #
       # Range rather than update-types, so v1.7.x patches keep flowing —
       # v1.7.15 is the newest release still on go 1.26.5 (see #840). There is

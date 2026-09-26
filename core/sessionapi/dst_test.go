@@ -6,7 +6,7 @@ import (
 	"time"
 
 	// EMBEDDED TZDATA. mustZone treats a load failure as a test failure, so the database has
-	// to be in the binary; see the same import in usage/dst_test.go and cost/ledger/dst_test.go
+	// to be in the binary; see the same import in cost/usage/dst_test.go and cost/ledger/dst_test.go
 	// for why a skip here would be worse than no test.
 	_ "time/tzdata"
 
@@ -27,7 +27,7 @@ type dayBoundaryCase struct {
 	start string
 }
 
-// dayBoundaryCases are the transition shapes, with controls. The same set usage/dst_test.go
+// dayBoundaryCases are the transition shapes, with controls. The same set cost/usage/dst_test.go
 // pins the bound against, so a failure here and a pass there localises the break to the
 // join rather than to either side.
 var dayBoundaryCases = []dayBoundaryCase{

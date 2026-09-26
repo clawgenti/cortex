@@ -90,7 +90,7 @@ There is no `authbridge/` subdirectory: what used to live there is the repo root
 
 ```
 cortex/
-├── core/                          # The runtime library (Go module). Auth is 1.6% of it;
+├── core/                             # The runtime library (Go module). Auth is 1.6% of it;
 │   │                                 # see core/README.md for the measured breakdown.
 │   ├── pipeline/                     #   Plugin interface + lifecycle
 │   ├── plugins/                      #   Every plugin; each owns its own config

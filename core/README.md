@@ -2,7 +2,7 @@
 
 The Go module every sidecar binary and both external consumers import. It holds the
 plugin framework, the listeners, the cost pipeline, the session store, and the auth
-primitives — roughly 53,000 non-test lines across 24 packages.
+primitives — roughly 53,000 non-test lines.
 
 It was called `authlib` and described as *"the shared auth library"*. Measured by
 non-test lines, auth is **1.6%** of it:
@@ -57,8 +57,8 @@ is an Envoy ext_proc gRPC server, and `core` has 20 direct dependencies includin
 
 **Auth and identity.** The theme table's 882-line Auth figure is `auth` + `bypass` +
 `capabilities` — `capabilities` is grouped here by subject even though it is listed
-under Framework above, which is where it is used from. `spiffe` and `routing` are
-counted under Framework, not here:
+under Framework above, which is where it is used from. `spiffe` is counted under
+Framework, not here:
 
 | Package | Purpose |
 |---------|---------|
@@ -128,6 +128,5 @@ plugin), `spiffe/go-spiffe/v2`, `lestrrat-go/jwx/v2` (JWT), `go.opentelemetry.io
 `fsnotify/fsnotify`, `tidwall/gjson` + `sjson`, `gopkg.in/yaml.v3`.
 
 `core` is **consumed outside this repo** — by `rossoctl/operator` and
-`rossoctl/rossoctl-cli`, both public repos that compile against this module, and
-neither referenced anywhere else in this tree —
+`rossoctl/rossoctl-cli`, both public repos that compile against this module —
 so removing exported API here is a cross-repo change.

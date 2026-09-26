@@ -26,14 +26,17 @@ single driver whose interface lives elsewhere.
 
 **The names are one product generation behind, and one of them is wrong on a second
 axis.** `authlib` is not merely stale from the AuthBridge→Cortex rename; measured by
-non-test lines it is **1.7% auth**:
+non-test lines it is **1.6% auth**:
 
-| Theme | Lines | Share |
-|---|---|---|
-| Framework — `pipeline`, `plugins`, `listener`, `config`, `spiffe` | 32,984 | 65% |
-| Cost — `pricing`, `costing`, `costledger`, `costevent`, `usage` | 11,288 | 22% |
-| Observability — `session`, `sessionapi`, `observe`, `redact` | 5,368 | 10% |
-| **Auth** — `auth`, `validation`, `bypass`, `exchange`, `contracts` | **882** | **1.7%** |
+| Theme | Lines |
+|---|---|
+| Framework — `pipeline`, `plugins`, `listener`, `config`, `spiffe` | 30,485 |
+| Cost — `pricing`, `costing`, `costledger`, `costevent`, `usage` | 11,288 |
+| Observability — `session`, `sessionapi`, `observe`, `redact` | 5,368 |
+| **Auth** — `auth`, `bypass`, `contracts` | **882** |
+
+Shares are in `core/README.md`'s theme table, which is measured the same way and is the
+one place they are maintained.
 
 The docs compound it: they call it *"the shared auth library"* and enumerate it as
 *"validation, exchange, cache, bypass, spiffe, routing, auth, config…"* — the 1.7%
@@ -73,7 +76,7 @@ cortex/
 │   ├── pipeline/  plugins/  listener/  config/
 │   ├── cost/                ← pricing, costing, costledger, costevent, usage
 │   ├── session/  sessionapi/  observe/  redact/
-│   ├── auth/  validation/  bypass/
+│   ├── auth/  bypass/
 │   ├── storage/
 │   │   └── redis/           ← storage/redis, beside the interface it implements
 │   ├── memstore/            ← shared
@@ -205,11 +208,11 @@ One PR, six commits, each independently reviewable:
 6. Prose — rewrite the descriptions that call it "the shared auth library" and
    enumerate the 1.7% while omitting the 32%.
 
-**As implemented: twelve commits, not six.** The six above all landed as planned; the
-other six are fallout each of which deserved its own reviewable boundary rather than
-being folded into the commit that caused it — retargeting ten relative links the
-`deploy/` move stranded, making the migration script actually reproduce its own output,
+**As implemented: the six planned commits, plus fallout.** The six above all landed as
+planned; each piece of fallout deserved its own reviewable boundary rather than being
+folded into the commit that caused it — retargeting ten relative links the `deploy/`
+move stranded, making the migration script actually reproduce its own output,
 restoring the gofmt ordering the rename disturbed, and correcting the godoc headers and
-filenames the package renames left behind. That the fallout matched the planned work
-commit-for-commit is the honest measure of how much of this change was invisible to
-the sweep that performed it.
+filenames the package renames left behind. That the fallout ran to a comparable number
+of commits as the planned work is the honest measure of how much of this change was
+invisible to the sweep that performed it.

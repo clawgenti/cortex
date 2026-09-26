@@ -100,7 +100,7 @@ sh -c 'SD=$(cd scripts/dev && pwd); RR=$(cd "$SD/../.." && pwd); test -f "$RR/go
 
 The largest task. 850 import occurrences across 393 files, one module path, five `replace` directives, nineteen bare-name sites.
 
-**Files:** `git mv authlib core`; every `*.go` importing it; all 12 `go.mod`; `go.work`; `.github/workflows/{ci,build,release-binaries,dependabot-tidy}.yaml`; `.github/dependabot.yml`; `Makefile`; Dockerfiles; docs.
+**Files:** `git mv authlib core`; every `*.go` importing it; all 12 `go.mod`; `go.work`; `.github/workflows/{ci,build,release-binaries}.yaml`; `.github/workflows/dependabot-tidy.yml`; `.github/dependabot.yml`; `Makefile`; Dockerfiles; docs.
 
 - [ ] **Step 1: Write the migration script** as `scripts/layout-migrate.sh`, committed so review is "re-run it and diff":
 
@@ -243,6 +243,6 @@ for f in $(git ls-files '*.md'); do d=$(dirname "$f"); grep -oE '\]\([^)#h][^)]*
 
 **Placeholder scan.** No TBD. Every step carries its command or its table.
 
-**Type consistency.** The six target names (`core`, `deploy`, `memstore`, `bootstrap`, `capabilities`, `tlsconfig`, `cost/*`) are used identically in the spec's §3/§4 and in Tasks 3–5. All seven were checked for collisions against existing directories and package clauses before being chosen.
+**Type consistency.** The target names (`core`, `deploy`, `memstore`, `bootstrap`, `capabilities`, `tlsconfig`, `cost/*`) are used identically in the spec's §3/§4 and in Tasks 3–5. All of them were checked for collisions against existing directories and package clauses before being chosen.
 
 **One risk the plan cannot remove:** Task 5's `event` and `settle` are short, common words. Step 3 names the shadowing hazard, but only the build proves it.
