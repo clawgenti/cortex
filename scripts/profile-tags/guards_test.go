@@ -25,8 +25,8 @@ const legacyTagEscape = "allow-legacy-plugin-tag"
 // than an AST walk: it matches inside a grouped import block as well as a single
 // one, since it does not anchor on the `import` keyword. If the registration
 // shape ever loosens beyond `_ "<path>"`, switch to go/ast — see
-// authlib/plugins/injection_coverage_test.go for the pattern.
-var blankPluginImport = regexp.MustCompile(`_\s+"github\.com/rossoctl/cortex/authlib/plugins/(\w+)"`)
+// core/plugins/injection_coverage_test.go for the pattern.
+var blankPluginImport = regexp.MustCompile(`_\s+"github\.com/rossoctl/cortex/core/plugins/(\w+)"`)
 
 // profileInvocations match the shapes a call site uses to name a profile. All
 // three deliberately require the name to start with a letter, so a shell
@@ -155,6 +155,12 @@ func TestEveryPluginFileIsTagged(t *testing.T) {
 // no error said so. Every plugin must enter through a tagged plugins_*.go file.
 func TestNoUnconditionalPluginImports(t *testing.T) {
 	var hits []string
+	// Matches inside the plugins_*.go files this scan deliberately skips. Those are
+	// where a blank plugin import legitimately lives, so they are the pattern's
+	// positive control: zero hits below is the pass, and a blankPluginImport whose
+	// hardcoded module path has gone stale also produces zero. Counting the
+	// sanctioned sites separates "the tree is clean" from "the regexp is blind".
+	sanctioned := 0
 	entries, err := os.ReadDir(cmdDir)
 	if err != nil {
 		t.Fatalf("read %s: %v", cmdDir, err)
@@ -172,6 +178,11 @@ func TestNoUnconditionalPluginImports(t *testing.T) {
 			// plugins_*.go files are the sanctioned entry point; that they actually
 			// carry a directive is TestEveryPluginFileIsTagged's job.
 			if strings.HasPrefix(base, "plugins_") || strings.HasSuffix(base, "_test.go") {
+				if strings.HasPrefix(base, "plugins_") {
+					if data, err := os.ReadFile(f); err == nil {
+						sanctioned += len(blankPluginImport.FindAllStringSubmatch(string(data), -1))
+					}
+				}
 				continue
 			}
 			data, err := os.ReadFile(f)
@@ -186,6 +197,10 @@ func TestNoUnconditionalPluginImports(t *testing.T) {
 	if len(hits) > 0 {
 		t.Errorf("%d unconditional plugin import(s) outside a tagged plugins_*.go:\n  %s",
 			len(hits), strings.Join(hits, "\n  "))
+	}
+	if sanctioned == 0 {
+		t.Fatal("blankPluginImport matched no import in any plugins_*.go, so it can no longer " +
+			"match a real registration — the pattern is stale, not the tree clean")
 	}
 }
 

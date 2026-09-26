@@ -6,10 +6,12 @@ import (
 	"go/parser"
 	"go/token"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/rossoctl/cortex/authlib/config"
+	"github.com/rossoctl/cortex/core/config"
 )
 
 // captureWarns runs fn with a logger recording WARN records as JSON lines.
@@ -90,11 +92,26 @@ func TestCostLedgerInertClaim_NoLedgerOrAggregatorIsLinkedHere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse main.go: %v", err)
 	}
+	// ONE list, used for both the match below and the existence check after it. A
+	// match is the failure here, so zero hits is the pass — and a stale suffix
+	// produces zero hits too. Deriving both from this slice is what makes the
+	// existence check cover the matcher: an edit to THESE STRINGS blinds one and the
+	// other, so it cannot go quietly green. Two copies of them would not. Editing the
+	// match EXPRESSION below still can, which this does not claim to catch.
+	costPkgs := []string{"core/cost/ledger", "core/cost/usage"}
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, `"`)
-		if strings.HasSuffix(path, "/authlib/costledger") || strings.HasSuffix(path, "/authlib/usage") {
-			t.Errorf("main.go imports %s, so cost_ledger may no longer be inert in this binary — "+
-				"wire the block through and delete warnCostLedgerInert, or narrow its message", path)
+		for _, pkg := range costPkgs {
+			if strings.HasSuffix(path, "/"+pkg) {
+				t.Errorf("main.go imports %s, so cost_ledger may no longer be inert in this binary — "+
+					"wire the block through and delete warnCostLedgerInert, or narrow its message", path)
+			}
+		}
+	}
+	for _, pkg := range costPkgs {
+		if _, err := os.Stat(filepath.Join("..", "..", pkg)); err != nil {
+			t.Fatalf("this guard matches on %s, which does not exist — the suffix is "+
+				"stale and the check above can no longer fail: %v", pkg, err)
 		}
 	}
 }
