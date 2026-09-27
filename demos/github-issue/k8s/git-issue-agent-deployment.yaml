@@ -8,7 +8,7 @@
 #   Workload API; there is no spiffe-helper container.
 # - envoy-sidecar: a "proxy-init" init container (iptables) plus one
 #   container "envoy-proxy" from the "authbridge-envoy" image (Envoy +
-#   ext_proc + bundled spiffe-helper).
+#   ext_proc). SVIDs are fetched in-process here too; no spiffe-helper.
 # Either way the sidecar handles inbound JWT validation, outbound token
 # exchange (HTTP), and HTTPS passthrough.
 #

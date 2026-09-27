@@ -258,9 +258,8 @@ weather-tool-7f8c9d6b44-yyyyy     1/1     Running   0          5m
 > **Note:** AuthBridge ships as a single combined sidecar image (since
 > cortex#411). `weather-service` runs `agent` + the combined
 > AuthBridge sidecar — `2/2` — regardless of whether SPIRE identity is
-> enabled. The `spiffe-helper` is bundled inside the combined image and
-> activated per workload via `SPIRE_ENABLED` (driven by the
-> `rossoctl.io/spire: enabled` label); it is not a separate container. In
+> enabled. SVIDs are fetched in-process over the SPIRE Workload API; there
+> is no bundled `spiffe-helper` binary and no `SPIRE_ENABLED` gate. In
 > `envoy-sidecar` mode the pod is still `2/2` (`agent` + the combined
 > sidecar) plus a `proxy-init` init container for iptables setup. See the
 > [AuthBridge deployment guide](https://github.com/rossoctl/rossoctl/blob/main/docs/authbridge/deployment-guide.md)

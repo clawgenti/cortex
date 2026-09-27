@@ -716,8 +716,8 @@ mtls:
 
 // --- SPIFFE config ---
 
-// Load applies SPIFFE defaults that match today's spiffe-helper-driven
-// setup: the SPIRE agent socket path, mirror-files-on, and /opt mirror
+// Load applies SPIFFE defaults that match the file layout spiffe-helper
+// used to write: the SPIRE agent socket path, mirror-files-on, and /opt mirror
 // directory. JWT audience lives on the per-plugin tokenexchange.identity
 // block now, not here.
 func TestSPIFFEConfig_Defaults(t *testing.T) {

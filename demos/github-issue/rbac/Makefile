@@ -7,7 +7,7 @@
 #   make deploy
 #                              # namespace + ConfigMaps + PAT secret + tool + agent
 #   make validate              # verify pod readiness and operator client registration
-#   make test-ab               # authbridge inbound validation tests (Steps 8a–8f from demo-rbac.md)
+#   make test-ab               # authbridge inbound validation tests (Steps 8a–8f from demo-manual.md)
 #   make test-rbac             # show scope-based PAT selection logs (Alice vs Bob)
 #   make clean                 # delete all deployed resources
 #
@@ -236,7 +236,7 @@ test-ab:  ## Run inbound validation tests (Steps 8a-8f): public endpoint, no-tok
 
 # ---------- RBAC test ----------
 
-test-rbac:  ## Show scope-based PAT selection logs (Alice vs Bob) — see demo-rbac.md §10 for full interactive steps
+test-rbac:  ## Show scope-based PAT selection logs (Alice vs Bob) — see demo-manual.md Step 10 for full interactive steps
 	@echo "[*] GitHub tool scope-selection logs (last 20 lines):"
 	@kubectl logs deployment/github-tool -n $(NAMESPACE) 2>/dev/null \
 	  | grep -E "REQUIRED_SCOPE|scopes" | tail -20 || echo "(no relevant log lines yet)"
@@ -244,7 +244,7 @@ test-rbac:  ## Show scope-based PAT selection logs (Alice vs Bob) — see demo-r
 	@printf "To run the full Alice vs Bob test interactively:\n"
 	@printf "  \033[1mkubectl run test-client --image=nicolaka/netshoot -n $(NAMESPACE) --restart=Never -- sleep 3600\033[0m\n"
 	@printf "  \033[1mkubectl exec -it test-client -n $(NAMESPACE) -- sh\033[0m\n"
-	@printf "Then follow Steps 10b–10d from demo-rbac.md.\n"
+	@printf "Then follow Steps 10b–10d from demo-manual.md.\n"
 
 # ---------- Clean ----------
 

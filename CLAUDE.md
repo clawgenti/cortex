@@ -678,9 +678,8 @@ through to a per-agent rendered envoy-config with the matching TLS
 blocks (operator companion PR). **This design has no end-to-end
 verification in-tree.** The `demos/mtls/` demo used to exercise it — six
 make targets including negative checks on both deployment shapes — and was
-retired as superseded. The Go tests in `core/tlsconfig` and
-`core/listener/reverseproxy` cover the proxy-sidecar path only; nothing
-exercises the Envoy filter chains. Re-verify by hand after changing them.
+retired as superseded. The Go tests cover the proxy-sidecar path only;
+nothing exercises the Envoy filter chains. Re-verify by hand after changing them.
 
 ## CI/CD Workflows
 

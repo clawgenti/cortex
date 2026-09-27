@@ -171,13 +171,14 @@ only — `abctl cost` does not print it.
 ## Reading usage over HTTP
 
 `GET /v1/usage` on the session API (`:9094` in Kubernetes, `:47601` for the laptop
-install) is the aggregate behind `abctl cost`. Three query parameters:
+install) is the aggregate behind `abctl cost`. Query parameters:
 
 | Parameter | Values | Notes |
 |---|---|---|
-| `window` | `today`, `month`, `7d`, or a duration (`1h`, `6h`) | The symbolic ones are **boundaries, not lengths** — `today` runs from local midnight, `month` from the 1st — and are served from the durable ledger. A duration is served from the in-memory ring. |
+| `window` | `today`, `month`, `7d`, or a duration (`1h`, `6h`) | `today`, `month` and `7d` are served from the durable ledger. A duration is served from the in-memory ring. |
 | `group` | `none`, `model`, `endpoint`, `session`, `agent`, `status`, `plugin`, `host` (`method` aliases `model`) | See the caveat below. |
-| `resolution` | a duration | Bucket size. Omitted gives a ten-bucket default. |
+| `resolution` | a duration | Bucket size. Omitted gives one-minute buckets. |
+| `session` | a session id | Combining it with a symbolic window (`today`, `month`, `7d`) is rejected with 400. |
 
 Response envelope: `window`, `bucketSeconds`, `group`, `buckets[]`, `totals`, `priced`,
 `pricedBy`, `unpricedBy`, `incompleteBy`. `pricedBy` is keyed by provenance
@@ -185,8 +186,8 @@ Response envelope: `window`, `bucketSeconds`, `group`, `buckets[]`, `totals`, `p
 
 **The response reports the `group` it SERVED, not the one you asked for — and the
 difference is silent.** On a ledger-backed window (`today`, `month`, `7d`) only
-`endpoint`, `agent` and `model` are actually grouped; `host`, `session` and `status`
-fall back to `group: "none"` with no error and HTTP 200. Always read the `group` field
+`endpoint`, `agent` and `model` are actually grouped; `host`, `session`, `status`
+and `plugin` fall back to `group: "none"` with no error and HTTP 200. Always read the `group` field
 back:
 
 ```sh

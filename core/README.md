@@ -21,8 +21,7 @@ not every package.
 component, and it is still the correct word inside artifact identifiers — the
 `authbridge-*` binaries that import this module, the images they ship in, the
 `x-authbridge-*` headers they set, the `AUTHBRIDGE_*` env vars they read. None of those
-can be renamed from here: two of them are a CRD field and an annotation owned by
-`rossoctl/operator`. So in prose, say Cortex for the product and AuthBridge for the
+can be renamed from here. So in prose, say Cortex for the product and AuthBridge for the
 sidecar. The full frozen list is in [CLAUDE.md](../CLAUDE.md#naming-cortex-is-the-product-authbridge-is-the-sidecar).
 
 **It is not protocol-free.** An earlier version of this file claimed no gRPC and no
