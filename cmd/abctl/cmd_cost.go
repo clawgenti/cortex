@@ -213,6 +213,28 @@ func scopeToAgent(snap *usage.Snapshot, agent string) (*usage.Snapshot, error) {
 	}
 	scoped := *snap
 	scoped.Totals = counts
+	// EVERY WHOLE-WINDOW STATEMENT ABOUT WHERE THE TOTALS CAME FROM GOES WITH Totals, or it is
+	// printed beside one agent's figure while describing all of them. Replacing only Totals left
+	// `--agent <an agent nothing priced>` printing $0.00 — the window was priced, just not this
+	// agent's traffic — for exactly the agent the AGENTS pane prints "—" for, which breaks both
+	// writeCostSummary's "cost unavailable rather than $0.00" rule and this function's own claim
+	// that the figure here and the row there cannot disagree.
+	//
+	// Priced is RE-DERIVED with the producers' own rule rather than one invented here: both
+	// snapshot.go and sessionapi set it to Totals.PricedRequests > 0, so the narrowed snapshot is
+	// the one they would have emitted had this agent's traffic been the whole window.
+	scoped.Priced = counts.PricedRequests > 0
+	// The three by-model maps are DROPPED, not narrowed, because nothing here can narrow them: a
+	// bucket's series is keyed by agent and carries no per-model breakdown, so the only available
+	// readings are the window's maps — which describe other agents' traffic — or none. They are
+	// omitempty on the wire, and costIncompleteReasonLines already treats an absent map as
+	// nothing to say, which is its common case for a ledger-backed window anyway.
+	scoped.PricedBy = nil
+	scoped.UnpricedBy = nil
+	scoped.IncompleteBy = nil
+	// Degraded and DaysOutsideRetention STAY, and the asymmetry is the point: they describe the
+	// READ and the retention configuration, which are the same facts whichever agent is scoped
+	// to. Dropping them would hide a short sum behind a narrower question.
 	return &scoped, nil
 }
 

@@ -60,9 +60,10 @@ func agentRowsFromBuckets(buckets []usage.Bucket) []agentRow {
 // SEPARATE FROM THE FOLD so the ordering can be asserted deterministically. Inside the fold
 // its input arrives from a map walk, which Go randomises per run, and sort.Slice is not
 // stable — so a test that fed the fold tied labels could only catch a missing tie-break when
-// the random order happened to be wrong. Measured before this split: a deleted tie-break
-// survived 6 runs in 30 with four tied labels, and 4 in 20 with two. A guard that misses a
-// real defect one run in four reads as coverage and is not.
+// the random order happened to be wrong. It was measured before this split, and a deleted
+// tie-break survived a large minority of runs either way; the counts live with the fixture
+// that produced them, in TestSortAgentRows_OrdersByCostThenLabel. A guard that misses a real
+// defect one run in four reads as coverage and is not.
 //
 // Given a slice, the order is a pure function of it, so a test can hand this a deliberately
 // mis-ordered input and the assertion holds every run.
@@ -150,6 +151,11 @@ type agentRowsLoadedMsg struct {
 	// field rather than inferred from the current pane: by the time a reply lands the reader
 	// may have moved.
 	open bool
+	// from is the pane the `A` press came from, captured AT PRESS TIME and carried here for
+	// exactly the reason the field above gives: by the time this reply lands the reader may have
+	// moved, so reading m.pane then records a caller the press never had. Only meaningful with
+	// open:true; a background refresh leaves it paneNone and enters nothing.
+	from paneID
 }
 
 // fetchAgentRowsCmd requests the per-agent breakdown off the render loop.
@@ -158,7 +164,7 @@ type agentRowsLoadedMsg struct {
 // group and session, and session is its only scoping parameter. The per-agent split therefore
 // arrives as Bucket.Series and is folded here. That limit is also why this pane is read-only —
 // there is no server-side agent scope to apply to any other pane.
-func (m *model) fetchAgentRowsCmd(open bool) tea.Cmd {
+func (m *model) fetchAgentRowsCmd(open bool, from paneID) tea.Cmd {
 	if m.client == nil {
 		return nil
 	}
@@ -168,9 +174,9 @@ func (m *model) fetchAgentRowsCmd(open bool) tea.Cmd {
 		defer cancel()
 		snap, err := client.GetUsageWindow(ctx, agentsWindow, 0, "", usage.GroupAgent)
 		if err != nil {
-			return agentRowsLoadedMsg{err: err, open: open}
+			return agentRowsLoadedMsg{err: err, open: open, from: from}
 		}
-		return agentRowsLoadedMsg{rows: agentRowsFromBuckets(snap.Buckets), open: open}
+		return agentRowsLoadedMsg{rows: agentRowsFromBuckets(snap.Buckets), open: open, from: from}
 	}
 }
 
@@ -233,14 +239,20 @@ func agentCostCell(c usage.Counts) string {
 
 // enterAgentsOrRefuse opens the pane, or returns the reason it will not.
 //
-// ONE DECISION POINT for both callers — the key press that already has rows, and the reply
-// that has just fetched them — so the two cannot drift on what counts as available. The
+// ONE DECISION POINT for every caller, so no two can drift on what counts as available. The
 // refusal string is agentsPaneRefusal's, never rephrased here.
-func (m *model) enterAgentsOrRefuse() (entered bool, refusal string) {
+//
+// `from` IS PASSED IN, NOT READ OFF m.pane. This runs when the reply lands, and by then the
+// reader may have moved or may already be standing on AGENTS — reading the current pane here
+// recorded `paneAgents` as its own caller on a refetch, which left the first esc silently inert
+// against the rule paneCatalog's esc arm states. keys.go's `case "A":` resolves the caller at
+// press time, the way `case "C":` does, and agentRowsLoadedMsg.from carries it across the
+// round trip.
+func (m *model) enterAgentsOrRefuse(from paneID) (entered bool, refusal string) {
 	if why := agentsPaneRefusal(m.agents); why != "" {
 		return false, why
 	}
-	m.previousPane = m.pane
+	m.previousPane = from
 	m.pane = paneAgents
 	m.rebuildAgentsTable()
 	return true, ""
