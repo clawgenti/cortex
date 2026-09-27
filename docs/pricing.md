@@ -177,7 +177,7 @@ install) is the aggregate behind `abctl cost`. Query parameters:
 |---|---|---|
 | `window` | `today`, `month`, `7d`, or a duration (`1h`, `6h`) | `today`, `month` and `7d` are served from the durable ledger. A duration is served from the in-memory ring. |
 | `group` | `none`, `model`, `endpoint`, `session`, `agent`, `status`, `plugin`, `host` (`method` aliases `model`) | See the caveat below. |
-| `resolution` | a duration | Bucket size. Omitted gives one-minute buckets. |
+| `resolution` | a duration | Bucket size. |
 | `session` | a session id | Combining it with a symbolic window (`today`, `month`, `7d`) is rejected with 400. |
 
 Response envelope: `window`, `bucketSeconds`, `group`, `buckets[]`, `totals`, `priced`,

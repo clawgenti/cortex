@@ -786,7 +786,7 @@ For the unreloadable cases, `Status.LastError` names the field(s) that changed a
 
 **Validation guarantee: bad YAML never takes the pod down.** Any failure during Load / Validate / Build / Start results in the status being updated and the active pipeline continuing to serve traffic on the previous config. Only a successful end-to-end reload swaps the holders.
 
-**Non-reloadable choices elsewhere.** The in-memory session store, the cost ledger, the stat server, the session API server, and the reloader itself are all process-scoped — they live from startup to shutdown. A change to `session.enabled`, `cost_ledger.enabled`, `listener.session_api_addr`, or the reloader's own knobs (drain window, debounce) requires a pod restart. The first two are refused outright, per the table above; the reloader's own knobs are read once at construction, so an edit is simply not seen.
+**Non-reloadable choices elsewhere.** The in-memory session store, the cost ledger, the stat server, the session API server, and the reloader itself are all process-scoped — they live from startup to shutdown. A change to `session.enabled`, `cost_ledger.enabled`, `stats.address`, `listener.session_api_addr`, or the reloader's own knobs (drain window, debounce) requires a pod restart. The first two are refused outright, per the table above; the reloader's own knobs are read once at construction, so an edit is simply not seen.
 
 ---
 

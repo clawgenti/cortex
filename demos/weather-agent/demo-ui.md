@@ -283,8 +283,7 @@ Or, in `envoy-sidecar` mode:
 agent envoy-proxy
 ```
 
-The container *names* don't change with SPIRE — `spiffe-helper` runs inside
-the combined sidecar, not as a separate container.
+The container *names* don't change with SPIRE.
 
 ### Check operator-managed client registration
 
