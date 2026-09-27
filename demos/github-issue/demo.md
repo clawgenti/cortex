@@ -1,6 +1,6 @@
 # GitHub Issue Agent Demo with Cortex
 
-This demo shows the **GitHub Issue Agent** running with **AuthBridge** for transparent,
+This demo shows the **GitHub Issue Agent** running with **Cortex** for transparent,
 zero-trust token management. Cortex provides automatic identity registration,
 inbound JWT validation, and outbound token exchange — all without changing the
 agent code.
@@ -86,7 +86,7 @@ Common names used by both:
 
 ## Related
 
-- [All Demos](../README.md) — index of all AuthBridge demos
+- [All Demos](../README.md) — index of all Cortex demos
 - [Weather Agent Demo](../weather-agent/demo-ui.md) — simpler getting-started demo (no token exchange)
 - [Token-Exchange Routes](../token-exchange-routes/README.md) — route-based token exchange to multiple tools
-- [AuthBridge Overview](../../docs/architecture.md) — architecture and design
+- [Cortex Overview](../../docs/architecture.md) — architecture and design

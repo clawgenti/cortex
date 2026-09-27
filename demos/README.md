@@ -1,8 +1,8 @@
 # Cortex Demos
 
-This directory contains demo scenarios showing AuthBridge providing zero-trust
+This directory contains demo scenarios showing Cortex providing zero-trust
 authentication for Kubernetes agent workloads. Each demo progressively introduces
-more AuthBridge capabilities.
+more Cortex capabilities.
 
 > **Note:** These demos use the operator-injected combined sidecar (after
 > cortex#411 — `authbridge` for proxy-sidecar, `authbridge-envoy`
@@ -22,7 +22,7 @@ more AuthBridge capabilities.
 | **[Token-Exchange Routes](token-exchange-routes/README.md)** | Reference | How to write `authproxy-routes` for single- and multi-target token exchange | Configuration only |
 | **[MCP Parser Plugin](mcp-parser/README.md)** | Reference | Enable the `mcp-parser` plugin to surface tool calls / resource reads in session events | Configuration only |
 | **[Session Budget](session-budget/README.md)** | Reference | Test assets for the `session-budget` plugin, including a pause-mode webhook stub. Also see [`hitl-local.md`](session-budget/hitl-local.md) for a laptop-only walkthrough of `on_exceed: pause` (no Kubernetes required). | kubectl or local |
-| **[abctl Walkthrough](weather-agent/demo-with-abctl.md)** | Reference | Watch the AuthBridge plugin pipeline live with the `abctl` TUI | Tooling only |
+| **[abctl Walkthrough](weather-agent/demo-with-abctl.md)** | Reference | Watch the Cortex plugin pipeline live with the `abctl` TUI | Tooling only |
 | **[IBAC](ibac/README.md)** | Intermediate | Intent-Based Access Control: LLM judge denies outbound HTTP that doesn't align with the user's recorded intent. Reproduces the email-poison / prompt-injection attack from `huang195/ibac`; chat with the agent through the rossoctl UI and see the exfiltration blocked, then `make show-result` for a pipeline-level forensic | UI + kubectl |
 | **[SPARC (finance)](finance-sparc/README.md)** | Intermediate | SPARC pre-tool reflection: the `sparc` plugin blocks a hallucinated/ungrounded tool argument (an invented transaction id) before it executes and transparently asks the user to clarify, then approves the corrected call. Complements IBAC — SPARC verifies argument grounding, IBAC verifies intent alignment | UI + kubectl |
 | **[Lineage](lineage/README.md)** | Intermediate | Per-request lineage on the Weather Agent pair: attach the sidecar with the lineage attach kit and see one turn first as 19 separate traces (the app forwards no `traceparent`), then as one trace of 70 spans with one root once the app's own propagation is switched on. Deploys the two stock images plain; edits nothing else | kubectl + scripts |
@@ -34,15 +34,15 @@ more AuthBridge capabilities.
 
 ## Recommended Path
 
-**New to AuthBridge?** Start with the demos in this order:
+**New to Cortex?** Start with the demos in this order:
 
-1. **[Weather Agent](weather-agent/demo-ui.md)** — Fastest way to see AuthBridge
+1. **[Weather Agent](weather-agent/demo-ui.md)** — Fastest way to see Cortex
    in action. Deploys via the Rossoctl UI with inbound JWT validation protecting
    the agent. No token exchange configuration needed; outbound traffic uses the
    default passthrough policy.
 
-2. **[GitHub Issue Agent](github-issue/demo.md)** — Full AuthBridge demo with
-   inbound validation *and* outbound token exchange. Shows how AuthBridge
+2. **[GitHub Issue Agent](github-issue/demo.md)** — Full Cortex demo with
+   inbound validation *and* outbound token exchange. Shows how Cortex
    transparently exchanges tokens when the agent calls the GitHub tool, with
    scope-based access control (Alice vs Bob).
 
@@ -171,5 +171,5 @@ pip install -r requirements.txt
 
 ## Related Documentation
 
-- [AuthBridge Overview](../docs/architecture.md) — Architecture and design
+- [Cortex Overview](../docs/architecture.md) — Architecture and design
 - [Rossoctl Operator](https://github.com/rossoctl/operator) — Admission webhook for sidecar injection (migrated from this repo)

@@ -1,11 +1,11 @@
 ---
 name: demo
-description: Use when building, debugging, or running an AuthBridge demo end-to-end on a Kind cluster with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh — covers the demo directory layout, the Keycloak setup scripts, and the recurring failure modes (ext_proc header ordering, ambient-mesh inbound path, Keycloak scope assignment).
+description: Use when building, debugging, or running a Cortex demo end-to-end on a Kind cluster with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh — covers the demo directory layout, the Keycloak setup scripts, and the recurring failure modes (ext_proc header ordering, ambient-mesh inbound path, Keycloak scope assignment).
 ---
 
 # Skill: Cortex Demo Development
 
-This skill captures knowledge from building, debugging, and running AuthBridge demos end-to-end on Kind clusters with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh.
+This skill captures knowledge from building, debugging, and running Cortex demos end-to-end on Kind clusters with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh.
 
 > **Some entries below are historical.** They describe failures from the
 > pre-cortex#411 multi-sidecar shape, when `spiffe-helper` and

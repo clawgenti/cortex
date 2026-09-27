@@ -7,7 +7,7 @@ This demo extends the standard [Weather Agent demo](./demo-ui.md) with a live vi
 Before starting, complete these in order:
 
 1. **Install Rossoctl** (operator + Keycloak + UI + SPIFFE/SPIRE): [Rossoctl Installation Guide](https://github.com/rossoctl/rossoctl/blob/main/docs/getting-started/install.md). Works on Kind (local) or OpenShift.
-2. **Deploy the Weather Agent + Tool** through the Rossoctl UI: [Weather Agent Demo with AuthBridge](./demo-ui.md). At the end of that demo you'll have:
+2. **Deploy the Weather Agent + Tool** through the Rossoctl UI: [Weather Agent Demo with Cortex](./demo-ui.md). At the end of that demo you'll have:
    - `weather-service` agent running in the `team1` namespace (with AuthBridge sidecars).
    - `weather-tool-mcp` MCP tool running in `team1`.
    - Keycloak configured with the agent's `agent-team1-weather-service-aud` scope.

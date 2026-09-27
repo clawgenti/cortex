@@ -1,6 +1,6 @@
 # GitHub Issue Agent Demo with Cortex (Manual Deployment)
 
-This guide walks through deploying the **GitHub Issue Agent** with **AuthBridge**
+This guide walks through deploying the **GitHub Issue Agent** with **Cortex**
 using `kubectl` commands exclusively. All resources — agent, tool, ConfigMaps, and
 secrets — are deployed via Kubernetes manifests.
 
@@ -1046,7 +1046,7 @@ kubectl delete pod test-client -n team1 --ignore-not-found
 
 ## How Cortex Changes the Original Demo
 
-| Aspect | Original Demo | With AuthBridge |
+| Aspect | Original Demo | With Cortex |
 |--------|--------------|-----------------|
 | **Agent secrets** | Manual PAT token configuration | Dynamic credentials via SPIFFE + client-registration |
 | **Inbound auth** | No validation | AuthBridge validates JWT (signature, issuer, audience) via ext_proc |
@@ -1201,4 +1201,4 @@ kubectl delete mutatingwebhookconfiguration rossoctl-webhook-authbridge-mutating
   JWT validation and outbound token exchange internals
 - **Token-Exchange Routes**: See the [routes-configuration guide](../token-exchange-routes/README.md) for
   route-based token exchange to multiple tool services
-- **AuthBridge Overview**: See the [AuthBridge architecture](../../docs/architecture.md) for details
+- **Cortex Overview**: See the [Cortex architecture](../../docs/architecture.md) for details

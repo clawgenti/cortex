@@ -1,7 +1,7 @@
 # AI Access Control (AIAC) Demo for GitHub Issue Agent with Cortex
 
 This demo showcases **AI based access control policy generation** integrated with
-**AuthBridge** and **Keycloak**. It demonstrates how natural language policy descriptions
+**Cortex** and **Keycloak**. It demonstrates how natural language policy descriptions
 can be automatically converted into structured YAML policies and applied to a Keycloak
 realm for role-based access control (RBAC).
 

@@ -77,8 +77,8 @@ The sidecar injection webhook lives in a separate repo: [rossoctl/operator](http
 ### Naming: Cortex is the product, AuthBridge is the sidecar
 
 Two renames have happened and only one of them finished. **Kagenti → Rossoctl is
-complete** — the only `kagenti` strings left are inside `docs/superpowers/`, a frozen
-archive. Treat a new one as a mistake.
+complete** — apart from this rule, every remaining `kagenti` string is inside
+`docs/superpowers/`, a frozen archive. Treat a new one as a mistake.
 
 **AuthBridge → Cortex is deliberately partial, and the boundary is the point.**
 `Cortex` is the product: this repo, the registry namespace, the laptop service,
@@ -89,10 +89,10 @@ survives inside artifact identifiers that other things address by name:
 |---|---|
 | `authbridge`, `authbridge-envoy`, `authbridge-lite`, `authbridge-cpex` | published image names; the operator selects images **by name** |
 | `authbridge-{proxy,envoy,cpex,praxis}` | binary names, `cmd/` dirs, Go module paths, release tarballs |
-| `x-authbridge-{direction,secret,unmapped}` | wire protocol, injected by Envoy config in the rossoctl Helm chart |
+| `x-authbridge-{direction,secret}`, `x-authbridge-unmapped-<name>` | wire protocol |
 | `AUTHBRIDGE_*` | env vars users may already have set |
 | `authbridge-config{,-<agent>}`, `authbridge-runtime{,-config,-mtls}`, `authproxy-routes` | ConfigMaps the operator creates and mounts |
-| `/etc/authbridge/config.yaml` | the operator's volume spec |
+| `/etc/authbridge/config.yaml` | the operator's volume spec; also this repo's entrypoint and manifests |
 | `abph_` | credential-handle prefix, on the wire |
 | `Spec.AuthBridgeMode`, `rossoctl.io/authbridge-mode` | **another repo's API** — the operator's AgentRuntime CRD field and its annotation |
 
@@ -103,7 +103,7 @@ needs a deprecation window and coordinated PRs in at least two repositories.
 **The rule for prose and comments:** say **Cortex** when the sentence is about the
 product — what it is, what it does, what a demo demonstrates. Keep **AuthBridge** when
 the phrase names a concrete artifact: a sidecar, an image, a binary, a container, that
-container's logs, a mode field, a ConfigMap. Both of these are correct: "Cortex
+container's logs, a mode field, a ConfigMap, a literal UI label. Both of these are correct: "Cortex
 provides zero-trust token management", "the AuthBridge sidecar validates the JWT".
 
 `install.sh` is the reference implementation — zero prose "AuthBridge", with
@@ -873,7 +873,7 @@ kind load docker-image authbridge-lite:latest  --name rossoctl
 
 1. Set up a Kind cluster with SPIRE + Keycloak (use [Rossoctl installer](https://www.rossoctl.dev/docs/overview/quickstart))
 2. Deploy the webhook via [operator](https://github.com/rossoctl/operator)
-3. See the [AuthBridge demos index](demos/README.md) for a recommended learning path:
+3. See the [Cortex demos index](demos/README.md) for a recommended learning path:
    - **Getting started**: `demos/weather-agent/demo-ui.md` (inbound validation, UI deployment)
    - **Full flow**: `demos/github-issue/demo-ui.md` (token exchange + scope-based access)
    - **Routes config reference**: `demos/token-exchange-routes/README.md` (single + multi-target route patterns)

@@ -1,11 +1,11 @@
 # Weather Agent Demo with Cortex
 
-This guide walks through deploying the **Weather Service Agent** with **AuthBridge**
+This guide walks through deploying the **Weather Service Agent** with **Cortex**
 using the **Rossoctl UI** for agent and tool deployment. Infrastructure setup
 (webhook, Keycloak, ConfigMaps) is done via CLI, while the agent and tool are
 imported and deployed through the Rossoctl dashboard.
 
-This is the recommended **getting-started** demo for AuthBridge. It demonstrates
+This is the recommended **getting-started** demo for Cortex. It demonstrates
 inbound JWT validation and automatic identity registration with a simple agent
 that doesn't require token exchange. For a more advanced demo showing outbound
 token exchange and scope-based access control, see the
@@ -844,4 +844,4 @@ kubectl delete namespace team1
   JWT validation and outbound token exchange internals
 - **Token-Exchange Routes**: See the [routes-configuration guide](../token-exchange-routes/README.md) for
   route-based token exchange to multiple tool services
-- **AuthBridge Overview**: See the [AuthBridge architecture](../../docs/architecture.md) for details
+- **Cortex Overview**: See the [Cortex architecture](../../docs/architecture.md) for details
