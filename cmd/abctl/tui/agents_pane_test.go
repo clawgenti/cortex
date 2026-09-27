@@ -350,16 +350,22 @@ func TestAgentsPane_RecordsTheCallerAtPressTimeNotAtReplyTime(t *testing.T) {
 		// than merely not overwritten with paneAgents.
 		previousPane paneID
 	}{
+		// NOT paneSessions AS THE CALLER in either of the first two rows, and that is the
+		// difference between a guard and a decoration. The esc arm falls back to paneSessions
+		// when no caller was recorded, so a row that presses `A` FROM Sessions gets the right
+		// answer out of the fallback as well — deleting the assignment outright left all three
+		// rows green (mutant `enter-no-previouspane` SURVIVED) until these two moved off it. A
+		// caller the fallback cannot coincide with is what makes the row able to fail.
 		{
 			name:      "reader stays put",
-			pressedOn: paneSessions, movedTo: paneSessions, wantBack: paneSessions,
+			pressedOn: paneDetail, movedTo: paneDetail, wantBack: paneDetail,
 			previousPane: paneNone,
 		},
 		{
 			// The reply-time read returned paneEvents here — the later pane, which never
 			// asked for anything.
 			name:      "reader navigates while the fetch is in flight",
-			pressedOn: paneSessions, movedTo: paneEvents, wantBack: paneSessions,
+			pressedOn: paneDetail, movedTo: paneEvents, wantBack: paneDetail,
 			previousPane: paneNone,
 		},
 		{
