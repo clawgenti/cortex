@@ -1597,10 +1597,17 @@ func TestRunCost_UnknownAgentNamesTheOnesThatExist(t *testing.T) {
 // usage.Snapshot.UngroupedCostMicros can be non-zero: cost the totals include and no agent
 // carries. Without a word about it, a reader adding up --agent for every agent and comparing
 // that against plain `abctl cost` finds a shortfall with nothing to explain it.
+// THE RESIDUAL MUST DIFFER FROM THIS AGENT'S OWN COST, and the first version of this test did
+// not arrange that: it set both to 1_500_000 micros, so "1.50" appeared in the headline whether
+// or not the disclosure printed. Deleting the disclosure left this test GREEN — a dead guard
+// reading as coverage, caught by mutating the line it was supposed to protect. The residual is
+// $0.75 here against the agent's $1.50 so the assertion can only be satisfied by the line it is
+// about, and the sentence is asserted beside the figure because a figure can coincide where a
+// sentence cannot.
 func TestRunCost_AgentDisclosesCostNoAgentCarries(t *testing.T) {
 	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
-		"totals":{"requests":10,"costMicros":5000000,"pricedRequests":10,"priceableRequests":10},
-		"ungroupedCostMicros":1500000,
+		"totals":{"requests":10,"costMicros":4250000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":750000,
 		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
 		   "claude-code/2.1.270":{"requests":6,"costMicros":2000000,"pricedRequests":6,"priceableRequests":6},
 		   "bob-shell/2.0.5":{"requests":4,"costMicros":1500000,"pricedRequests":4,"priceableRequests":4}}}]}`)
@@ -1611,8 +1618,38 @@ func TestRunCost_AgentDisclosesCostNoAgentCarries(t *testing.T) {
 		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
 	}
 	got := out.String()
+	if !strings.Contains(got, "0.75") {
+		t.Errorf("output does not disclose the $0.75 that no agent carries:\n%s", got)
+	}
+	if !strings.Contains(got, "no agent") {
+		t.Errorf("output carries the figure but not what it means:\n%s", got)
+	}
+	// This agent's own $1.50 must still be the headline: the residual is stated BESIDE the
+	// figure, never folded into it.
 	if !strings.Contains(got, "1.50") {
-		t.Errorf("output does not disclose the $1.50 that no agent carries:\n%s", got)
+		t.Errorf("output lost this agent's own cost:\n%s", got)
+	}
+}
+
+// Without --agent no residual line is printed, even if the server sends the field.
+//
+// The disclosure is gated on the FLAG, not merely on the field being present, and this is the
+// half a mutation would otherwise reach unchallenged: dropping the `agent != ""` term leaves
+// every other test here green, because they all pass the flag. A server sending the field on a
+// group=none answer would then print a line whose own explanation — that per-agent figures do
+// not sum to the total — is nonsense on a document containing no per-agent figures.
+func TestRunCost_WithoutAgentNoResidualLineIsPrinted(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","priced":true,
+		"totals":{"requests":10,"costMicros":4250000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":750000}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if got := out.String(); strings.Contains(got, "no agent") {
+		t.Errorf("unscoped run printed a per-agent residual line:\n%s", got)
 	}
 }
 
