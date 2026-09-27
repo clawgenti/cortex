@@ -1679,3 +1679,162 @@ func TestRunCost_WithoutAgentTheDefaultAxisIsUnchanged(t *testing.T) {
 		t.Errorf("default asked for group=%q, want none — a reconcilable axis owes a residual disclosure", gotGroup)
 	}
 }
+
+// --by prints a row per label, ordered by cost, with the axis it asked for on the wire.
+func TestRunCost_ByAgentPrintsARowPerAgent(t *testing.T) {
+	var gotGroup string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotGroup = r.URL.Query().Get("group")
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"window":"today","group":"agent","priced":true,
+			"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1048,"priceableRequests":1055},
+			"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+			   "claude-code/2.1.270":{"requests":1049,"tokens":297961318,"costMicros":146361600,
+			                          "pricedRequests":1048,"priceableRequests":1048},
+			   "bob-shell/2.0.5":{"requests":8,"tokens":38682,"priceableRequests":7}}}]}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if gotGroup != "agent" {
+		t.Errorf("asked for group=%q, want agent", gotGroup)
+	}
+	got := out.String()
+	for _, want := range []string{"claude-code/2.1.270", "bob-shell/2.0.5"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("table missing row %q:\n%s", want, got)
+		}
+	}
+	// Costliest first, which is usage.SortSeriesLabels' rule. Asserted by POSITION, because
+	// both labels being present says nothing about the order a reader scans.
+	if i, j := strings.Index(got, "claude-code/2.1.270"), strings.Index(got, "bob-shell/2.0.5"); i > j {
+		t.Errorf("rows are not ordered by cost descending:\n%s", got)
+	}
+}
+
+// An unpriced row renders "—", never "$0.00".
+//
+// THE WHOLE POINT OF THE COLUMN. bob-shell here sent 8 requests and nothing could price them —
+// it bills in credits, which the cost model cannot represent — and "$0.00" would assert that
+// its traffic was free. Distinguishing "no rate configured" from "cost was zero" is the rule
+// this codebase keeps everywhere a figure may be unknown.
+func TestRunCost_ByRendersUnpricedAsADashNotZero(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1049,"priceableRequests":1056},
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1049,"costMicros":146361600,"pricedRequests":1049,"priceableRequests":1049},
+		   "bob-shell/2.0.5":{"requests":8,"priceableRequests":7}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "—") {
+		t.Errorf("unpriced row does not render an em dash:\n%s", got)
+	}
+	// The exact string that must never appear for an unpriced row.
+	if strings.Contains(got, "$0.00") {
+		t.Errorf("unpriced row rendered as free:\n%s", got)
+	}
+}
+
+// A grouping the window cannot serve is reported, not silently swallowed.
+//
+// The server DOWNGRADES rather than refusing — ledger-backed windows serve only the axes a Row
+// has a field for, and core/sessionapi reports the grouping IN EFFECT instead of a 400, which is
+// a considered decision and not one to undo from here. So the duty on this side is to notice:
+// compare what was asked for against snap.Group and say so, naming the axes that do work.
+// Without that the command prints an ungrouped total under a heading claiming a breakdown.
+func TestRunCost_ByDisclosesAGroupingTheServerDowngraded(t *testing.T) {
+	// Asked for host; the response says group=none, which is what a ledger window does.
+	srv := fakeUsageServer(t, `{"window":"today","group":"none","priced":true,
+		"totals":{"requests":10,"costMicros":5000000,"pricedRequests":10,"priceableRequests":10}}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--by", "host"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	combined := out.String() + errOut.String()
+	if !strings.Contains(combined, "host") {
+		t.Errorf("output does not name the grouping that was refused:\n%s", combined)
+	}
+	// And it must name at least one axis that DOES work, or the reader is told no and given
+	// nowhere to go.
+	if !strings.Contains(combined, "agent") {
+		t.Errorf("output does not name an axis that works:\n%s", combined)
+	}
+}
+
+// --by and --agent are contradictory and refused.
+//
+// One asks for every label as a table, the other for a single label's figures. Silently letting
+// one win would print an answer to a question the operator did not ask — and which one won
+// would be an implementation detail.
+func TestRunCost_ByAndAgentTogetherAreRefused(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","totals":{"requests":1},"priced":false}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--by", "agent", "--agent", "bob-shell/2.0.5"}, &out, &errOut)
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero for two contradictory flags; stdout = %s", out.String())
+	}
+	if msg := errOut.String(); !strings.Contains(msg, "--by") || !strings.Contains(msg, "--agent") {
+		t.Errorf("error does not name both flags:\n%s", msg)
+	}
+}
+
+// --by discloses cost that no label in the table carries.
+//
+// THIS is the case the residual exists for, and the one cmd_cost.go's own comment predicted: a
+// table that sums to less than the headline above it, with nothing to explain the difference.
+// The residual is $0.75 against a $4.25 total, deliberately not equal to any row, so only the
+// disclosure can satisfy the assertion.
+func TestRunCost_ByDisclosesCostNoLabelCarries(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":10,"costMicros":4250000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":6,"costMicros":2000000,"pricedRequests":6,"priceableRequests":6},
+		   "bob-shell/2.0.5":{"requests":4,"costMicros":1500000,"pricedRequests":4,"priceableRequests":4}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "0.75") {
+		t.Errorf("table does not disclose the $0.75 no row carries:\n%s", got)
+	}
+	if !strings.Contains(got, "no ") {
+		t.Errorf("figure is present but unexplained:\n%s", got)
+	}
+}
+
+// An unknown --by names the axes that are accepted.
+func TestRunCost_UnknownByNamesTheAcceptedAxes(t *testing.T) {
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", "http://127.0.0.1:1", "--by", "banana"}, &out, &errOut)
+	if code == 0 {
+		t.Fatal("exit = 0, want non-zero for an axis that does not exist")
+	}
+	msg := errOut.String()
+	if !strings.Contains(msg, "banana") {
+		t.Errorf("error does not echo the rejected value:\n%s", msg)
+	}
+	for _, want := range []string{"agent", "model", "endpoint"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error does not name the accepted axis %q:\n%s", want, msg)
+		}
+	}
+}
