@@ -61,8 +61,10 @@ func agentRowsFromBuckets(buckets []usage.Bucket) []agentRow {
 // its input arrives from a map walk, which Go randomises per run, and sort.Slice is not
 // stable — so a test that fed the fold tied labels could only catch a missing tie-break when
 // the random order happened to be wrong. It was measured before this split, and a deleted
-// tie-break survived a large minority of runs either way; the counts live with the fixture
-// that produced them, in TestSortAgentRows_OrdersByCostThenLabel. A guard that misses a real
+// tie-break survived a large minority of runs either way. Those counts are RECORDED in
+// TestSortAgentRows_OrdersByCostThenLabel, not reproducible from it — that test now feeds a
+// fixed slice precisely so it cannot flake, and no test in the tree drives the fold with tied
+// costs any more. A guard that misses a real
 // defect one run in four reads as coverage and is not.
 //
 // Given a slice, the order is a pure function of it, so a test can hand this a deliberately
