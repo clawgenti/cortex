@@ -515,7 +515,7 @@ if [ -n "${_reexec}" ]; then
 			# VERSION_REF keeps the pin: running main's SCRIPT is the fallback,
 			# changing which BINARIES get installed is not. `--ref=X installs X`
 			# has to survive this branch or the flag means nothing here.
-			warn "${want_ref} has no install.sh at either path (HTTP 404); continuing with the copy from main"
+			warn "${want_ref} has no install.sh (HTTP 404); continuing with the copy from main"
 			SCRIPT_REF="main"
 			VERSION_REF="${want_ref}"
 		else

@@ -5,7 +5,9 @@
 #
 # Every string in the shell act is copied from the real source, not paraphrased.
 # The sources are scripts/install.sh and cmd/abctl/cmd_claudecode.go; grep a quoted
-# string below to find the line it came from, rather than trusting a line number here.
+# fragment below to find the line it came from, rather than trusting a line number here.
+# Most of these strings interpolate a variable at source, so grep a literal prefix of one
+# rather than the whole rendered line.
 # If those strings change, change them here too — the demo claims to be cortex.
 
 total: 50s
@@ -16,8 +18,8 @@ grid:
 acts:
   # Acts 1 and 2 of the storyboard are one continuous terminal, because
   # --claude-code does not merely suggest `abctl claude-code enable`: the
-  # installer RUNS it (install.sh:1227-1233) and only prints the "run this
-  # yourself" hint when it is not doing so (install.sh:1219). So the consent
+  # installer RUNS it and only prints the "run this yourself" hint when it is
+  # not doing so — grep `claude-code enable` in scripts/install.sh. So the consent
   # prompt arrives as the tail of the install, with nothing typed but the y.
   - name: install
     kind: shell

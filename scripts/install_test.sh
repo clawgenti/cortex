@@ -328,6 +328,10 @@ with_bootstrap() { # want_ref http_scripts http_root http_legacy newest_release 
 		# install.sh's die and the scenario fails instead of quietly succeeding.
 		# shellcheck disable=SC2016 # literal on purpose: expanded by the probe, not here.
 		printf '  case "${_u}" in\n'
+		# ARM ORDER IS LOAD-BEARING: shell `*` matches `/`, so the bare
+		# .../cortex/*/install.sh arm also matches .../main/scripts/install.sh. The
+		# scripts/ and authbridge/ arms must precede it. Mutant M37 reorders them and
+		# reds two scenarios, so this constraint is tested, not merely asserted.
 		printf '    *//install.sh|*/cortex//*|*/cortex/install.sh|*/cortex/scripts/install.sh) _c="BADURL" ;;\n'
 		printf '    https://raw.githubusercontent.com/rossoctl/cortex/*/scripts/install.sh) _c="%s" ;;\n' "${_httpnew}"
 		printf '    https://raw.githubusercontent.com/rossoctl/cortex/*/authbridge/install.sh) _c="%s" ;;\n' "${_httplegacy}"
