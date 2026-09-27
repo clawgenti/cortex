@@ -177,12 +177,23 @@ install) is the aggregate behind `abctl cost`. Query parameters:
 |---|---|---|
 | `window` | `today`, `month`, `7d`, or a duration (`1h`, `6h`) | `today`, `month` and `7d` are served from the durable ledger. A duration is served from the in-memory ring. |
 | `group` | `none`, `model`, `endpoint`, `session`, `agent`, `status`, `plugin`, `host` (`method` aliases `model`) | See the caveat below. |
-| `resolution` | a duration | Bucket size. |
+| `resolution` | a duration | Bucket size on a ring-served window. A ledger-backed window is answered as one bucket spanning the whole window and does not read this at all; `bucketSeconds` reports the span actually served. |
 | `session` | a session id | Combining it with a symbolic window (`today`, `month`, `7d`) is rejected with 400. |
 
-Response envelope: `window`, `bucketSeconds`, `group`, `buckets[]`, `totals`, `priced`,
-`pricedBy`, `unpricedBy`, `incompleteBy`. `pricedBy` is keyed by provenance
-(`authoritative`, `configured`, `bundled`); `unpricedBy` by `<endpoint> <model>`.
+Response envelope: `window`, `bucketSeconds`, `group`, `buckets[]`, `totals` and `priced` are
+always present. Every other field is `omitempty` and appears only when it applies, so a clean
+response is shorter than the struct — among them `degraded`, `ungroupedCostMicros` and
+`daysOutsideRetention`, which is where dropped ledger rows, unattributable spend and a window
+reaching past retention are disclosed. Do not code against a closed field list.
+
+`pricedBy`, `unpricedBy` and `incompleteBy` are absent on a ledger-backed window even when
+pricing gaps exist — a per-minute row cannot say which requests could not be priced, and
+emitting one map without the other would read as "no gaps here". Read `totals.pricedRequests`
+against `totals.priceableRequests` for that instead. `pricedBy` is keyed by provenance —
+`bundled`, `discovered`, `configured`, `authoritative`, plus `unlabelled` for a producer that
+settled a figure without naming its level. Nothing produces `discovered` today; it is a defined
+level kept so that anything which later learns rates from a gateway has a slot in the precedence
+order. `unpricedBy` is keyed by `<endpoint> <model>`.
 
 **The response reports the `group` it SERVED, not the one you asked for — and the
 difference is silent.** On a ledger-backed window (`today`, `month`, `7d`) only
