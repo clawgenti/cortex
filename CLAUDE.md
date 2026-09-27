@@ -189,6 +189,8 @@ cortex/
 │                                     #   not an inert archive.
 │
 ├── scripts/
+│   ├── install.sh                    # Laptop installer (abctl + the local proxy service)
+│   ├── keycloak_sync.py              # Declarative Keycloak sync tool (routes.yaml driven)
 │   ├── dev/                          # Loose dev-only shell scripts
 │   │   ├── local-build-and-test.sh   #   Build every image and load it into Kind
 │   │   ├── verify-spire-keycloak.sh  #   Platform preflight for a local dev cluster
@@ -216,10 +218,8 @@ cortex/
 │   ├── session-budget/               #   Redis-backed budget tracking
 │   └── context-guru/                 #   Opt-in context-guru plugin
 │
-├── keycloak_sync.py                  # Declarative Keycloak sync tool (routes.yaml driven)
 ├── tests/                            # Python tests (keycloak_sync)
 ├── go.work                           # Workspace linking 9 of the 12 Go modules
-├── install.sh                        # Laptop installer (abctl + the local proxy service)
 ├── .github/
 │   ├── workflows/                    # CI/CD (ci.yaml, build.yaml, release-binaries.yaml,
 │   │                                 # security-scans, scorecard, spellcheck)

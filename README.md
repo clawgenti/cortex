@@ -22,7 +22,7 @@ One binary, no Kubernetes. macOS or Linux, amd64 or arm64.
      Change both, or they drift — the --ref wording already did once. -->
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh \
   | sh -s -- --claude-code
 ```
 

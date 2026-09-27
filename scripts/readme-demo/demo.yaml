@@ -3,8 +3,9 @@
 # Regenerate the asset after editing:  go run .
 # CI fails if docs/assets/cortex-demo.svg does not match this file.
 #
-# Every string in the shell act is copied from the real source, not paraphrased:
-#   install.sh:376,892,1048,1157   cmd_claudecode.go:462,464,724,495
+# Every string in the shell act is copied from the real source, not paraphrased.
+# The sources are scripts/install.sh and cmd/abctl/cmd_claudecode.go; grep a quoted
+# string below to find the line it came from, rather than trusting a line number here.
 # If those strings change, change them here too — the demo claims to be cortex.
 
 total: 50s
@@ -22,7 +23,7 @@ acts:
     kind: shell
     runtime: 14s
     steps:
-      - cmd: "curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/install.sh | sh -s -- --claude-code"
+      - cmd: "curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh | sh -s -- --claude-code"
         out:
           - "Resolving newest release..."
           - "Downloading v0.9.3 for darwin/arm64..."

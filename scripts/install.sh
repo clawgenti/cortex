@@ -1,7 +1,7 @@
 #!/bin/sh
 # install.sh — one-line installer for Cortex on a local machine.
 #
-#   curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh | sh
 #
 # Detects your OS/arch, downloads the prebuilt `abctl` and `authbridge-proxy`
 # binaries for the newest release, verifies their SHA-256 checksums, installs
@@ -161,7 +161,7 @@ usage() {
 install.sh — install Cortex on a local machine (macOS/Linux, amd64/arm64).
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh | sh
   curl -fsSL ...install.sh | sh -s -- [option]
 
 Installs abctl and authbridge-proxy to ~/.local/bin, starts the proxy with its
@@ -469,10 +469,12 @@ if [ -n "${_reexec}" ]; then
 		done
 
 		boot=$(mktemp)
-		# Two paths, because a pinned ref may predate the flatten. Try the current
-		# layout first so a post-flatten ref never pays for the legacy probe; fall
+		# Three paths, because a pinned ref may predate this script's move under
+		# scripts/ (it lived at the repository root from the #1134 flatten until
+		# then) or predate the flatten itself (authbridge/install.sh). Try the
+		# current layout first so a current ref never pays for a legacy probe; fall
 		# back only on a clean 404, never on a transport error.
-		url="https://raw.githubusercontent.com/${REPO}/${want_ref}/install.sh"
+		url="https://raw.githubusercontent.com/${REPO}/${want_ref}/scripts/install.sh"
 		# Capture the status code rather than collapsing every failure into one
 		# branch. A 404 means that ref genuinely predates this script — fall back.
 		# A transport error means we could not ask, and silently dropping to main
@@ -481,6 +483,11 @@ if [ -n "${_reexec}" ]; then
 		# so appending our own default produced "HTTP 000000". Overwrite instead.
 		http=$(curl -sSL -o "${boot}" -w '%{http_code}' "${url}" 2>/dev/null) || http="000"
 		[ -n "${http}" ] || http="000"
+		if [ "${http}" = "404" ]; then
+			url="https://raw.githubusercontent.com/${REPO}/${want_ref}/install.sh"
+			http=$(curl -sSL -o "${boot}" -w '%{http_code}' "${url}" 2>/dev/null) || http="000"
+			[ -n "${http}" ] || http="000"
+		fi
 		if [ "${http}" = "404" ]; then
 			url="https://raw.githubusercontent.com/${REPO}/${want_ref}/authbridge/install.sh"
 			http=$(curl -sSL -o "${boot}" -w '%{http_code}' "${url}" 2>/dev/null) || http="000"
@@ -1277,7 +1284,7 @@ if [ -z "${NO_SERVICE}" ]; then
   in order to start Cortex. Either run that release's own installer, piped -- a
   local copy of this script never re-execs, so --ref would pin only its binaries
   and land you back here:
-    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh -s -- --ref=${version}
+    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh -s -- --ref=${version}
   or install newer binaries with this script:
     --ref=<newer tag>"
 				;;

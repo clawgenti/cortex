@@ -437,7 +437,7 @@ AuthBridge supports per-host token exchange configuration via `routes.yaml`:
 Use `keycloak_sync.py` to reconcile routes.yaml with Keycloak configuration:
 
 ```bash
-python keycloak_sync.py --config routes.yaml --agent-client "spiffe://..." --yes
+python scripts/keycloak_sync.py --config routes.yaml --agent-client "spiffe://..." --yes
 ```
 
 This creates target clients, audience scopes, and assigns scopes to the agent.

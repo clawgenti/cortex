@@ -152,7 +152,7 @@ jobs:
           echo "=== Bandit Python Security Scan ==="
           # Scan all Python in the repo. This was `authbridge tests` until that
           # tree became the repo root; the union is now `.`, which is also the only
-          # spelling that still reaches the root-level keycloak_sync.py.
+          # spelling that still reaches scripts/keycloak_sync.py.
           PYTHON_DIRS="."
           echo "Scanning: $PYTHON_DIRS"
           echo ""

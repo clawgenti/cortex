@@ -110,7 +110,7 @@ are kept current, and the manual path is not. Start from
 A fix merged to `main` is installable immediately, without waiting for a release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh \
   | sh -s -- --claude-code --ref=main
 ```
 
