@@ -154,9 +154,9 @@ Flags:
 	// resolution 0 omits the parameter: a symbolic window is served as one bucket and
 	// the server's default is right for every other case.
 	//
-	// THE AXIS IS GroupNone UNLESS --agent ASKS OTHERWISE, and the asymmetry is the point.
+	// THE AXIS IS GroupNone UNLESS A FLAG ASKS OTHERWISE, and the asymmetry is the point.
 	//
-	// Without the flag this command reports one total and asks for no breakdown, which is what
+	// With neither flag this command reports one total and asks for no breakdown, which is what
 	// keeps it free of a residual: usage.Snapshot.UngroupedCostMicros is the part of the total
 	// that no SERIES entry carries, and both producers compute it only where
 	// usage.Group.Reconcilable is true — false for exactly GroupNone and GroupPlugin, because a
@@ -165,14 +165,17 @@ Flags:
 	// path the field cannot arrive, there would be nothing for it to disclose if it did —
 	// Totals.CostMicros already INCLUDES every ungrouped dollar — and no series is summed that a
 	// reader could find short. TestRunCost_AsksForAnAxisThatCannotCarryAResidual pins that, and
-	// it drives this command WITHOUT the flag, which is why --agent had to be opt-in rather than
+	// it drives this command WITHOUT either flag, which is why both had to be opt-in rather than
 	// a change of default.
 	//
-	// WITH the flag the axis becomes GroupAgent, which IS reconcilable, and the disclosure the
+	// WITH --agent the axis becomes GroupAgent, which IS reconcilable, and the disclosure the
 	// paragraph above says a change of axis inherits comes due. It is paid in two places:
 	// writeCostSummary prints what no agent carries, and costJSON.UngroupedCostMicros carries it
 	// for a script — the field that struct's own comment said was owed by "whoever gives this
 	// command an axis".
+	//
+	// WITH --by the axis is whichever one the caller named, so whether the disclosure can arrive
+	// is that axis's own usage.Group.Reconcilable and not a property of the flag.
 	group := usage.GroupNone
 	switch {
 	case *agent != "":
@@ -225,9 +228,9 @@ Flags:
 //
 // IT REWRITES Totals AND HANDS BACK A SNAPSHOT, rather than rendering the agent itself, so
 // every existing writer applies unchanged — the negative-total refusal, the coverage-gap
-// disclosure, the incomplete-read admission and the JSON schema all keep working on one
-// agent's numbers with no second implementation and no chance of the two drifting. A COPY,
-// never the caller's snapshot mutated in place.
+// disclosure and the incomplete-read admission all keep working on one agent's numbers with no
+// second implementation and no chance of the two drifting. A COPY, never the caller's snapshot
+// mutated in place.
 //
 // The fold is usage.FoldSeriesAcrossWindow, the same one abctl's AGENTS pane uses, so the
 // figure printed here and the row shown there cannot disagree.
@@ -255,6 +258,16 @@ func scopeToAgent(snap *usage.Snapshot, agent string) (*usage.Snapshot, error) {
 	}
 	scoped := *snap
 	scoped.Totals = counts
+	// THE PROVENANCE MAPS DO NOT SURVIVE THE NARROWING, and dropping them is the only honest
+	// option. PricedBy, UnpricedBy and IncompleteBy describe the WHOLE WINDOW — only the ring
+	// populates them (core/cost/usage/snapshot.go), and it keys them by reason, not by agent, so
+	// there is nothing in a snapshot to re-derive one agent's share from. Carried over unchanged
+	// they would sit beside a CostMicros that is one agent's: writeCostSummary would print the
+	// window's reasons indented under the agent's count, which can account for more requests than
+	// the line above them, and costJSON would ship window-wide provenance next to an `agent` key.
+	// That is the rule writeCostSummary states about itself — "a caveat printed beside a figure it
+	// is not about is not a warning but a misattribution".
+	scoped.PricedBy, scoped.UnpricedBy, scoped.IncompleteBy = nil, nil, nil
 	return &scoped, nil
 }
 
@@ -293,9 +306,10 @@ func scopeToAgent(snap *usage.Snapshot, agent string) (*usage.Snapshot, error) {
 // as "the breakdown reconciles" when the truth is that no breakdown was asked for.
 //
 // That comment closed with "whoever gives this command an axis owes it a place in this struct",
-// and --agent is that axis: it requests group=agent, which IS reconcilable. So the field is
-// declared below and populated ONLY on that path, which keeps both readings honest — absent
-// still means "no breakdown was asked for", present means "here is what no agent carries".
+// and --agent was the first such axis: it requests group=agent, which IS reconcilable. --by is
+// the second, and asks for whichever axis the caller named. So the field is declared below and
+// populated ONLY on those paths, which keeps both readings honest — absent still means "no
+// breakdown was asked for", present means "here is what no label carries".
 // SeriesOvershootMicros below is the same shape of field admitted on the opposite finding about
 // its absence, and the three comments are meant to be read together.
 type costJSON struct {
@@ -522,7 +536,7 @@ func writeCostJSON(snap *usage.Snapshot, stdout, stderr io.Writer, agent, by str
 		IncompleteBy:         snap.IncompleteBy,
 		Degraded:             snap.Degraded,
 		DaysOutsideRetention: snap.DaysOutsideRetention,
-		// ONLY UNDER --agent, so the default path serialises no key and its absence keeps
+		// ONLY UNDER --agent OR --by, so the default path serialises no key and its absence keeps
 		// meaning "no breakdown was asked for". See the field's own comment for the debt this
 		// pays.
 		UngroupedCostMicros: ungroupedForBreakdown(snap, agent, by),

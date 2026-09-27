@@ -271,3 +271,64 @@ func TestAgentsPane_EscReturnsToTheCaller(t *testing.T) {
 		})
 	}
 }
+
+// An agent nothing could price renders "—", and a genuine zero renders "$0.00".
+//
+// THE TWO READINGS THIS SEPARATES are the whole reason agentCostCell tests PricedRequests rather
+// than CostMicros: "nothing priced this agent" and "this agent was priced, and it cost nothing"
+// are different answers, and only the first is unknown. A guard written on the money field would
+// collapse them, and so would a test that only banned the string "$0.00" — the genuine-zero row
+// below is what makes this able to tell a correct implementation from that one.
+//
+// The CLI twin of this rule is pinned by TestRunCost_ByRendersUnpricedAsADashNotZero. This is the
+// TUI half, which the AGENTS pane's COST column exists for.
+func TestAgentCostCell_UnpricedIsADashAndAGenuineZeroIsNot(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		counts usage.Counts
+		want   string
+	}{
+		{"nothing priced", usage.Counts{Requests: 8, PriceableRequests: 7}, emptyCell},
+		{"priced at a rate of zero", usage.Counts{Requests: 4, PricedRequests: 4, CostMicros: 0}, "$0.00"},
+		{"priced and charged", usage.Counts{Requests: 4, PricedRequests: 4, CostMicros: 1_500_000}, "$1.50"},
+		// Sub-cent, because the column's own comment says formatUSDTotalMicros "carries the floor
+		// that keeps a known sub-cent charge from printing as free". Note the third distinct
+		// answer: a known charge under a cent is "<$0.01", which is neither the "$0.00" of a
+		// genuine zero nor the "—" of an unpriced agent. All three readings stay separable.
+		{"priced below a cent", usage.Counts{Requests: 1, PricedRequests: 1, CostMicros: 400}, "<$0.01"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentCostCell(tc.counts); got != tc.want {
+				t.Errorf("agentCostCell(%+v) = %q, want %q", tc.counts, got, tc.want)
+			}
+		})
+	}
+}
+
+// The rule survives the trip through the table the pane actually renders.
+//
+// agentCostCell is correct in isolation above; this pins that rebuildAgentsTable puts its output
+// in the COST cell rather than formatting the money a second way. Two rows, one priced and one
+// not, so a builder that dropped the helper would have to reproduce both answers to pass.
+func TestRebuildAgentsTable_CarriesTheCostCellRuleIntoTheRow(t *testing.T) {
+	m := &model{
+		agentsTbl: newAgentsTable(),
+		agents: []agentRow{
+			{label: "claude-code/2.1.270", Counts: usage.Counts{Requests: 9, PricedRequests: 9, CostMicros: 2_250_000}},
+			{label: "bob-shell/2.0.5", Counts: usage.Counts{Requests: 8, PriceableRequests: 7}},
+		},
+	}
+	m.rebuildAgentsTable()
+
+	rows := m.agentsTbl.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("rebuilt %d rows, want 2", len(rows))
+	}
+	// Column 3 is COST — see newAgentsTable's column list.
+	if got, want := rows[0][3], "$2.25"; got != want {
+		t.Errorf("priced row COST = %q, want %q", got, want)
+	}
+	if got, want := rows[1][3], emptyCell; got != want {
+		t.Errorf("unpriced row COST = %q, want %q (never $0.00)", got, want)
+	}
+}

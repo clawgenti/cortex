@@ -1838,3 +1838,184 @@ func TestRunCost_UnknownByNamesTheAcceptedAxes(t *testing.T) {
 		}
 	}
 }
+
+// --by --json carries the axis, the folded series and the residual.
+//
+// THE HALF WITH NO READER UNTIL NOW. The human table is well covered, but costJSON is the shape
+// the struct's own comments argue hardest for — "a script is the reader that needs it most" — and
+// --by's three JSON-only producers (seriesForBreakdown, costJSON.By, and ungroupedForBreakdown's
+// by term) were reachable with nothing pointed at them. Each is asserted here by VALUE, not by
+// presence: a `by` key holding "" and a `series` key holding null both satisfy "the key is there"
+// while telling a script nothing.
+//
+// Decoded into map[string]any rather than costJSON, because unmarshalling into the struct that
+// produced it would agree with any renaming the struct made. The keys a script reads are the
+// assertion.
+func TestRunCost_ByJSONCarriesTheAxisTheSeriesAndTheResidual(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1048,"priceableRequests":1055},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1049,"tokens":297961318,"costMicros":146361600,
+		                          "pricedRequests":1048,"priceableRequests":1048}}},
+		          {"at":"2026-09-27T11:00:00Z","series":{
+		   "bob-shell/2.0.5":{"requests":8,"tokens":38682,"priceableRequests":7}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+
+	// The axis itself. Without it a consumer sees labels with no dimension, and
+	// "claude-code/2.1.270" and "api.anthropic.com" are both just strings.
+	if by, _ := got["by"].(string); by != "agent" {
+		t.Errorf("by = %q, want %q", by, "agent")
+	}
+
+	// The series, keyed on that axis and FOLDED ACROSS BUCKETS — the two labels arrive in
+	// different buckets above, so a producer handing over snap.Buckets verbatim, or one taking
+	// only the last bucket, fails here rather than looking plausible.
+	series, ok := got["series"].(map[string]any)
+	if !ok {
+		t.Fatalf("series is absent or not an object: %#v", got["series"])
+	}
+	for label, wantCost := range map[string]float64{
+		"claude-code/2.1.270": 146361600,
+		// Unpriced: it carries requests but no cost, so costMicros is omitempty-absent rather
+		// than zero. Asserting the LABEL is present with no cost keeps "not priced" distinct
+		// from "cost nothing" on the machine path too.
+		"bob-shell/2.0.5": 0,
+	} {
+		entry, ok := series[label].(map[string]any)
+		if !ok {
+			t.Errorf("series is missing label %q: %#v", label, series)
+			continue
+		}
+		cost, _ := entry["costMicros"].(float64)
+		if cost != wantCost {
+			t.Errorf("series[%q].costMicros = %v, want %v", label, cost, wantCost)
+		}
+	}
+
+	// The residual, which --by now owes for the same reason --agent does: without it a script
+	// summing the series against the total finds a shortfall with nothing to explain it.
+	if res, _ := got["ungroupedCostMicros"].(float64); res != 750000 {
+		t.Errorf("ungroupedCostMicros = %v, want 750000", res)
+	}
+}
+
+// Without --by, --json serialises none of the three breakdown keys.
+//
+// THE OTHER HALF OF THE CONTRACT, and the reason the positive test above is not enough: costJSON
+// spends forty lines arguing that the ABSENCE of these keys means "no breakdown was asked for",
+// so a producer that emitted `"by":""` or `"series":null` on the default path would break a
+// promise while still passing any present-and-correct assertion. Same fixture, flag removed.
+func TestRunCost_WithoutByJSONCarriesNoBreakdownKeys(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"none","priced":true,
+		"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1048,"priceableRequests":1055},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1049,"costMicros":146361600,
+		                          "pricedRequests":1048,"priceableRequests":1048}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	// ungroupedCostMicros is in the fixture and still must not be serialised: the field's own
+	// comment says the default path asks for group=none, which cannot produce a residual, so a
+	// value arriving there means the producer changed and dropping it keeps the promise.
+	for _, absent := range []string{"by", "series", "ungroupedCostMicros"} {
+		if _, present := got[absent]; present {
+			t.Errorf("default path serialised %q = %#v; its absence is what means "+
+				"\"no breakdown was asked for\"", absent, got[absent])
+		}
+	}
+}
+
+// --agent does not carry the WINDOW's provenance beside ONE AGENT's figure.
+//
+// A MISATTRIBUTION, NOT A MISSING FEATURE. pricedBy, unpricedBy and incompleteBy describe the
+// whole window — only the ring populates them, keyed by reason rather than by agent, so a
+// snapshot holds nothing to re-derive one agent's share from. Copied through unchanged they sit
+// beside a costMicros that is one agent's, and the human path is worse than the machine one:
+// writeCostSummary prints "N of M priced requests carry an inexact figure" from the AGENT's
+// totals and then indents the WINDOW's reasons under it, which can account for more requests
+// than the line above them.
+//
+// This is writeCostSummary's own rule applied to itself — "a caveat printed beside a figure it is
+// not about is not a warning but a misattribution". The fixture is a ring-shaped window (a
+// duration, which is the kind that populates the maps at all) and the agent asked for owns 4 of
+// the window's 10 requests, so a leaked map is arithmetically visible and not just present.
+func TestRunCost_AgentDropsTheWindowsProvenance(t *testing.T) {
+	body := `{"window":"1h","group":"agent","priced":true,
+		"totals":{"requests":10,"costMicros":1240000,"pricedRequests":7,"priceableRequests":10},
+		"pricedBy":{"authoritative":4,"bundled":3},
+		"unpricedBy":{"api.openai.com gpt-5":3},
+		"incompleteBy":{"floor":2},
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":4,"costMicros":500000,"pricedRequests":4,"priceableRequests":4},
+		   "bob-shell/2.0.5":{"requests":6,"priceableRequests":6}}}]}`
+
+	t.Run("json carries no window-wide map", func(t *testing.T) {
+		srv := fakeUsageServer(t, body)
+		defer srv.Close()
+		var out, errOut strings.Builder
+		if code := runCost([]string{"--endpoint", srv.URL, "--agent", "claude-code/2.1.270", "--json"},
+			&out, &errOut); code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+			t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+		}
+		// The agent's own figure must still be there — otherwise this test would pass against a
+		// scopeToAgent that returned an empty snapshot.
+		if agent, _ := got["agent"].(string); agent != "claude-code/2.1.270" {
+			t.Fatalf("agent = %q, want the one asked for", agent)
+		}
+		totals, ok := got["totals"].(map[string]any)
+		if !ok {
+			t.Fatalf("totals is absent or not an object: %#v", got["totals"])
+		}
+		if cost, _ := totals["costMicros"].(float64); cost != 500000 {
+			t.Fatalf("totals.costMicros = %v, want this agent's 500000 (not the window's 1240000)", cost)
+		}
+		for _, leaked := range []string{"pricedBy", "unpricedBy", "incompleteBy"} {
+			if v, present := got[leaked]; present {
+				t.Errorf("--agent shipped the window's %q = %#v beside one agent's costMicros",
+					leaked, v)
+			}
+		}
+	})
+
+	t.Run("human summary carries no window-wide reason", func(t *testing.T) {
+		srv := fakeUsageServer(t, body)
+		defer srv.Close()
+		var out, errOut strings.Builder
+		if code := runCost([]string{"--endpoint", srv.URL, "--agent", "claude-code/2.1.270"},
+			&out, &errOut); code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+		}
+		got := out.String()
+		// The named gap and the inexactness reason are the two the window's maps would supply.
+		for _, leaked := range []string{"api.openai.com gpt-5", "floor"} {
+			if strings.Contains(got, leaked) {
+				t.Errorf("--agent printed the window's caveat %q beside one agent's figure:\n%s",
+					leaked, got)
+			}
+		}
+	})
+}
