@@ -50,6 +50,9 @@ func runCost(args []string, stdout, stderr io.Writer) int {
 		"window to report: today, month, 7d, or a duration such as 1h or 6h")
 	endpoint := fs.String("endpoint", "",
 		"session API URL of the proxy (default: the Cortex installed on this machine)")
+	agent := fs.String("agent", "",
+		"report only this `agent`, spelled as the AGENTS pane in \"abctl observe\" shows it "+
+			"(e.g. bob-shell/2.0.5); omit for every agent together")
 	fs.Usage = func() {
 		fmt.Fprint(stderr, `abctl cost — what your agents have spent
 
@@ -60,6 +63,12 @@ Usage:
   abctl cost --window 1h         a rolling hour, from the in-memory ring
   abctl cost --json              the totals as JSON, for a script
   abctl cost --endpoint URL      ask a specific proxy rather than the local one
+  abctl cost --agent NAME        only this coding agent, e.g. bob-shell/2.0.5
+
+--agent reports ONE agent's figures. The name is the User-Agent the agent sends, as
+the AGENTS pane in "abctl observe" spells it; an unknown name fails and lists the ones
+seen in the window. Per-agent figures need not sum to the window total — some cost is
+attributed to no agent at all, and a scoped run says how much when there is any.
 
 "today", "month" and "7d" are served from Cortex's durable cost ledger, which is on
 for a local install and off in Kubernetes. Where it is off, the proxy answers with the
@@ -107,28 +116,32 @@ Flags:
 	ctx, cancel := context.WithTimeout(context.Background(), costFetchTimeout)
 	defer cancel()
 	// resolution 0 omits the parameter: a symbolic window is served as one bucket and
-	// the server's default is right for every other case. group none — this command
-	// reports one total, and a breakdown belongs in the TUI's Cost pane where there
-	// is room for a table.
+	// the server's default is right for every other case.
 	//
-	// GROUP NONE IS ALSO WHY THIS SURFACE RENDERS NO RESIDUAL BAND, and the absence is
-	// structural rather than an oversight. usage.Snapshot.UngroupedCostMicros is the part of
-	// the total that no SERIES entry carries, and both producers compute it only where
-	// usage.Group.Reconcilable is true — false for exactly GroupNone and GroupPlugin, because
-	// a request that asks for no breakdown has nothing to reconcile and a residual equal to
-	// the whole total would then appear on every group-less answer and read as a fault. So
-	// the field can never arrive here, and there would be nothing for it to disclose if it
-	// did: this command prints Totals.CostMicros, which already INCLUDES every ungrouped
-	// dollar, and sums no series that a reader could find short. The TUI's Cost pane is the
-	// consumer, because it is the surface that draws the breakdown.
+	// THE AXIS IS GroupNone UNLESS --agent ASKS OTHERWISE, and the asymmetry is the point.
 	//
-	// A FUTURE CHANGE OF AXIS INHERITS THE DISCLOSURE. The moment this asks for a
-	// reconcilable group — to print a by-model table, say — the answer starts carrying a
-	// residual, and a table summing to less than the headline above it with nothing to
-	// explain the difference is the defect the field exists to end. Pinned by
-	// TestRunCost_AsksForAnAxisThatCannotCarryAResidual, which fails on that change and says
-	// what is then owed.
-	snap, err := apiclient.New(target).GetUsageWindow(ctx, *window, 0, "", usage.GroupNone)
+	// Without the flag this command reports one total and asks for no breakdown, which is what
+	// keeps it free of a residual: usage.Snapshot.UngroupedCostMicros is the part of the total
+	// that no SERIES entry carries, and both producers compute it only where
+	// usage.Group.Reconcilable is true — false for exactly GroupNone and GroupPlugin, because a
+	// request that asks for no breakdown has nothing to reconcile and a residual equal to the
+	// whole total would appear on every group-less answer and read as a fault. So on the default
+	// path the field cannot arrive, there would be nothing for it to disclose if it did —
+	// Totals.CostMicros already INCLUDES every ungrouped dollar — and no series is summed that a
+	// reader could find short. TestRunCost_AsksForAnAxisThatCannotCarryAResidual pins that, and
+	// it drives this command WITHOUT the flag, which is why --agent had to be opt-in rather than
+	// a change of default.
+	//
+	// WITH the flag the axis becomes GroupAgent, which IS reconcilable, and the disclosure the
+	// paragraph above says a change of axis inherits comes due. It is paid in two places:
+	// writeCostSummary prints what no agent carries, and costJSON.UngroupedCostMicros carries it
+	// for a script — the field that struct's own comment said was owed by "whoever gives this
+	// command an axis".
+	group := usage.GroupNone
+	if *agent != "" {
+		group = usage.GroupAgent
+	}
+	snap, err := apiclient.New(target).GetUsageWindow(ctx, *window, 0, "", group)
 	if err != nil {
 		fmt.Fprintf(stderr, "abctl cost: %v\n", err)
 		switch {
@@ -150,11 +163,57 @@ Flags:
 		return 1
 	}
 
-	if *asJSON {
-		return writeCostJSON(snap, stdout, stderr)
+	if *agent != "" {
+		scoped, err := scopeToAgent(snap, *agent)
+		if err != nil {
+			fmt.Fprintf(stderr, "abctl cost: %v\n", err)
+			return 1
+		}
+		snap = scoped
 	}
-	writeCostSummary(snap, stdout)
+
+	if *asJSON {
+		return writeCostJSON(snap, stdout, stderr, *agent)
+	}
+	writeCostSummary(snap, stdout, *agent)
 	return 0
+}
+
+// scopeToAgent narrows a group=agent snapshot to one agent's figures.
+//
+// IT REWRITES Totals AND HANDS BACK A SNAPSHOT, rather than rendering the agent itself, so
+// every existing writer applies unchanged — the negative-total refusal, the coverage-gap
+// disclosure, the incomplete-read admission and the JSON schema all keep working on one
+// agent's numbers with no second implementation and no chance of the two drifting. A COPY,
+// never the caller's snapshot mutated in place.
+//
+// The fold is usage.FoldSeriesAcrossWindow, the same one abctl's AGENTS pane uses, so the
+// figure printed here and the row shown there cannot disagree.
+//
+// AN UNKNOWN AGENT IS AN ERROR THAT NAMES THE KNOWN ONES. The labels are User-Agents, so they
+// are neither short nor guessable — "bob" is the obvious thing to try and is not what Bob
+// sends. The set is already in hand, so withholding it would be a choice.
+func scopeToAgent(snap *usage.Snapshot, agent string) (*usage.Snapshot, error) {
+	series := usage.FoldSeriesAcrossWindow(snap.Buckets)
+	counts, ok := series[agent]
+	if !ok {
+		known := make([]string, 0, len(series))
+		for label := range series {
+			known = append(known, label)
+		}
+		// Sorted so the same window reports the same order every run; a set printed in map
+		// order is a set a reader cannot diff against yesterday's.
+		sort.Strings(known)
+		if len(known) == 0 {
+			return nil, fmt.Errorf("no agent traffic in the %s window, so --agent %q matches nothing",
+				snap.Window, agent)
+		}
+		return nil, fmt.Errorf("no agent %q in the %s window; seen: %s",
+			agent, snap.Window, strings.Join(known, ", "))
+	}
+	scoped := *snap
+	scoped.Totals = counts
+	return &scoped, nil
 }
 
 // costJSON is the --json shape: the window actually served plus the totals
@@ -184,16 +243,19 @@ Flags:
 // script summing CostMicros across days had no way to know one of them was short. The
 // server logs a warning for it, which is a line no scripted consumer can read.
 //
-// UngroupedCostMicros is the one disclosure deliberately NOT here, and the reason is not the
-// argument above running out. It is the part of the total that no SERIES entry carries, this
-// command requests group=none, and both producers compute it only where
-// usage.Group.Reconcilable is true — so the field can never arrive on this path (see the
-// request site) and Totals.CostMicros here already includes every ungrouped dollar. A schema
-// field that nothing can ever populate is a promise to a script that nothing keeps: a
-// consumer would read its absence as "the breakdown reconciles" when the truth is that no
-// breakdown was asked for. Whoever gives this command an axis owes it a place in this struct.
+// UngroupedCostMicros WAS the one disclosure deliberately not here, and --agent is why it now
+// is. The reasoning that kept it out still holds for the default path: it is the part of the
+// total that no SERIES entry carries, group=none is not reconcilable, so the field cannot
+// arrive and Totals.CostMicros already includes every ungrouped dollar. A schema field nothing
+// can populate is a promise to a script that nothing keeps — a consumer would read its absence
+// as "the breakdown reconciles" when the truth is that no breakdown was asked for.
+//
+// That comment closed with "whoever gives this command an axis owes it a place in this struct",
+// and --agent is that axis: it requests group=agent, which IS reconcilable. So the field is
+// declared below and populated ONLY on that path, which keeps both readings honest — absent
+// still means "no breakdown was asked for", present means "here is what no agent carries".
 // SeriesOvershootMicros below is the same shape of field admitted on the opposite finding about
-// its absence, and the two comments are meant to be read together.
+// its absence, and the three comments are meant to be read together.
 type costJSON struct {
 	// Window is what the SERVER served, so a script reading this learns it got six
 	// hours rather than a day without having to ask a second question.
@@ -323,6 +385,30 @@ type costJSON struct {
 	// for group=none, where a missing residual cannot be told apart from "no breakdown was
 	// asked for".
 	SeriesAvoidedOvershootMicros *int64 `json:"seriesAvoidedOvershootMicros,omitempty"`
+
+	// Agent names the coding agent Totals is scoped to, present only under --agent.
+	//
+	// It exists so a script cannot mistake a scoped document for a whole-window one. Every
+	// other field here would look identical either way — Window still says "today" and Totals
+	// still carries a plausible figure — so its absence was the only thing distinguishing
+	// "the window" from "one agent in the window", and absence is not something a consumer
+	// can check for.
+	Agent string `json:"agent,omitempty"`
+
+	// UngroupedCostMicros is the part of the window's cost that NO agent carries.
+	//
+	// THE DEBT THE STRUCT'S OWN COMMENT RECORDED, now paid. That comment said the field could
+	// never arrive here because this command requested group=none, and closed with "whoever
+	// gives this command an axis owes it a place in this struct" — --agent is that axis.
+	// GroupAgent is reconcilable, so the producers compute this, and a script summing --agent
+	// over every agent and comparing it against an unscoped run would otherwise find a
+	// shortfall with nothing in the document to explain it.
+	//
+	// PRESENT ONLY UNDER --agent, and a pointer, so the default path serialises no key at all
+	// and its absence keeps meaning "no breakdown was asked for" rather than "the breakdown
+	// reconciled". Not folded into Totals: this agent's figure is this agent's, and the
+	// residual is nobody's.
+	UngroupedCostMicros *int64 `json:"ungroupedCostMicros,omitempty"`
 }
 
 // NO FLAG FOR A NEGATIVE TOTAL, deliberately: it is DERIVABLE as `priced && costMicros < 0`,
@@ -372,19 +458,24 @@ func tiersJSONOf(t usage.Counts) *costTiersJSON {
 	return out
 }
 
-func writeCostJSON(snap *usage.Snapshot, stdout, stderr io.Writer) int {
+func writeCostJSON(snap *usage.Snapshot, stdout, stderr io.Writer, agent string) int {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	out := costJSON{
 		Window:               snap.Window,
 		Priced:               snap.Priced,
 		Totals:               snap.Totals,
+		Agent:                agent,
 		Tiers:                tiersJSONOf(snap.Totals),
 		PricedBy:             snap.PricedBy,
 		UnpricedBy:           snap.UnpricedBy,
 		IncompleteBy:         snap.IncompleteBy,
 		Degraded:             snap.Degraded,
 		DaysOutsideRetention: snap.DaysOutsideRetention,
+		// ONLY UNDER --agent, so the default path serialises no key and its absence keeps
+		// meaning "no breakdown was asked for". See the field's own comment for the debt this
+		// pays.
+		UngroupedCostMicros: ungroupedForAgent(snap, agent),
 		// usage.Counts.Saturated and usage.Counts.RefusedTokenRequests need no line here: Totals
 		// is usage.Counts embedded verbatim, so both travel with their own field names and their
 		// own omitempty. That is the whole point of not re-keying the struct — a disclosure added
@@ -421,9 +512,13 @@ func writeCostJSON(snap *usage.Snapshot, stdout, stderr io.Writer) int {
 // reader that can act on a fact with nothing on screen to attach it to, and
 // TestRunCost_AsksForAnAxisThatCannotCarryAResidual is what fails if this command ever takes an
 // axis and owes a rendering.
-func writeCostSummary(snap *usage.Snapshot, stdout io.Writer) {
+func writeCostSummary(snap *usage.Snapshot, stdout io.Writer, agent string) {
 	t := snap.Totals
-	fmt.Fprintf(stdout, "COST — %s\n", costWindowLabel(snap.Window))
+	if agent != "" {
+		fmt.Fprintf(stdout, "COST — %s · %s\n", costWindowLabel(snap.Window), agent)
+	} else {
+		fmt.Fprintf(stdout, "COST — %s\n", costWindowLabel(snap.Window))
+	}
 
 	// A NEGATIVE total is not a total, and gets the headline an unpriced window gets. The
 	// session API refuses to publish one — cost is a sum of per-request figures that are
@@ -446,6 +541,22 @@ func writeCostSummary(snap *usage.Snapshot, stdout io.Writer) {
 		// impossible figure. Different problem, different fix.
 		fmt.Fprintln(stdout,
 			"  ! the server reported a negative total, which cannot be spend — no figure is shown")
+	}
+	// COST THAT BELONGS TO NO AGENT, disclosed only on the --agent path, where it can exist.
+	//
+	// This is the duty group=agent brings. UngroupedCostMicros is the part of the window's
+	// total that no series entry carries, and both producers compute it only for a
+	// reconcilable grouping — so on the default axis the field can never arrive (see the
+	// GROUP NONE note in runCost), and there is nothing to say. With --agent it can, and
+	// without a word about it a reader who runs --agent for every agent and compares the sum
+	// against plain `abctl cost` finds a shortfall with nothing to explain it.
+	//
+	// It is NOT subtracted from or added to the figure above: this agent's total is this
+	// agent's, and the residual is neither. Stated beside it, not folded into it.
+	if agent != "" && snap.UngroupedCostMicros != nil && *snap.UngroupedCostMicros != 0 {
+		fmt.Fprintf(stdout,
+			"  note  %s of this window is attributed to no agent, so per-agent figures do not sum to the window total\n",
+			costUSD(float64(*snap.UngroupedCostMicros)/1e6))
 	}
 
 	if split := tokenSplit(t); split != "" {
@@ -877,4 +988,19 @@ func tokenSplit(t usage.Counts) string {
 	// of what it generated was reasoning. Labelled so nobody adds the two.
 	add(usage.KindReasoning, "reasoning (of output)", t.ReasoningTokens)
 	return strings.Join(parts, " · ")
+}
+
+// ungroupedForAgent is snap.UngroupedCostMicros, but only on the --agent path.
+//
+// A FUNCTION RATHER THAN AN INLINE CONDITIONAL because the rule is the load-bearing part, not
+// the plumbing: the field must stay absent without --agent even if a future snapshot arrives
+// carrying it. The default axis is group=none, which cannot produce a residual, so a value
+// there would mean the producer changed — and serialising it would quietly retract what the
+// field's absence has always promised a script. Dropping it keeps that promise and the
+// mismatch surfaces where it belongs, in the producer.
+func ungroupedForAgent(snap *usage.Snapshot, agent string) *int64 {
+	if agent == "" {
+		return nil
+	}
+	return snap.UngroupedCostMicros
 }

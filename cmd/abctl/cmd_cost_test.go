@@ -1513,3 +1513,132 @@ func TestRunCost_JSONOmitsTheCoverageWhenThereIsNone(t *testing.T) {
 		t.Errorf("a window the ledger covers still carries the key:\n%s", out.String())
 	}
 }
+
+// --agent reports one agent's figures, and asks for the axis that can carry them.
+//
+// The group is asserted as well as the output because the two are one decision: without
+// group=agent the response has no per-agent series at all, and the command would have to
+// invent the number it prints.
+func TestRunCost_AgentReportsThatAgentOnly(t *testing.T) {
+	var gotGroup string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		gotGroup = r.URL.Query().Get("group")
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"window":"today","group":"agent","priced":true,
+			"totals":{"requests":1057,"tokens":298000000,"costMicros":146361600,
+			          "pricedRequests":1048,"priceableRequests":1055},
+			"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+			   "claude-code/2.1.270":{"requests":1049,"tokens":297961318,"costMicros":146361600,
+			                          "pricedRequests":1048,"priceableRequests":1048},
+			   "bob-shell/2.0.5":{"requests":8,"tokens":38682,"priceableRequests":7}}}]}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob-shell/2.0.5"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if gotGroup != "agent" {
+		t.Errorf("asked for group=%q, want %q — without it there is no per-agent series to read", gotGroup, "agent")
+	}
+	got := out.String()
+	if !strings.Contains(got, "bob-shell/2.0.5") {
+		t.Errorf("output does not name the agent it reports:\n%s", got)
+	}
+	// The OTHER agent's figures must not appear. This is the whole point of the flag, and the
+	// failure it guards is the one the billing-unit work exists to prevent: Bob's 8 requests
+	// reading as claude-code's 1,049, or the two totals summed.
+	if strings.Contains(got, "1,049") || strings.Contains(got, "146.36") {
+		t.Errorf("output leaked the other agent's figures:\n%s", got)
+	}
+	if !strings.Contains(got, "8") {
+		t.Errorf("output missing this agent's request count:\n%s", got)
+	}
+}
+
+// An unknown --agent fails and names the agents that do exist.
+//
+// A bare "not found" would leave the reader guessing at a string they cannot see — and the
+// strings here are User-Agents, so they are neither short nor guessable. The label to type is
+// exactly what the error has in hand, so withholding it would be a choice.
+func TestRunCost_UnknownAgentNamesTheOnesThatExist(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":8},
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1},
+		   "bob-shell/2.0.5":{"requests":7}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob"}, &out, &errOut)
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero for an agent that was not seen; stdout = %s", out.String())
+	}
+	msg := errOut.String()
+	for _, want := range []string{"bob", "claude-code/2.1.270", "bob-shell/2.0.5"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error does not mention %q:\n%s", want, msg)
+		}
+	}
+}
+
+// --agent discloses cost that belongs to no agent, when there is any.
+//
+// THIS IS THE OBLIGATION group=agent BRINGS. runCost's default axis is GroupNone, which is
+// non-reconcilable, so no residual can ever arrive — and cmd_cost.go says in as many words
+// that a future change of axis inherits the disclosure. group=agent IS reconcilable, so
+// usage.Snapshot.UngroupedCostMicros can be non-zero: cost the totals include and no agent
+// carries. Without a word about it, a reader adding up --agent for every agent and comparing
+// that against plain `abctl cost` finds a shortfall with nothing to explain it.
+func TestRunCost_AgentDisclosesCostNoAgentCarries(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":10,"costMicros":5000000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":1500000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":6,"costMicros":2000000,"pricedRequests":6,"priceableRequests":6},
+		   "bob-shell/2.0.5":{"requests":4,"costMicros":1500000,"pricedRequests":4,"priceableRequests":4}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob-shell/2.0.5"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "1.50") {
+		t.Errorf("output does not disclose the $1.50 that no agent carries:\n%s", got)
+	}
+}
+
+// With no --agent the axis stays GroupNone, so the default path carries no residual.
+//
+// TestRunCost_AsksForAnAxisThatCannotCarryAResidual already asserts the group, and it drives
+// the command WITHOUT the flag — so it keeps passing and is the reason --agent had to be
+// opt-in rather than a change of default. This states the pairing explicitly, because the two
+// tests only mean something together: one says the default is safe, the other says the flag
+// takes on the duty.
+func TestRunCost_WithoutAgentTheDefaultAxisIsUnchanged(t *testing.T) {
+	var gotGroup string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotGroup = r.URL.Query().Get("group")
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"window":"today","totals":{"requests":1},"priced":false}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if gotGroup != "" && gotGroup != string(usage.GroupNone) {
+		t.Errorf("default asked for group=%q, want none — a reconcilable axis owes a residual disclosure", gotGroup)
+	}
+}

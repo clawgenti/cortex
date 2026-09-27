@@ -225,3 +225,86 @@ func TestParseResolution_DivisibilityErrorIsAFixedLiteral(t *testing.T) {
 		}
 	}
 }
+
+// FoldSeriesAcrossWindow sums each label's Counts over every bucket.
+//
+// EXTRACTED, NOT ADDED. capSeriesAcrossWindow already carried this loop inline to build the
+// ranking it caps by; it is exported here because two clients outside this package need the
+// same answer — abctl's AGENTS pane, which shows one row per agent for the window, and
+// `abctl cost --agent`, which needs one label's total plus the set of labels to name in a
+// "no such agent" error. A second copy in either would be a second definition of what a
+// window total means.
+//
+// THROUGH Counts.Add, so the sum saturates and says so in Saturated rather than wrapping
+// negative. That is why this is worth sharing at all: a caller writing the four-line loop
+// itself is overwhelmingly likely to reach for `+=`, and a wrapped cost total sorts BELOW a
+// ten-micro one — which in the pane that ranks agents by spend silently moves the biggest
+// spender to the bottom.
+func TestFoldSeriesAcrossWindow_SumsEachLabelOverEveryBucket(t *testing.T) {
+	buckets := []Bucket{
+		{Series: map[string]Counts{
+			"claude-code/2.1.270": {Requests: 2, Tokens: 100, CostMicros: 500},
+			"bob-shell/2.0.5":     {Requests: 1, Tokens: 10},
+		}},
+		{Series: map[string]Counts{
+			"claude-code/2.1.270": {Requests: 3, Tokens: 200, CostMicros: 700},
+		}},
+		// An idle bucket contributes nothing and must not invent a label.
+		{},
+	}
+
+	got := FoldSeriesAcrossWindow(buckets)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d labels, want 2: %v", len(got), got)
+	}
+	if c := got["claude-code/2.1.270"]; c.Requests != 5 || c.Tokens != 300 || c.CostMicros != 1200 {
+		t.Errorf("claude-code = %+v, want Requests 5, Tokens 300, CostMicros 1200", c)
+	}
+	// Present with a zero cost, NOT absent: an agent that sent traffic nothing could price
+	// still has to appear, which is exactly the Bob case until billing units land.
+	c, ok := got["bob-shell/2.0.5"]
+	if !ok {
+		t.Fatal("bob-shell is missing; an unpriced agent still sent traffic and must appear")
+	}
+	if c.Requests != 1 || c.CostMicros != 0 {
+		t.Errorf("bob-shell = %+v, want Requests 1, CostMicros 0", c)
+	}
+}
+
+// No buckets folds to an empty map, never nil.
+//
+// The callers range over the result and check its length; a nil map is safe for both in Go,
+// so this pins the CHEAPER property instead — that "no traffic" is distinguishable from an
+// error by being an empty answer rather than by a caller having to test for nil.
+func TestFoldSeriesAcrossWindow_NoBucketsIsEmptyNotNil(t *testing.T) {
+	got := FoldSeriesAcrossWindow(nil)
+	if got == nil {
+		t.Fatal("FoldSeriesAcrossWindow(nil) = nil, want an empty map")
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d labels, want 0", len(got))
+	}
+}
+
+// The fold saturates rather than wrapping, because it goes through Counts.Add.
+//
+// The figure needs ~$9.2T in one label to reach, so this is not a total anybody will see. The
+// DIRECTION is the point: a raw += wraps negative, and every consumer of this ranks or
+// compares the result, so the biggest number in the window would sort as the smallest. Pinned
+// here, at the one definition, rather than in each caller.
+func TestFoldSeriesAcrossWindow_SaturatesRatherThanWrapping(t *testing.T) {
+	buckets := []Bucket{
+		{Series: map[string]Counts{"a": {CostMicros: math.MaxInt64 - 5}}},
+		{Series: map[string]Counts{"a": {CostMicros: 100}}},
+	}
+
+	got := FoldSeriesAcrossWindow(buckets)
+
+	if got["a"].CostMicros != math.MaxInt64 {
+		t.Errorf("CostMicros = %d, want MaxInt64 — a raw += would have wrapped negative", got["a"].CostMicros)
+	}
+	if !got["a"].Saturated {
+		t.Error("Saturated = false; a clamped total must disclose it")
+	}
+}

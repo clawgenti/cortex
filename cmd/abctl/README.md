@@ -1005,6 +1005,8 @@ Layered on top of all of them:
 | `Esc` | pipeline | back to the pane `P` was pressed on |
 | `C` | any session-view pane (not the picker) | open the registered-plugin catalog. Was `P` until the pipeline took that letter |
 | `r` | catalog | refresh the catalog from `/v1/plugins` |
+| `A` | any session-view pane (not the picker) | open the per-agent cost breakdown — what each coding agent has spent today. Capital `A` because lowercase `a` cycles the spend drawer's axis. Refetches on every press, then **refuses below two agents** and says which one it found: a one-row breakdown restates a total already on screen. Not in the footer for that reason; the `?` overlay names it |
+| `Esc` | agents | back to the pane `A` was pressed on |
 | `e` | pipeline | edit pipeline subtree in `$EDITOR` |
 | `y` | edit/diff | apply the edit |
 | `N` | edit/diff | abort the edit |

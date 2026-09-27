@@ -1598,13 +1598,25 @@ func CapSeries(series map[string]Counts, n int) map[string]Counts {
 	return out
 }
 
-// capSeriesAcrossWindow applies MaxSeriesInResponse to every bucket using ONE ranking taken
-// over the whole window, so a label is either a series everywhere or (other) everywhere.
+// FoldSeriesAcrossWindow sums each series label's Counts over every bucket, giving one total
+// per label for the whole window.
 //
-// See MaxSeriesInResponse for why per-bucket capping is the wrong shape. The ranking is built
-// from the same Counts.Add the totals use, so "costliest" means the same thing here as in the
-// figure the client renders above the chart.
-func capSeriesAcrossWindow(buckets []Bucket, n int) {
+// EXTRACTED FROM capSeriesAcrossWindow, which carried this loop inline to build the ranking it
+// caps by, and exported because two consumers outside this package need the same answer:
+// abctl's AGENTS pane, which renders one row per agent for the window, and
+// `abctl cost --agent`, which needs one label's total plus the set of labels to name in a
+// "no such agent" error. Either writing the loop again would be a second definition of what a
+// window total means.
+//
+// THROUGH Counts.Add, which is the reason it is worth sharing rather than retyping: Add
+// saturates and records it in Saturated, where a hand-written `+=` wraps negative. Every
+// consumer here ranks or compares the result, so a wrapped cost total sorts BELOW a ten-micro
+// one — in the pane that orders agents by spend, that silently moves the biggest spender to
+// the bottom. rankSeriesByCost's godoc in abctl records the same trap being hit for real.
+//
+// Returns an empty map rather than nil for no buckets, so "no traffic" is an empty answer and
+// not something a caller has to nil-check.
+func FoldSeriesAcrossWindow(buckets []Bucket) map[string]Counts {
 	window := map[string]Counts{}
 	for _, b := range buckets {
 		for k, v := range b.Series {
@@ -1613,6 +1625,17 @@ func capSeriesAcrossWindow(buckets []Bucket, n int) {
 			window[k] = cur
 		}
 	}
+	return window
+}
+
+// capSeriesAcrossWindow applies MaxSeriesInResponse to every bucket using ONE ranking taken
+// over the whole window, so a label is either a series everywhere or (other) everywhere.
+//
+// See MaxSeriesInResponse for why per-bucket capping is the wrong shape. The ranking is built
+// from the same Counts.Add the totals use, so "costliest" means the same thing here as in the
+// figure the client renders above the chart.
+func capSeriesAcrossWindow(buckets []Bucket, n int) {
+	window := FoldSeriesAcrossWindow(buckets)
 	if len(window) <= n {
 		return
 	}

@@ -34,10 +34,11 @@ type agentRow struct {
 // grouping's keys instead, which is the caller's error to avoid and not something this can
 // detect — Bucket.Series does not record which axis produced it.
 //
-// MONEY AND COUNTERS THROUGH usage.Counts.Add, never a raw `+=`. Add saturates and records it
-// in Saturated, and it is exported precisely so abctl folds arbitrary Counts the one way. The
-// drawer's rankSeriesByCost carries the full argument: a wrapped total ranks BELOW a ten-micro
-// series, which here would sort the busiest agent to the bottom of the picker.
+// THE FOLD ITSELF IS usage.FoldSeriesAcrossWindow, not a loop here. It saturates through
+// Counts.Add rather than wrapping, and `abctl cost --agent` needs the identical answer — two
+// copies would be two definitions of what a window total means. The drawer's rankSeriesByCost
+// records what the alternative cost when it did write its own: a wrapped total ranks BELOW a
+// ten-micro series, which here would sort the busiest agent to the bottom of the table.
 //
 // ORDERED BY COST DESCENDING, TIES ON LABEL. The tie-break is load-bearing, not tidiness:
 // these rows are rebuilt on every poll and Go randomises map iteration per run, so equal-cost
@@ -45,18 +46,10 @@ type agentRow struct {
 // now — every unpriced agent has CostMicros 0, so until pricing lands the label IS the order
 // for all of them.
 func agentRowsFromBuckets(buckets []usage.Bucket) []agentRow {
-	totals := map[string]*usage.Counts{}
-	for _, b := range buckets {
-		for label, c := range b.Series {
-			if totals[label] == nil {
-				totals[label] = &usage.Counts{}
-			}
-			totals[label].Add(c)
-		}
-	}
+	totals := usage.FoldSeriesAcrossWindow(buckets)
 	out := make([]agentRow, 0, len(totals))
 	for label, c := range totals {
-		out = append(out, agentRow{label: label, Counts: *c})
+		out = append(out, agentRow{label: label, Counts: c})
 	}
 	sortAgentRows(out)
 	return out
