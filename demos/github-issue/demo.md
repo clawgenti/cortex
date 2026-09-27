@@ -14,6 +14,7 @@ For a simpler getting-started demo without token exchange, see the
 |-------|-------------|----------|
 | **[Manual Deployment](demo-manual.md)** | Deploy everything via `kubectl` and YAML manifests | Full control, debugging, understanding internals |
 | **[UI Deployment](demo-ui.md)** | Import agent and tool via the Rossoctl dashboard | Quick start, UI-driven workflow |
+| **[AI Access Control](demo-aiac.md)** | Generate Keycloak RBAC policies from natural language with an LLM, on top of this demo | Policy-as-code, AI-driven access control |
 
 Both guides share the same infrastructure setup (webhook, Keycloak, ConfigMaps) and
 produce identical AuthBridge security behavior.
@@ -79,6 +80,7 @@ Common names used by both:
 |------|-------------|
 | [demo-manual.md](demo-manual.md) | Full manual deployment guide |
 | [demo-ui.md](demo-ui.md) | UI-driven deployment guide |
+| [demo-aiac.md](demo-aiac.md) | AI-generated access-control policies (`aiac/`) |
 | [setup_keycloak.py](setup_keycloak.py) | Keycloak configuration script |
 | [k8s/configmaps.yaml](k8s/configmaps.yaml) | ConfigMaps for AuthBridge sidecars |
 | [k8s/git-issue-agent-deployment.yaml](k8s/git-issue-agent-deployment.yaml) | Agent deployment YAML (manual) |

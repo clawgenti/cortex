@@ -548,7 +548,7 @@ Expected log entries showing:
 
 ### Step 11: Create a Policy Description
 
-Create a text file with your natural language policy description. Two examples are provided under policies directory e.g. [regular_policy](policies/regular_policy.txt)
+Create a text file with your natural language policy description. Two examples are provided under policies directory e.g. [regular_policy](aiac/policies/regular_policy.txt)
 
 ### Step 12: Generate and Apply Policy (Full Pipeline)
 
@@ -780,7 +780,7 @@ curl -s --max-time 300 \
 
 To update the policy, simply modify the policy description and re-run:
 
-Create an updated natural language policy description. See example [permissive_policy](policies/permissive_policy.txt)
+Create an updated natural language policy description. See example [permissive_policy](aiac/policies/permissive_policy.txt)
 
 The AIAC system will:
 1. Export the current realm configuration

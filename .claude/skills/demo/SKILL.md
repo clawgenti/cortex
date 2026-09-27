@@ -82,10 +82,9 @@ gone), and `demos/github-issue/k8s/configmaps.yaml` has shrunk to
 `authbridge-config` + `authproxy-routes` with no listener in it at all.
 
 Inbound interception is configured through `authbridge-config` and rendered by
-the operator, not hand-written into demo ConfigMaps. The one hand-maintained
-Envoy filter chain left in the repo is
-`demos/mtls/k8s/envoy-config-mtls.yaml`; nothing needs lockstep edits
-any more.
+the operator, not hand-written into demo ConfigMaps. No hand-maintained Envoy filter chain is left in the repo — the last one,
+`demos/mtls/k8s/envoy-config-mtls.yaml`, was retired with that demo — so
+nothing needs lockstep edits any more.
 
 ## Critical Bugs and Fixes
 

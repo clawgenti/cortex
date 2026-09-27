@@ -206,14 +206,13 @@ cortex/
 │   ├── sparc-service/                #   Python SPARC reflection service (own image)
 │   └── lineage-attach/               #   OTel shim + scripts for lineage propagation
 │
-├── demos/                            # 12 scenarios — see demos/README.md for the order
+├── demos/                            # 10 scenarios — see demos/README.md for the order
 │   ├── weather-agent/                #   Getting started (+ advanced, + abctl walkthrough)
 │   ├── github-issue/                 #   Token exchange + scope-based access (largest)
 │   ├── token-exchange-routes/        #   Routes config reference
-│   ├── mcp-parser/                   #   Enabling the outbound mcp-parser plugin
 │   ├── ibac/, hr-cpex/,              #   Guardrail / policy demos
 │   │   finance-sparc/                #   (echo, ibac and finance-sparc are
-│   ├── echo/, mtls/, lineage/        #    self-contained Go modules)
+│   ├── echo/, lineage/               #    self-contained Go modules)
 │   ├── session-budget/               #   Redis-backed budget tracking
 │   └── context-guru/                 #   Opt-in context-guru plugin
 │
@@ -676,10 +675,12 @@ other permissive on inbound only.
 
 The operator's AgentRuntime CR's `Spec.MTLSMode` flows
 through to a per-agent rendered envoy-config with the matching TLS
-blocks (operator companion PR). The [`demos/mtls/`](demos/mtls/)
-envoy-sidecar variant (`make demo-mtls-envoy*`) ships a hand-crafted
-demo that proves the same Envoy YAML design at the data-plane level
-without needing a CR.
+blocks (operator companion PR). **This design has no end-to-end
+verification in-tree.** The `demos/mtls/` demo used to exercise it — six
+make targets including negative checks on both deployment shapes — and was
+retired as superseded. The Go tests in `core/tlsconfig` and
+`core/listener/reverseproxy` cover the proxy-sidecar path only; nothing
+exercises the Envoy filter chains. Re-verify by hand after changing them.
 
 ## CI/CD Workflows
 

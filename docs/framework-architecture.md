@@ -769,6 +769,7 @@ curl http://localhost:9093/config               # now-active config
 | A plugin's `config:` subtree (issuer, bypass paths, routes, JWKS URL, etc.) | ✅ | Plugin's `Configure` runs again with new bytes |
 | `mode` (`envoy-sidecar` / `proxy-sidecar`) | ❌ | Different wire protocol + listener set; refuse reload |
 | `listener.*` (ports) | ❌ | Bound sockets; refuse reload |
+| `stats.address` (default `:9093`) | ❌ | A bound socket like the listeners. Serves the diagnostic endpoints — `/stats`, `/config`, `/reload/status` and `/pricing/table` — so it is how a reload is confirmed and cannot be swapped by one |
 | `session.*` (TTL, MaxEvents, MaxSessions, ID headers) | ❌ | Every consumer reads the block once at startup — `session.New(...)` in each `cmd` main, `forwardproxy.Server.SessionIDHeaders` assigned before `ListenAndServe`. There is no live object to reach; refuse reload |
 | `cost_ledger.*` (`enabled`, `dir`, `retention_days`) | ❌ | The ledger is a `*ledger.Writer` opened once at startup and handed to the session store as a `Recorder`. Refuse reload |
 

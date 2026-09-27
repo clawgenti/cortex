@@ -72,7 +72,7 @@ sequenceDiagram
 12. [Staged Rollout](#12-staged-rollout)
 13. [Layering Model and Protocol-Semantic Hooks](#13-layering-model-and-protocol-semantic-hooks)
 14. [Open Questions](#14-open-questions)
-15. [Appendices](#appendices)
+15. [Appendix A: Complete Go Payload Type Definitions](#appendix-a-complete-go-payload-type-definitions)
 
 Out of scope:
 

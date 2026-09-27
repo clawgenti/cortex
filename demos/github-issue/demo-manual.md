@@ -165,7 +165,7 @@ three checks on the `Authorization: Bearer <token>` header:
 
 Requests that fail any check receive an immediate `401 Unauthorized` response from
 Envoy — the agent application never sees them. This is tested in
-[Step 8a–8c](#step-8-test-the-authbridge-flow).
+[Step 8a–8c](#step-8-test-the-cortex-flow).
 
 ---
 

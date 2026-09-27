@@ -4,8 +4,8 @@
 # a single combined AuthBridge sidecar (post-cortex#411). The exact
 # container shape depends on the resolved AuthBridge mode:
 # - proxy-sidecar (default): one container "authbridge-proxy" from the
-#   "authbridge" image. spiffe-helper is bundled inside; gated per-workload
-#   by SPIRE_ENABLED.
+#   "authbridge" image. SVIDs are fetched in-process over the SPIRE
+#   Workload API; there is no spiffe-helper container.
 # - envoy-sidecar: a "proxy-init" init container (iptables) plus one
 #   container "envoy-proxy" from the "authbridge-envoy" image (Envoy +
 #   ext_proc + bundled spiffe-helper).

@@ -198,7 +198,7 @@ can be configured in two ways:
 **Option A (recommended): Via the Rossoctl UI** — configure outbound routing
 rules directly during agent import in Step 5 (item 12). No manual ConfigMap
 creation needed. Requires a Rossoctl backend that writes list-shaped `routes.yaml`
-(see [Rossoctl version notes](#rossoctl-version-notes-ui-import-and-authbridge) above);
+(see [Rossoctl version notes](#rossoctl-version-notes-ui-import-and-cortex) above);
 otherwise use Option B or upgrade.
 
 **Option B: Via kubectl** — apply the demo-specific ConfigMap that configures

@@ -50,8 +50,8 @@ plugin pipeline in real time while chatting with the agent, see
 │  │                        │    - HTTP: Passthrough (default policy)      │    │   │
 │  │                        │    - HTTPS: TLS passthrough (no interception)│    │   │
 │  │                        │                                              │    │   │
-│  │                        │  spiffe-helper is bundled inside the image  │    │   │
-│  │                        │  and gated per-workload by SPIRE_ENABLED.   │    │   │
+│  │                        │  SVIDs are fetched in-process over the      │    │   │
+│  │                        │  SPIRE Workload API (no spiffe-helper).     │    │   │
 │  │                        │  Keycloak client registration is             │    │   │
 │  │                        │  operator-managed (no in-pod sidecar);      │    │   │
 │  │                        │  the operator mounts the resulting Secret    │    │   │

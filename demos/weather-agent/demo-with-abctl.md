@@ -35,7 +35,7 @@ Verify by sending one chat message and getting a weather response. Once that wor
    kubectl rollout restart deployment/weather-service -n team1
    ```
 
-   Merging only the `pipeline:` key into the existing YAML is brittle across operator versions. If the patch above doesn't take effect, `kubectl edit configmap authbridge-runtime-config -n team1` and add the `pipeline:` section to the existing `config.yaml` by hand. See [mcp-parser demo](../mcp-parser/README.md) for the full config format and rationale.
+   Merging only the `pipeline:` key into the existing YAML is brittle across operator versions. If the patch above doesn't take effect, `kubectl edit configmap authbridge-runtime-config -n team1` and add the `pipeline:` section to the existing `config.yaml` by hand. See the [`mcp-parser` plugin reference](../../docs/plugin-catalog.md) for its config fields.
 
 ## 1. Get `abctl`
 
