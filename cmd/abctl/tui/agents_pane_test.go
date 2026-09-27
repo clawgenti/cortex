@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/rossoctl/cortex/core/cost/usage"
 )
 
@@ -153,6 +155,81 @@ func TestAgentsPaneApplies_SkippedBelowTwoAgents(t *testing.T) {
 	}
 }
 
+// Refusing the pane says WHY, and the reason names the actual count.
+//
+// A key that does nothing is the failure this package has been bitten by twice — paneUsage
+// shipped reachable and undocumented, and the spend drawer once printed the wrong refusal
+// reason on two panes. So `A` below two agents must not be silently inert: it refuses and
+// says what it found, the same contract spendDrawerHostPane keeps, whose test requires that
+// no refusal be silent.
+//
+// The two refusals are DIFFERENT SENTENCES because they are different situations: no agents
+// means nothing has been observed yet and waiting may fix it, while one agent means the
+// breakdown would have a single row and waiting will not. Collapsing them into "not enough
+// agents" tells a reader nothing about which of those they are looking at.
+func TestAgentsPaneRefusal_NamesWhyAndIsSilentOnlyWhenAvailable(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		rows     []agentRow
+		wantSome bool     // a refusal is expected
+		contains []string // fragments the refusal must carry
+	}{
+		{
+			name: "no agents seen yet", rows: nil, wantSome: true,
+			contains: []string{"no agent"},
+		},
+		{
+			name: "one agent", rows: []agentRow{{label: "claude-code/2.1.270"}}, wantSome: true,
+			// The agent's own name, so the reader can see the breakdown would be a
+			// restatement of the total they already have.
+			contains: []string{"claude-code/2.1.270"},
+		},
+		{
+			name: "two agents is available", rows: []agentRow{
+				{label: "claude-code/2.1.270"}, {label: "bob-shell/2.0.5"},
+			}, wantSome: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := agentsPaneRefusal(tc.rows)
+			if !tc.wantSome {
+				if got != "" {
+					t.Fatalf("agentsPaneRefusal = %q, want empty — the pane is available here", got)
+				}
+				return
+			}
+			if got == "" {
+				t.Fatal("agentsPaneRefusal = empty; a refusal may never be silent")
+			}
+			for _, frag := range tc.contains {
+				if !strings.Contains(got, frag) {
+					t.Errorf("refusal %q does not mention %q", got, frag)
+				}
+			}
+		})
+	}
+}
+
+// The refusal and the availability rule can never disagree.
+//
+// Two functions answering one question is how the spend drawer's wrong-reason bug happened:
+// the decision and the sentence explaining it drifted apart. Asserted over both sides of the
+// boundary rather than at it, so a change to either that forgets the other fails here.
+func TestAgentsPaneRefusal_AgreesWithAgentsPaneApplies(t *testing.T) {
+	for n := 0; n <= 3; n++ {
+		rows := make([]agentRow, n)
+		for i := range rows {
+			rows[i] = agentRow{label: string(rune('a' + i))}
+		}
+		applies := agentsPaneApplies(rows)
+		refused := agentsPaneRefusal(rows) != ""
+		if applies == refused {
+			t.Errorf("%d agents: agentsPaneApplies=%v but refused=%v — these must be exact opposites",
+				n, applies, refused)
+		}
+	}
+}
+
 // The help overlay tells the two "agent" panes apart.
 //
 // This repo uses the word for two unrelated things: paneNamespaces lists KUBERNETES
@@ -205,5 +282,43 @@ func TestAgentRowsFromBuckets_MoneySaturatesRatherThanWrapping(t *testing.T) {
 	}
 	if !rows[0].Saturated {
 		t.Error("Saturated = false; the row must disclose that its total was clamped")
+	}
+}
+
+// esc leaves the AGENTS pane and lands where `A` was pressed.
+//
+// A KEY-OPENED SURFACE MUST RETURN TO ITS CALLER, which is the rule paneCatalog's own esc
+// case states and the reason the sessions pane is the only one whose esc costs the
+// connection. Without a case of its own a new pane is a DEAD END: esc falls through, the
+// reader is stuck, and the only way out is `q`.
+//
+// The paneNone fallback is Sessions rather than the pane enum's zero value. It is reachable
+// rather than defensive — the same way paneCatalog's is — and Sessions is the one pane that is
+// always a defensible place to land; falling back to the zero value would drop the reader on
+// the Kubernetes namespace picker, tearing down nothing but looking like the connection went
+// away.
+func TestAgentsPane_EscReturnsToTheCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		previousPane paneID
+		want         paneID
+	}{
+		{"opened from sessions", paneSessions, paneSessions},
+		{"opened from events", paneEvents, paneEvents},
+		{"opened from detail", paneDetail, paneDetail},
+		{"no caller recorded falls back to sessions", paneNone, paneSessions},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &model{
+				pane:               paneAgents,
+				previousPane:       tc.previousPane,
+				client:             deadClient(),
+				pipelineReturnPane: paneNone,
+			}
+			m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+			if m.pane != tc.want {
+				t.Errorf("esc from AGENTS left pane = %v, want %v", m.pane, tc.want)
+			}
+		})
 	}
 }

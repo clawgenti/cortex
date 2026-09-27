@@ -196,6 +196,8 @@ var jumpTargets = []jumpTarget{
 		desc: "the plugin chain this proxy runs, editable in $EDITOR"},
 	{key: "C", pane: paneCatalog,
 		desc: "every plugin the proxy offers, from /v1/plugins"},
+	{key: "A", pane: paneAgents,
+		desc: "what each coding agent has spent today; refuses below two agents"},
 	{key: "$", pane: paneNone, label: "spend",
 		desc: "a drawer over the spend band: tiers and a breakdown"},
 }
@@ -226,7 +228,10 @@ func jumpsFrom(p paneID) []jumpTarget {
 			default:
 				continue
 			}
-		case "C":
+		case "C", "A":
+			// Both need a connection and nothing else, so both are offered everywhere past
+			// the pickers. Sharing the arm rather than duplicating it: the rule is the same
+			// rule, and two copies would be two places to forget.
 			switch p {
 			case paneNamespaces, panePods:
 				continue
@@ -363,11 +368,9 @@ var paneKeys = map[paneID]keyGroup{
 		// workloads and its own purpose called them "agents" too, and this overlay renders
 		// both purposes at once — so without the word a reader cannot tell which pane they
 		// want.
-		purpose: "coding agents seen on the wire; scopes the cost and usage views to one of them",
+		purpose: "coding agents seen on the wire, and what each has spent",
 		bindings: []keyBinding{
 			{"↑↓ / jk", "navigate"},
-			{"↵", "scope to this agent"},
-			{"a", "all agents — clear the scope"},
 			{"esc", "back"},
 		},
 		// ONE SHORT NOTE, NOT TWO LONG ONES. The first draft spelled out the whole rationale
@@ -378,9 +381,10 @@ var paneKeys = map[paneID]keyGroup{
 		// agents_pane.go, and what a reader needs on screen is the two facts that change what
 		// they see.
 		notes: []string{
-			"Shown only when two or more agents have been seen. Scopes the cost and usage " +
-				"views, which key on the agent; the sessions table still says \"all agents\", " +
-				"because nothing on the wire maps a session to one.",
+			"Opens only when two or more agents have been seen; below that it refuses and names " +
+				"what it found. Read-only, and that is a limit of the API rather than a choice: " +
+				"/v1/usage filters by session and nothing else, so there is no agent scope to " +
+				"apply to the other panes.",
 		},
 	},
 }

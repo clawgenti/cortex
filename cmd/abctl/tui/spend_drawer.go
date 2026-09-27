@@ -275,12 +275,10 @@ func spendDrawerHostPane(pane paneID) (bool, string) {
 		// something else is a lie printed on screen.
 		return false, "spend: the usage pane is the breakdown — use its own [b] and [w]"
 	case paneAgents:
-		// THE SAME ARGUMENT AS paneUsage, and concretely so: that pane's rows ARE a per-agent
-		// cost breakdown, and it binds `a` to "all agents" — which is the drawer's own axis key.
-		// Its handler runs first and returns, so the drawer's `a` could never reach it, and a
-		// hint line advertising [a] where `a` means something else is the exact lie the usage
-		// case above refuses to print.
-		return false, "spend: the agents pane is a per-agent breakdown — its [a] clears the scope"
+		// THE SAME ARGUMENT AS paneUsage: that pane's rows ARE a per-agent cost breakdown, and
+		// the drawer's `a` axis cycles to `agent` — so opening it there offers a reader a way to
+		// reach, in a drawer, the view they are already looking at.
+		return false, "spend: the agents pane is already the per-agent breakdown"
 	}
 	return true, ""
 }
