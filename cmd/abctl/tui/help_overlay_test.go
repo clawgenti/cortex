@@ -532,19 +532,26 @@ func TestHelpOverlayScrollKeys(t *testing.T) {
 // helpNoScrollHeight is a terminal tall enough to show the whole reference at
 // helpWideTerminal columns, so the no-affordance case is testable.
 //
-// IT IS BIG, AND THAT IS THE POINT. The body is 91 lines once every pane carries
-// its purpose and its descriptions, and 94 rows is the exact floor. The previous
+// IT IS BIG, AND THAT IS THE POINT. The body is 100 lines once every pane carries
+// its purpose and its descriptions, and 103 rows is the exact floor. The previous
 // version of this test asked for 60 and t.Skip()ed when the content did not fit —
 // which, the moment the body grew, silently took the three short-terminal
 // assertions below with it and reported PASS. A number that has to track the body's
 // height is asserted, never skipped.
 //
-// It has already earned that: adding the MOVING AROUND THIS HELP group took the
-// body from 86 lines to 91, and this failed with the value to use rather than going
-// quiet again.
+// It has earned that twice now. Adding the MOVING AROUND THIS HELP group took the
+// body from 86 lines to 91, and adding the AGENTS pane took it from 91 to 100 —
+// each time this failed naming the value to use rather than going quiet again.
+//
+// NINE LINES IS WHAT A PANE COSTS: a title, a purpose, its bindings, and any note.
+// So this constant moves whenever a pane is added, and the right response is to
+// raise it — not to trim the new pane's prose until it fits. The first attempt at
+// AGENTS did trim, from two notes to one, which bought 3 lines and still left the
+// test red; the prose that was cut belonged in agents_pane.go anyway, but the
+// arithmetic here was never going to be satisfied that way.
 const (
 	helpWideTerminal   = 100
-	helpNoScrollHeight = 94
+	helpNoScrollHeight = 103
 )
 
 // With everything visible there must be no scroll affordance — it would be noise

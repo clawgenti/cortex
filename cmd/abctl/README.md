@@ -941,7 +941,7 @@ Layered on top of all of them:
      THE SPEND DRAWER** (`a`/`w` are live only while it is open, so they
      are not mixed in with the keys that always work — and the section is
      omitted on the panes where `$` is refused);
-  5. **EVERY PANE** — the other eight in full, purpose and every
+  5. **EVERY PANE** — the other nine in full, purpose and every
      binding's description. Not compacted to bare keys: `USAGE  m w b s
      esc` said the pane has five keys and nothing about what any of them
      do.
@@ -965,7 +965,7 @@ Layered on top of all of them:
   edge, so the descriptions and the scope note survive a narrow
   terminal.
 
-  Spelling out all nine panes costs roughly four screens at 24 rows,
+  Spelling out all ten panes costs roughly four screens at 24 rows,
   which `g`/`G` and the pinned close hint are what make affordable. The
   overlay is the one surface with no width or height budget to defend,
   so it is where completeness belongs.
@@ -993,7 +993,7 @@ Layered on top of all of them:
 | `y` | detail | yank event JSON to `~/.cortex/abctl-events` (path stays until the next keypress) |
 | `g` / `G` | lists | jump to top / bottom. In the events timeline this also sets where the *next* session opens — see [Where a session opens](#where-a-session-opens) |
 | `u` | sessions, events, detail | open the usage charts (sessions: all sessions; events/detail: the selected session) |
-| `$` | every pane except the two pickers and usage | expand the band into a breakdown — where the money went by rate tier, and who spent it by model, endpoint or agent — in place, so the table stays on screen. Needs 27 rows; refuses on the two pickers (nothing is connected yet) and on the usage pane, which is already a breakdown with its own cycles |
+| `$` | every pane except the two pickers, usage and agents | expand the band into a breakdown — where the money went by rate tier, and who spent it by model, endpoint or agent — in place, so the table stays on screen. Needs 27 rows; refuses on the two pickers (nothing is connected yet), on the usage pane, which is already a breakdown with its own cycles, and on the agents pane, which is itself a per-agent breakdown and binds `a` to clearing the scope |
 | `a` | while the breakdown is open | cycle the axis: model / endpoint / agent. Not `g`, which is the global "jump to top" |
 | `w` | while the breakdown is open | cycle the span: the band's four — last 1h / today / 7 days / month. Without a cost ledger only the hour is distinct; see [Spans and the cost ledger](#spans-and-the-cost-ledger) |
 | `m` | usage | cycle metric: tokens / requests / errors / latency / cost |

@@ -42,13 +42,17 @@ const (
 	panePluginDetail
 	paneCatalog
 	paneUsage
+	// paneAgents picks which CODING AGENT the cost and usage views are scoped to. Not to be
+	// confused with paneNamespaces, which lists Kubernetes workloads and whose own purpose
+	// line used to call them "agents" too — see paneKeys for how the two are told apart.
+	paneAgents
 )
 
 // lastPaneID is the highest valid paneID. Kept adjacent to the iota block so
 // adding a pane means updating one line here, and TestPaneKeysCoverAllPanes then
 // fails until that pane is documented in paneKeys — which is how paneUsage
 // shipped reachable by `u` but named in no footer and no help overlay.
-const lastPaneID = paneUsage
+const lastPaneID = paneAgents
 
 // paneNone is the explicit "no previous pane recorded" sentinel for
 // model.previousPane. Using paneNamespaces (the zero value) as a

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/rossoctl/cortex/core/cost/usage"
@@ -149,6 +150,33 @@ func TestAgentsPaneApplies_SkippedBelowTwoAgents(t *testing.T) {
 				t.Errorf("agentsPaneApplies(%d rows) = %v, want %v", len(tc.rows), got, tc.apply)
 			}
 		})
+	}
+}
+
+// The help overlay tells the two "agent" panes apart.
+//
+// This repo uses the word for two unrelated things: paneNamespaces lists KUBERNETES
+// workloads, and its purpose line called them "agents grouped by namespace", while paneAgents
+// lists CODING agents — the clients seen on the wire. Side by side in the [?] overlay those
+// two descriptions sent a reader to the wrong pane, and the overlay is the one surface that
+// renders both at once, so it is where the ambiguity had to be resolved.
+//
+// Asserted on the distinguishing WORD in each, not on the full sentence, so rewording either
+// purpose stays free while dropping the distinction does not.
+func TestPaneKeys_TheTwoAgentPanesAreDistinguishable(t *testing.T) {
+	ns, ok := paneKeys[paneNamespaces]
+	if !ok {
+		t.Fatal("paneNamespaces has no paneKeys entry")
+	}
+	ag, ok := paneKeys[paneAgents]
+	if !ok {
+		t.Fatal("paneAgents has no paneKeys entry")
+	}
+	if !strings.Contains(ns.purpose, "Kubernetes") {
+		t.Errorf("paneNamespaces purpose %q does not say Kubernetes — it lists workloads, and without that word it reads as the coding-agent pane", ns.purpose)
+	}
+	if !strings.Contains(ag.purpose, "coding") {
+		t.Errorf("paneAgents purpose %q does not say coding — it lists wire clients, and without that word it reads as the namespace pane", ag.purpose)
 	}
 }
 
