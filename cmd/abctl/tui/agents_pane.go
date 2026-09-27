@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -40,39 +39,23 @@ type agentRow struct {
 // records what the alternative cost when it did write its own: a wrapped total ranks BELOW a
 // ten-micro series, which here would sort the busiest agent to the bottom of the table.
 //
-// ORDERED BY COST DESCENDING, TIES ON LABEL. The tie-break is load-bearing, not tidiness:
-// these rows are rebuilt on every poll and Go randomises map iteration per run, so equal-cost
-// agents would swap places between polls under a reader comparing them. It matters most right
-// now — every unpriced agent has CostMicros 0, so until pricing lands the label IS the order
-// for all of them.
+// ORDERED BY usage.SortSeriesLabels, not by a comparison written here. `abctl cost --by` ranks
+// the same series for the same reason, so the rule has one definition in core and both surfaces
+// call it — the tie-break on the label matters more than it sounds, because every unpriced agent
+// has CostMicros 0 and until billing units land the label is the entire order for all of them.
+// That function's godoc carries why it takes a slice rather than the map.
 func agentRowsFromBuckets(buckets []usage.Bucket) []agentRow {
 	totals := usage.FoldSeriesAcrossWindow(buckets)
-	out := make([]agentRow, 0, len(totals))
-	for label, c := range totals {
-		out = append(out, agentRow{label: label, Counts: c})
+	labels := make([]string, 0, len(totals))
+	for label := range totals {
+		labels = append(labels, label)
 	}
-	sortAgentRows(out)
+	usage.SortSeriesLabels(labels, totals)
+	out := make([]agentRow, 0, len(labels))
+	for _, label := range labels {
+		out = append(out, agentRow{label: label, Counts: totals[label]})
+	}
 	return out
-}
-
-// sortAgentRows orders rows by cost descending, breaking ties on the label.
-//
-// SEPARATE FROM THE FOLD so the ordering can be asserted deterministically. Inside the fold
-// its input arrives from a map walk, which Go randomises per run, and sort.Slice is not
-// stable — so a test that fed the fold tied labels could only catch a missing tie-break when
-// the random order happened to be wrong. Measured before this split: a deleted tie-break
-// survived 6 runs in 30 with four tied labels, and 4 in 20 with two. A guard that misses a
-// real defect one run in four reads as coverage and is not.
-//
-// Given a slice, the order is a pure function of it, so a test can hand this a deliberately
-// mis-ordered input and the assertion holds every run.
-func sortAgentRows(rows []agentRow) {
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].CostMicros != rows[j].CostMicros {
-			return rows[i].CostMicros > rows[j].CostMicros
-		}
-		return rows[i].label < rows[j].label
-	})
 }
 
 // agentsPaneApplies reports whether the AGENTS pane is worth entering.
