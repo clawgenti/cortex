@@ -258,8 +258,23 @@ func capUA(s string) string {
 // Keys are the token BEFORE the slash, lowercased. Claude Code sends
 // "claude-cli/<version> (external, cli)"; the product token is "claude-cli",
 // which is why the key is not the canonical name.
+// Keys are matched against the FIRST product token, and — when that one is unknown —
+// against the later ones, last to first. See ParseUserAgent's second rule and
+// trailingKnownClient for which agents need that and why a map entry alone cannot express
+// it.
 var knownClients = map[string]string{
 	"claude-cli": "claude-code",
+	// bob-shell IS the canonical name here, unlike claude-cli above: the product token Bob
+	// Shell sends is already its product name, so renaming it would invent a third spelling
+	// beside the binary (`bob`) and the IDE ("IBM Bob"). It arrives with its own detection
+	// work — the inference endpoint is parsed (inferenceparser's bobPath), its session header
+	// is session.BobSessionHeader, and `abctl configure bobshell` sets it up — so this is a
+	// supported agent rather than the speculative entry the paragraph above refuses.
+	//
+	// Earns its place in the FIRST-token map as well as the trailing scan because Bob sends
+	// the bare form too, on /admin/v1/profile and /inference/v1/model/info, where bob-shell
+	// is the only token there is.
+	"bob-shell": "bob-shell",
 }
 
 // ParseUserAgent derives an EventClient from a User-Agent header value.
@@ -320,8 +335,55 @@ func ParseUserAgent(ua string) *EventClient {
 	if name, ok := knownClients[strings.ToLower(product)]; ok {
 		c.Name = name
 		c.Version = version
+		return c
+	}
+	// SECOND RULE, and a FALLBACK rather than an alternative: reached only when the first
+	// token matched nothing. Some agents put a library's product token first and their own
+	// last — bob-shell sends three User-Agents whose first tokens are `ai-sdk`, `ai` and
+	// `bob-shell`, and only the last of those is the agent. Keyed on the first token alone,
+	// one agent's spend divides into three series.
+	//
+	// It cannot be a knownClients entry instead. Two of those first tokens are a Vercel AI
+	// SDK version, so claiming them would file every other program built on that SDK under
+	// Bob's name — the mis-mapping knownClients' own godoc calls worse than no answer.
+	//
+	// ORDER IS LOAD-BEARING and this is why it runs second, not merged into one scan: a UA
+	// carrying two known tokens must answer the same regardless of which end it is read
+	// from, and "the first token, else the last one that matched" is a rule, where "the last
+	// known token" would silently demote an agent that embedded another's name.
+	if name, ver, ok := trailingKnownClient(ua); ok {
+		c.Name = name
+		c.Version = ver
 	}
 	return c
+}
+
+// trailingKnownClient scans the product tokens after the first, LAST TO FIRST, for a known
+// agent, and reports the name and version of the one that matched.
+//
+// Last-to-first rather than first-to-last because the token being looked for is the agent's
+// own and it sits at the END, behind however many libraries it wants to announce. Scanning
+// forwards would find a library that later joins knownClients in preference to the agent
+// that is actually calling.
+//
+// THE VERSION COMES FROM THE MATCHED TOKEN, not from the first one. Reading it off the front
+// yields "openai-compatible/3.0.36" for Bob's inference client — a plausible-looking string
+// that is not the agent's version, and worse than an empty one because nothing downstream
+// can tell it is wrong.
+//
+// Allocates, via strings.Fields, on a path whose first rule deliberately does not. Paid only
+// by a request whose first token is unrecognised, so the common case — claude-cli, which
+// matches on the first rule and returns above — never reaches here. Starts at the LAST index
+// and stops before index 0, since the caller has already tried that one.
+func trailingKnownClient(ua string) (name, version string, ok bool) {
+	fields := strings.Fields(ua)
+	for i := len(fields) - 1; i >= 1; i-- {
+		product, ver, _ := strings.Cut(fields[i], "/")
+		if n, found := knownClients[strings.ToLower(product)]; found {
+			return n, ver, true
+		}
+	}
+	return "", "", false
 }
 
 // UnknownClientLabel is the reserved key for traffic that carried no User-Agent.

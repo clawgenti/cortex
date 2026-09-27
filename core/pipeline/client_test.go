@@ -56,6 +56,141 @@ func TestParseUserAgent(t *testing.T) {
 	}
 }
 
+// Bob Shell is identified by the LAST product token in its User-Agent, not the first.
+//
+// This is the one identification rule knownClients cannot express, and the reason is in the
+// three values below rather than in any preference: bob-shell sends the SAME agent under
+// three different first tokens, and only one of them is its own. Keyed on the first token,
+// one agent's spend divides into three series — one per raw User-Agent — and no map entry
+// closes that, because two of the three first tokens (`ai-sdk`, `ai`) are a Vercel AI SDK
+// version, not an agent. Claiming those for Bob would file every other program built on the
+// same SDK under Bob's name.
+//
+// CAPTURED 2026-09-25 from bob-shell 2.0.5 against api.us-east.bob.ibm.com, verbatim. The
+// version is asserted too: it has to come from the token that MATCHED, and reading it off
+// the first token instead yields "openai-compatible/3.0.36" or "7.0.16" — a plausible-looking
+// string that is not Bob's version, which is worse than an empty one.
+func TestParseUserAgent_BobShellIsIdentifiedByItsTrailingProductToken(t *testing.T) {
+	for _, tc := range []struct {
+		name, ua string
+	}{
+		// The inference client — the only one of the three that carries token spend.
+		{"inference client", "ai-sdk/openai-compatible/3.0.36 ai-sdk/provider-utils/5.0.29 runtime/node.js/24 bob-shell/2.0.5"},
+		// Same agent, different SDK entry point. Nothing but the first token differs.
+		{"secondary client", "ai/7.0.16 ai-sdk/provider-utils/5.0.29 runtime/node.js/24 bob-shell/2.0.5"},
+		// The bare form, sent on /admin/v1/profile and /inference/v1/model/info. This is the
+		// ONE of the three a plain knownClients entry would already fix, which is why it is
+		// here: without it, a first-token-only implementation passes two thirds of this test
+		// and the rule looks less necessary than it is.
+		{"bare control", "bob-shell/2.0.5"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseUserAgent(tc.ua)
+			if got == nil {
+				t.Fatalf("ParseUserAgent(%q) = nil, want a client", tc.ua)
+			}
+			if got.Name != "bob-shell" {
+				t.Errorf("Name = %q, want %q", got.Name, "bob-shell")
+			}
+			if got.Version != "2.0.5" {
+				t.Errorf("Version = %q, want %q", got.Version, "2.0.5")
+			}
+			// Label is the assertion that matters downstream: it is what the usage
+			// aggregator keys its series on and what ledger.Row.Agent stores, so this is
+			// the field that decides whether three User-Agents are one row or three.
+			if want := "bob-shell/2.0.5"; got.Label() != want {
+				t.Errorf("Label() = %q, want %q — this is the series key, so a mismatch here IS the fragmentation", got.Label(), want)
+			}
+		})
+	}
+}
+
+// A User-Agent whose FIRST token is already known is never re-resolved by a later one.
+//
+// The trailing scan is a FALLBACK, and this is the test that keeps it one. Without the
+// ordering, the rule becomes "last known token wins" — and then a UA carrying two known
+// tokens answers differently depending on which end you read from, which is a coin flip
+// dressed as a rule. Both orders are asserted because a single order passes under either
+// implementation.
+//
+// Neither value is traffic anyone has seen; they are constructed precisely because the
+// ordering is not otherwise reachable from real input. That is the point — the rule has to
+// be decided here rather than by whichever agent first happens to embed another's token.
+func TestParseUserAgent_AKnownFirstTokenIsNotReResolvedByALaterToken(t *testing.T) {
+	for _, tc := range []struct {
+		name, ua, wantName, wantVer string
+	}{
+		{"claude first, bob last", "claude-cli/2.1.270 bob-shell/2.0.5", "claude-code", "2.1.270"},
+		{"bob first, claude last", "bob-shell/2.0.5 claude-cli/2.1.270", "bob-shell", "2.0.5"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseUserAgent(tc.ua)
+			if got == nil {
+				t.Fatalf("ParseUserAgent(%q) = nil, want a client", tc.ua)
+			}
+			if got.Name != tc.wantName {
+				t.Errorf("Name = %q, want %q — the first token must win", got.Name, tc.wantName)
+			}
+			if got.Version != tc.wantVer {
+				t.Errorf("Version = %q, want %q", got.Version, tc.wantVer)
+			}
+		})
+	}
+}
+
+// The trailing scan reads LAST to FIRST, and this is the only test that can tell.
+//
+// Worth stating why it needs a constructed value. On all three of Bob's real User-Agents a
+// first-to-last scan returns the same answer as a last-to-first one, because bob-shell is
+// the only known token in any of them — so the documented direction is invisible to every
+// realistic fixture, and a scan written the other way round would ship green. Two known
+// tokens after an unknown first one is the smallest input that distinguishes them.
+//
+// The direction matters beyond the pin: the agent's own token sits at the END, behind
+// however many libraries it announces. Should a library's token ever join knownClients —
+// `ai-sdk` is one plausible future entry, since it is a real product — a forwards scan would
+// start answering "ai-sdk" for every agent built on it, silently reassigning Bob's spend to
+// its SDK. Backwards, the agent keeps its own name.
+func TestParseUserAgent_TheTrailingScanReadsLastToFirst(t *testing.T) {
+	const ua = "ai-sdk/openai-compatible/3.0.36 claude-cli/2.1.270 bob-shell/2.0.5"
+	got := ParseUserAgent(ua)
+	if got == nil {
+		t.Fatalf("ParseUserAgent(%q) = nil, want a client", ua)
+	}
+	if got.Name != "bob-shell" {
+		t.Errorf("Name = %q, want %q — the scan must read backwards, so the LAST known token wins once the first token is unknown", got.Name, "bob-shell")
+	}
+	if got.Version != "2.0.5" {
+		t.Errorf("Version = %q, want %q — the version must come from the token that matched", got.Version, "2.0.5")
+	}
+}
+
+// An unrecognised User-Agent with several tokens still reports no name.
+//
+// The trailing scan must not turn "nothing matched" into a guess. curl/8.4.0 is already
+// covered as a single token in TestParseUserAgent; the multi-token case is the one the new
+// loop makes reachable, and a loop that fell through to "last token" rather than "last token
+// that MATCHED" would name this agent "node.js" — filing unrelated traffic under a program
+// name, which is the failure knownClients' own godoc calls worse than no answer at all.
+func TestParseUserAgent_TheTrailingScanNeverGuessesAnUnknownAgent(t *testing.T) {
+	const ua = "some-tool/1.2 runtime/node.js/24 libcurl/8.4.0"
+	got := ParseUserAgent(ua)
+	if got == nil {
+		t.Fatalf("ParseUserAgent(%q) = nil, want a client", ua)
+	}
+	if got.Name != "" {
+		t.Errorf("Name = %q, want empty — no token matched, so nothing may be claimed", got.Name)
+	}
+	if got.Version != "" {
+		t.Errorf("Version = %q, want empty", got.Version)
+	}
+	// Unrecognised reports under its raw value, so it stays nameable from a breakdown
+	// instead of pooling with untagged traffic. See EventClient.Label.
+	if got.Label() != ua {
+		t.Errorf("Label() = %q, want the raw UA %q", got.Label(), ua)
+	}
+}
+
 // A tab is NORMALISED to a space, not replaced with U+FFFD.
 //
 // The distinction is the whole point of doing it before sanitizeUA rather than inside it: a
