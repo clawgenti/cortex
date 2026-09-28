@@ -343,8 +343,8 @@ func (m *MTLSConfig) Validate() error {
 // listeners and a JWT-SVID to the token-exchange plugin (when configured).
 //
 // Defaults match the file layout spiffe-helper used to write. They apply
-// only when this block is present: Defaults() gates them on non-nil, and
-// an absent block constructs no Provider at all.
+// only when this block is present: Load() gates them on non-nil, and an
+// absent block constructs no Provider at all.
 //
 // The audience for the JWT-SVID used by token-exchange as a client
 // assertion is per-plugin (tokenexchange.identity.jwt_audience) and is
