@@ -2014,12 +2014,17 @@ func TestRunCost_ByJSONCarriesTheAxisTheSeriesAndTheResidual(t *testing.T) {
 	if !ok {
 		t.Fatalf("series is absent or not an object: %#v", got["series"])
 	}
-	for label, wantCost := range map[string]float64{
-		"claude-code/2.1.270": 146361600,
-		// Unpriced: it carries requests but no cost, so costMicros is omitempty-absent rather
-		// than zero. Asserting the LABEL is present with no cost keeps "not priced" distinct
-		// from "cost nothing" on the machine path too.
-		"bob-shell/2.0.5": 0,
+	// pricedRequests IS THE FIELD THAT SEPARATES THE TWO READINGS, not costMicros. Both
+	// usage.Counts money fields are omitempty, so "nothing priced this label" and "priced at a
+	// rate of zero" both decode to 0 from costMicros and an assertion on it cannot tell them
+	// apart — zeroing PricedRequests across the fold passed this whole package before this line
+	// existed. It is the machine-path twin of the TUI's four-row agentCostCell table.
+	for label, want := range map[string]struct{ cost, priced float64 }{
+		"claude-code/2.1.270": {cost: 146361600, priced: 1048},
+		// Unpriced: requests but nothing priced them, so BOTH money and pricedRequests are
+		// omitempty-absent. The pair is what makes this row distinguishable from a priced-at-zero
+		// one, which would carry pricedRequests > 0 with the same absent cost.
+		"bob-shell/2.0.5": {cost: 0, priced: 0},
 	} {
 		entry, ok := series[label].(map[string]any)
 		if !ok {
@@ -2027,8 +2032,13 @@ func TestRunCost_ByJSONCarriesTheAxisTheSeriesAndTheResidual(t *testing.T) {
 			continue
 		}
 		cost, _ := entry["costMicros"].(float64)
-		if cost != wantCost {
-			t.Errorf("series[%q].costMicros = %v, want %v", label, cost, wantCost)
+		if cost != want.cost {
+			t.Errorf("series[%q].costMicros = %v, want %v", label, cost, want.cost)
+		}
+		priced, _ := entry["pricedRequests"].(float64)
+		if priced != want.priced {
+			t.Errorf("series[%q].pricedRequests = %v, want %v — this is the field that tells "+
+				"\"nothing priced it\" from \"priced at a rate of zero\"", label, priced, want.priced)
 		}
 	}
 

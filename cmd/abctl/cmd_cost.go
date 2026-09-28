@@ -226,11 +226,12 @@ Flags:
 
 // scopeToAgent narrows a group=agent snapshot to one agent's figures.
 //
-// IT REWRITES Totals AND HANDS BACK A SNAPSHOT, rather than rendering the agent itself, so
-// every existing writer applies unchanged — the negative-total refusal, the coverage-gap
-// disclosure and the incomplete-read admission all keep working on one agent's numbers with no
-// second implementation and no chance of the two drifting. A COPY, never the caller's snapshot
-// mutated in place.
+// IT REWRITES Totals AND HANDS BACK A SNAPSHOT, rather than rendering the agent itself, so the
+// writers apply to it directly with no second implementation and no chance of the two drifting:
+// the negative-total refusal, the coverage-gap disclosure and the incomplete-read admission each
+// read one agent's numbers. Which fields do NOT survive the narrowing, and why, is at the
+// narrowing itself below — that list is the one place it is stated. A COPY, never the caller's
+// snapshot mutated in place.
 //
 // The fold is usage.FoldSeriesAcrossWindow, the same one abctl's AGENTS pane uses, so the
 // figure printed here and the row shown there cannot disagree.
