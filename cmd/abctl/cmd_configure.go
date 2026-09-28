@@ -11,6 +11,9 @@ Usage:
   abctl configure claude-code enable  [--yes] [--settings PATH] [--config PATH]
   abctl configure claude-code disable [--yes] [--settings PATH]
   abctl configure claude-code status  [--settings PATH]
+  abctl configure bob enable  [--yes] [--settings PATH] [--config PATH]
+  abctl configure bob disable [--yes] [--settings PATH] [--config PATH]
+  abctl configure bob status  [--settings PATH] [--config PATH]
   abctl configure bobshell enable | disable | status
   abctl configure codex | opencode
 
@@ -18,8 +21,12 @@ Agents:
   claude-code    writes the proxy and CA variables into ~/.claude/settings.json, so
                  every session on the machine goes through Cortex. Run
                  "abctl configure claude-code --help" for the detail.
+  bob            writes "http.proxy" into IBM Bob's settings.json, so the Bob
+                 editor itself goes through Cortex. Run
+                 "abctl configure bob --help" for the detail.
   bobshell       defines a "bob" shell function in your shell's rc file, so typing
-                 "bob" runs it through Cortex. Run
+                 "bob" runs it through Cortex. A different thing from "bob" above,
+                 and the two are independent. Run
                  "abctl configure bobshell --help" for the detail.
   codex          not yet persistent — use "abctl exec -- codex"
   opencode       not yet persistent — use "abctl exec -- opencode"
@@ -31,11 +38,14 @@ the ones without. The agents that cannot yet be configured persistently say so a
 name the command that works today, rather than being absent and leaving the reader
 to conclude Cortex cannot drive them.
 
-Two agents persist, by two different mechanisms: Claude Code reads a settings file, so
-its configuration goes there, and Bob Shell gets a shell function written into the rc
-file so the routing is applied when you type the command. Codex and OpenCode read the
-process environment and nothing else, so their routing lasts exactly as long as the
-process — which is what "abctl exec" is for.
+Three agents persist, by two different mechanisms. Claude Code and Bob read settings
+files, so their configuration goes there — the key differs (Claude Code keeps an "env"
+block, Bob is a VS Code fork and reads "http.proxy"), and Bob additionally needs the
+bridge CA trusted by the OS, which "configure bob enable" prints rather than performs.
+Bob Shell gets a shell function written into the rc file instead, so the routing is
+applied when you type the command. Codex and OpenCode read the process environment and
+nothing else, so their routing lasts exactly as long as the process — which is what
+"abctl exec" is for.
 
 "abctl claude-code" is the old spelling of "abctl configure claude-code". It still
 works, and prints a notice pointing here.
@@ -101,10 +111,22 @@ func runConfigure(args []string, stdout, stderr io.Writer) int {
 		// fire here. A user who already typed the current spelling must not be told to
 		// type something else.
 		return runClaudeCode(args[1:], stdout, stderr)
+	case "bob":
+		// Two distinct agents, both spelled with "bob", because there are two
+		// separate things to configure and they persist differently:
+		//
+		//	bob       IBM Bob the editor. A VS Code fork, so it has a settings.json
+		//	          and reads "http.proxy" from it.
+		//	bobshell  the shell integration — a "bob" function in the rc file, so
+		//	          typing "bob" at a prompt runs through Cortex.
+		//
+		// This arm reverses part of #1133, which removed "configure bob" reasoning
+		// that "IBM Bob itself needs no configuring". That was right about the
+		// binary and wrong about the editor: Bob has a settings file, and without
+		// this a Bob user had to find "http.proxy" and the CA trust step by hand.
+		// Configuring one does not configure the other; keep both.
+		return runBob(args[1:], stdout, stderr)
 	case "bobshell":
-		// "bobshell", not "bob": what this configures is the Bob Shell integration
-		// — a function in the user's rc file — and not IBM Bob itself, which needs
-		// no configuring. The binary it runs is still called "bob".
 		return runBobShell(args[1:], stdout, stderr)
 	case "codex":
 		fmt.Fprint(stdout, comingSoon("Codex", "codex"))
@@ -116,7 +138,7 @@ func runConfigure(args []string, stdout, stderr io.Writer) int {
 		// The named list is the answer to a typo; the usage block after it is the
 		// answer to "what else can this do", which is what someone who guessed an
 		// agent name wrong most likely wanted. Same pairing as the no-argument case.
-		fmt.Fprintf(stderr, "abctl: unknown agent %q (claude-code, bobshell, codex, opencode)\n", agent)
+		fmt.Fprintf(stderr, "abctl: unknown agent %q (claude-code, bob, bobshell, codex, opencode)\n", agent)
 		fmt.Fprint(stderr, configureUsage)
 		return 2
 	}

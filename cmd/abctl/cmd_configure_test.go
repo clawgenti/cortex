@@ -162,11 +162,16 @@ func TestConfigure_UsageErrors(t *testing.T) {
 		}
 		// Naming the valid set is the difference between a refusal and a dead end.
 		//
-		// "bobshell" in full, not "bob": the shorter spelling is a substring of the
-		// longer one, so it stayed green through the rename this PR performs and
-		// would stay green through the next rename too. An expectation that a
-		// rename cannot break is not pinning the rename.
-		for _, agent := range []string{"claude-code", "bobshell", "codex", "opencode"} {
+		// "bobshell" is spelled in full because the shorter name is a substring of
+		// it, so an assertion on "bob" alone cannot tell the two apart.
+		//
+		// Which makes the "bob" entry below VACUOUS, and it is listed anyway only so
+		// the set matches the message: drop "bob" from the error text and this loop
+		// stays green, because "bobshell" still contains it. Do not read a passing
+		// run here as evidence that the message names the editor agent. What pins
+		// that arm is TestConfigure_BobReachesTheSameLogic and
+		// TestConfigure_BobAndBobShellAreDifferentAgents.
+		for _, agent := range []string{"claude-code", "bob", "bobshell", "codex", "opencode"} {
 			if !strings.Contains(got, agent) {
 				t.Errorf("stderr omits %q: %q", agent, got)
 			}
@@ -203,25 +208,59 @@ func TestConfigure_BobShellReachesTheSameLogic(t *testing.T) {
 	}
 }
 
-// The old spelling must be gone, not silently aliased. Keeping `configure bob` alive
-// would preserve the name this change argues is wrong, and the stub it dispatched to
-// had no behaviour anyone could depend on.
-func TestConfigure_BobIsNoLongerAnAgent(t *testing.T) {
-	var out, errb bytes.Buffer
-	if code := runConfigure([]string{"bob"}, &out, &errb); code != 2 {
-		t.Errorf("exit = %d, want 2", code)
+// `configure bob` must be a dispatch arm too, on the same terms as bobshell above.
+//
+// This replaces TestConfigure_BobIsNoLongerAnAgent, whose premise — that `bob` is not
+// an agent — this change reverses. #1133 removed the name reasoning that IBM Bob needs
+// no configuring; that was right about the binary and wrong about the editor, which is
+// a VS Code fork with a settings.json. The old test is deleted rather than adapted
+// because there is nothing left of what it claimed.
+//
+// `--settings` is not optional here: without it the default path is the real IBM Bob
+// settings file on whatever machine runs the test.
+func TestConfigure_BobReachesTheSameLogic(t *testing.T) {
+	settings := filepath.Join(t.TempDir(), "settings.json")
+
+	var viaConfigure, configureErr bytes.Buffer
+	configureCode := runConfigure([]string{"bob", "status", "--settings", settings}, &viaConfigure, &configureErr)
+
+	var direct, directErr bytes.Buffer
+	directCode := runBob([]string{"status", "--settings", settings}, &direct, &directErr)
+
+	if configureCode != directCode {
+		t.Errorf("exit codes differ: configure = %d, bob = %d", configureCode, directCode)
 	}
-	// The error has to name the replacement, or someone with `configure bob` in a
-	// script has no way to find out what to type instead.
-	//
-	// Asserted against the FIRST LINE, not the whole stream. The default arm prints
-	// configureUsage to stderr right after the error, and that usage text names
-	// bobshell three times — so `Contains(errb.String(), "bobshell")` passes even
-	// with the agent name stripped out of the error itself, which is the one thing
-	// this test exists to pin. Splitting first makes the assertion able to fail.
-	errLine, _, _ := strings.Cut(errb.String(), "\n")
-	if !strings.Contains(errLine, "bobshell") {
-		t.Errorf("the error line does not point at the new spelling: %q", errLine)
+	if viaConfigure.String() != direct.String() {
+		t.Errorf("stdout differs:\nconfigure:\n%s\nbob:\n%s", viaConfigure.String(), direct.String())
+	}
+	if configureErr.String() != directErr.String() {
+		t.Errorf("stderr differs: %q vs %q", configureErr.String(), directErr.String())
+	}
+}
+
+// Two agents, both spelled with "bob", and the shorter name is a prefix of the longer.
+// So the thing worth pinning is that they are NOT aliases of each other: `bob`
+// configures the editor's settings.json, `bobshell` writes a shell function, and a
+// dispatch that prefix-matched would silently collapse them into one.
+func TestConfigure_BobAndBobShellAreDifferentAgents(t *testing.T) {
+	settings := filepath.Join(t.TempDir(), "settings.json")
+
+	var bobOut, bobErr bytes.Buffer
+	runConfigure([]string{"bob", "status", "--settings", settings}, &bobOut, &bobErr)
+
+	t.Setenv(bobShellEnvVar, "1")
+	var shellOut, shellErr bytes.Buffer
+	runConfigure([]string{"bobshell", "status"}, &shellOut, &shellErr)
+
+	if bobOut.String() == shellOut.String() {
+		t.Errorf("the two agents report identically, so one is aliasing the other:\n%s", bobOut.String())
+	}
+
+	// The other direction of the same claim: bobshell has no --settings, so an
+	// aliasing dispatch would make this succeed instead of failing as a usage error.
+	var aliasOut, aliasErr bytes.Buffer
+	if code := runConfigure([]string{"bobshell", "status", "--settings", settings}, &aliasOut, &aliasErr); code != 2 {
+		t.Errorf("bobshell accepted bob's --settings: exit = %d, want 2", code)
 	}
 }
 
