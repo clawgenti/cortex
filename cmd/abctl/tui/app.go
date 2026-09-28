@@ -42,13 +42,17 @@ const (
 	panePluginDetail
 	paneCatalog
 	paneUsage
+	// paneAgents picks which CODING AGENT the cost and usage views are scoped to. Not to be
+	// confused with paneNamespaces, which lists Kubernetes workloads and whose own purpose
+	// line used to call them "agents" too — see paneKeys for how the two are told apart.
+	paneAgents
 )
 
 // lastPaneID is the highest valid paneID. Kept adjacent to the iota block so
 // adding a pane means updating one line here, and TestPaneKeysCoverAllPanes then
 // fails until that pane is documented in paneKeys — which is how paneUsage
 // shipped reachable by `u` but named in no footer and no help overlay.
-const lastPaneID = paneUsage
+const lastPaneID = paneAgents
 
 // paneNone is the explicit "no previous pane recorded" sentinel for
 // model.previousPane. Using paneNamespaces (the zero value) as a
@@ -712,6 +716,18 @@ type model struct {
 	selectedNamespace string // set on Enter from Namespaces pane
 	selectedPod       string // set on Enter from Pods pane
 
+	// agents is the per-agent cost breakdown behind paneAgents, newest fetch wins.
+	//
+	// NOT named clients despite being keyed on pipeline.EventClient.Label: the pane, the
+	// /v1/usage grouping and `abctl cost --agent` all say "agent", and a fourth word for the
+	// same thing would be the confusion this feature already had to untangle once. The
+	// Kubernetes sense lives one field up as `namespaces []cluster.AgentNamespace`.
+	agents    []agentRow
+	agentsTbl table.Model
+	// agentsErr is the last fetch failure, shown in the pane rather than swallowed: an empty
+	// breakdown and an unreachable endpoint look identical otherwise.
+	agentsErr error
+
 	pickerErr string // single-line picker error shown in footer
 
 	// loading is true while a loadAgentsCmd is in flight. Prevents
@@ -826,6 +842,7 @@ func New(ctx context.Context, c *apiclient.Client) tea.Model {
 		eventsTbl:    newEventsTable(),
 		pipelineTbl:  newPipelineTable(),
 		catalogTbl:   newCatalogTable(),
+		agentsTbl:    newAgentsTable(),
 		previousPane: paneNone,
 		// paneNone, not the zero value: paneNamespaces is 0, and a return pane
 		// of "namespaces" would send esc from the pipeline into the picker.
@@ -1282,6 +1299,36 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// rendered into a cell; every other user of sessionLabel builds its text on each
 			// View, so those pick the new names up on the next frame with nothing to do here.
 			m.rebuildSessionsTable()
+		}
+		return m, nil
+
+	case agentRowsLoadedMsg:
+		// NO REQUEST-ID GUARD, unlike usageLoadedMsg below, and the difference is the shape of
+		// the request rather than an oversight: this fetch has no view options to get out of
+		// step with. Every call asks for the same window and the same grouping, so two replies
+		// landing out of order carry the same question and the later one is simply fresher.
+		// Last-write-wins is the whole correctness requirement here.
+		m.agentsErr = msg.err
+		if msg.err == nil {
+			m.agents = msg.rows
+		}
+		switch {
+		case !msg.open:
+			// A background refresh. Repaint only if the reader is standing on the pane;
+			// otherwise the rows are just kept warm.
+			if m.pane == paneAgents {
+				m.rebuildAgentsTable()
+			}
+		case msg.err != nil:
+			// The `A` press cannot open a pane whose contents failed to load, and it must not
+			// fail silently either — see agentsPaneRefusal on why no refusal here may be mute.
+			m.setFlash("agents: " + msg.err.Error())
+		default:
+			// msg.from, not m.pane: the caller was resolved when `A` was pressed, and this
+			// runs a round trip later. See agentRowsLoadedMsg.from.
+			if entered, why := m.enterAgentsOrRefuse(msg.from); !entered {
+				m.setFlash(why)
+			}
 		}
 		return m, nil
 
@@ -2132,6 +2179,22 @@ func (m *model) paneView() string {
 		}
 		title = fmt.Sprintf("abctl · %s · usage · %s", m.endpoint, scope)
 		body = m.renderUsage(m.width, m.bodyHeight)
+	case paneAgents:
+		// The window is in the title because the figures are a day's, not a lifetime's, and
+		// this pane has no window cycle of its own to make that discoverable.
+		title = fmt.Sprintf("abctl · %s · agents · %s", m.endpoint, agentsWindow)
+		switch {
+		case m.agentsErr != nil:
+			// Named, not blank: an unreachable endpoint and a quiet day look identical
+			// otherwise, and only one of them is worth waiting out.
+			body = styleHint.Render("(agent breakdown unavailable: " + m.agentsErr.Error() + ")")
+		case len(m.agents) == 0:
+			// Reachable in principle only by a refresh emptying the rows after entry — `A`
+			// refuses this state — so it says what happened rather than rendering an empty grid.
+			body = styleHint.Render("(no agent traffic in this window)")
+		default:
+			body = m.agentsTbl.View()
+		}
 	case paneCatalog:
 		title = fmt.Sprintf("abctl · %s · catalog", m.endpoint)
 		if m.catalog == nil {

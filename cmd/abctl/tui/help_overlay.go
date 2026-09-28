@@ -196,6 +196,8 @@ var jumpTargets = []jumpTarget{
 		desc: "the plugin chain this proxy runs, editable in $EDITOR"},
 	{key: "C", pane: paneCatalog,
 		desc: "every plugin the proxy offers, from /v1/plugins"},
+	{key: "A", pane: paneAgents,
+		desc: "what each coding agent has spent today; refuses below two agents"},
 	{key: "$", pane: paneNone, label: "spend",
 		desc: "a drawer over the spend band: tiers and a breakdown"},
 }
@@ -226,7 +228,10 @@ func jumpsFrom(p paneID) []jumpTarget {
 			default:
 				continue
 			}
-		case "C":
+		case "C", "A":
+			// Both need a connection and nothing else, so both are offered everywhere past
+			// the pickers. Sharing the arm rather than duplicating it: the rule is the same
+			// rule, and two copies would be two places to forget.
 			switch p {
 			case paneNamespaces, panePods:
 				continue
@@ -254,8 +259,12 @@ func jumpsFrom(p paneID) []jumpTarget {
 // block and knows which of them work from where.
 var paneKeys = map[paneID]keyGroup{
 	paneNamespaces: {
-		title:   "NAMESPACES (this pane)",
-		purpose: "agents grouped by namespace; where abctl starts",
+		title: "NAMESPACES (this pane)",
+		// "Kubernetes" rather than the bare "agents" this used to say, and pinned by
+		// TestPaneKeys_TheTwoAgentPanesAreDistinguishable. These are workloads; AGENTS is the
+		// pane about coding agents, and one word is what keeps the two apart in an overlay
+		// that shows both.
+		purpose: "Kubernetes agent workloads grouped by namespace; where abctl starts",
 		bindings: []keyBinding{
 			{"↑↓ / jk", "navigate"},
 			{"↵", "open namespace"},
@@ -352,13 +361,39 @@ var paneKeys = map[paneID]keyGroup{
 			{"esc / ← / h", "back"},
 		},
 	},
+	paneAgents: {
+		title: "AGENTS (this pane)",
+		// "coding" is load-bearing and pinned by
+		// TestPaneKeys_TheTwoAgentPanesAreDistinguishable: NAMESPACES lists Kubernetes
+		// workloads and its own purpose called them "agents" too, and this overlay renders
+		// both purposes at once — so without the word a reader cannot tell which pane they
+		// want.
+		purpose: "coding agents seen on the wire, and what each has spent",
+		bindings: []keyBinding{
+			{"↑↓ / jk", "navigate"},
+			{"esc", "back"},
+		},
+		// ONE SHORT NOTE, NOT TWO LONG ONES. The first draft spelled out the whole rationale
+		// here and pushed the overlay body from 91 to 103 lines, which
+		// TestHelpOverlayScrollHint_AbsentWhenEverythingFits caught by demanding
+		// helpNoScrollHeight be raised to 106. Raising it would make every reader of every
+		// other pane scroll for this pane's explanation; the argument belongs in
+		// agents_pane.go, and what a reader needs on screen is the two facts that change what
+		// they see.
+		notes: []string{
+			"Opens only when two or more agents have been seen; below that it refuses and names " +
+				"what it found. Read-only, and that is a limit of the API rather than a choice: " +
+				"/v1/usage filters by session and nothing else, so there is no agent scope to " +
+				"apply to the other panes.",
+		},
+	},
 }
 
 // otherPaneOrder fixes the render order of the "OTHER PANES" section so
 // the overlay is stable across openings (Go map iteration is random).
 var otherPaneOrder = []paneID{
 	paneNamespaces, panePods, paneSessions, paneEvents,
-	paneDetail, paneUsage, panePipeline, panePluginDetail, paneCatalog,
+	paneDetail, paneAgents, paneUsage, panePipeline, panePluginDetail, paneCatalog,
 }
 
 // helpKeyColWidth is the fixed width of the key column so descriptions

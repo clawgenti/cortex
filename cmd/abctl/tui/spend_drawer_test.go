@@ -887,6 +887,7 @@ func TestSpendDrawerHost_CoversEveryPane(t *testing.T) {
 		paneNamespaces:   false, // nothing connected yet
 		panePods:         false, // likewise
 		paneUsage:        false, // already a breakdown, and it owns w/b/m
+		paneAgents:       false, // likewise a breakdown
 		paneSessions:     true,
 		paneEvents:       true,
 		paneDetail:       true,

@@ -503,6 +503,28 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			} else {
 				m.pane = panePipeline
 			}
+		case paneAgents:
+			// Return to whichever pane the user pressed `A` from — a key-opened surface owes
+			// its caller a way back, and without this case esc falls through and the pane is a
+			// dead end reachable only by `q`.
+			//
+			// SAME FALLBACK AS paneCatalog, and for its stated reason rather than by imitation:
+			// Sessions is the one pane that is always a defensible place to land, while the
+			// enum's zero value is the Kubernetes namespace picker, which would look like the
+			// connection had gone away.
+			//
+			// No polling chain to restart, unlike the catalog's case below: this pane fetches
+			// once per open and holds no ticker. Returning INTO Usage still needs its chain
+			// resumed, which is why the shared tail below runs for both.
+			if m.previousPane != paneNone {
+				m.pane = m.previousPane
+				m.previousPane = paneNone
+			} else {
+				m.pane = paneSessions
+			}
+			if m.pane == paneUsage {
+				return m.resumeUsagePolling()
+			}
 		case paneCatalog:
 			// Return to whichever pane the user pressed `C` from.
 			//
@@ -808,6 +830,41 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.rebuildPipelineTable()
 		return nil
 
+	case "A":
+		// Open the per-agent cost breakdown.
+		//
+		// `A` CAPITALISED, for the reason `P` is: lowercase `a` is the spend drawer's axis
+		// cycle. Available wherever `C` is — anywhere past the pickers, since it needs a
+		// connection — plus one gate no other pane has: it refuses below two agents, because a
+		// one-row breakdown restates a total the reader already has.
+		//
+		// ALWAYS REFETCHED, never decided from cached rows. How many agents have been seen
+		// changes while abctl runs, and a second agent starting up is exactly the event that
+		// makes this pane worth opening — so deciding from a stale count would refuse a pane
+		// that had just become useful. The reply carries open:true and decides there, through
+		// the one enterAgentsOrRefuse both paths share.
+		if m.client == nil {
+			return nil
+		}
+		switch m.pane {
+		case paneNamespaces, panePods:
+			return nil
+		}
+		// THE CALLER IS RESOLVED HERE, AT PRESS TIME, the way `case "C":` below resolves its
+		// own — and then carried on the message rather than re-read when the reply lands. The
+		// fetch is a round trip, so m.pane at reply time is whatever pane the reader has since
+		// navigated to, which is not who pressed the key.
+		//
+		// A press while already ON the pane is a refetch, not a new entry, so it keeps the
+		// caller it already has. Recording paneAgents as its own caller is what made the first
+		// esc afterwards a no-op — the arm sets pane to previousPane, which was the pane it was
+		// already on — and a key-opened surface owes its caller a way back.
+		from := m.pane
+		if from == paneAgents {
+			from = m.previousPane
+		}
+		return m.fetchAgentRowsCmd(true, from)
+
 	case "C":
 		// Open the registered-plugin catalog. Available from any
 		// session-view pane; in --endpoint mode the picker fields
@@ -1068,6 +1125,14 @@ func (m *model) helpView() string {
 		// cheaply (the hints it outlives are the two most guessable on the line) so it
 		// is worth having, but it is not the difference between visible and invisible
 		// at 80 that the first draft of this comment claimed.
+		// [A] agents IS DELIBERATELY ABSENT, which is the one exception to the rule the two
+		// paragraphs above argue for. It is a cost key, so by that rule it belongs beside [u]
+		// and [$] — but it REFUSES below two agents, and one agent is every deployment today.
+		// Advertising it on the always-visible line would spend width, taken from the front of
+		// a line already at 98 columns, on a key that answers "only claude-code has been seen"
+		// for almost every reader. The [?] overlay names it instead, and its jump section shows
+		// it only from the panes it works on, so it is discoverable without being promoted.
+		// Revisit when two agents is the common case rather than the exception.
 		if m.parentCtx != nil {
 			return "[↑↓] nav  [↵] drill  [u] usage  [$] spend  [/] filter  [esc] pods  [p] pause  [P] pipeline  [?] keys  [q] quit"
 		}
@@ -1167,6 +1232,12 @@ func (m *model) helpView() string {
 			return "loading catalog…  [esc] back  [?] keys  [q] quit"
 		}
 		return "[↑↓] nav  [↵] plugin detail  [r] refresh  [esc] back  [?] keys  [q] quit"
+	case paneAgents:
+		// NO [↵] AND NO [r]. There is nothing to drill into — /v1/usage takes no agent
+		// filter, so a selected row cannot scope anything — and the rows are refetched on
+		// every `A`, so a refresh key would duplicate the way in. Advertising either would be
+		// the inert-key problem the usage pane's breakdownHint above avoids.
+		return "[↑↓] nav  [esc] back  [?] keys  [q] quit"
 	}
 	return "[?] keys  [q] quit"
 }

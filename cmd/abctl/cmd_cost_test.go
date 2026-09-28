@@ -1513,3 +1513,298 @@ func TestRunCost_JSONOmitsTheCoverageWhenThereIsNone(t *testing.T) {
 		t.Errorf("a window the ledger covers still carries the key:\n%s", out.String())
 	}
 }
+
+// --agent reports one agent's figures, and asks for the axis that can carry them.
+//
+// The group is asserted as well as the output because the two are one decision: without
+// group=agent the response has no per-agent series at all, and the command would have to
+// invent the number it prints.
+func TestRunCost_AgentReportsThatAgentOnly(t *testing.T) {
+	var gotGroup string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		gotGroup = r.URL.Query().Get("group")
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"window":"today","group":"agent","priced":true,
+			"totals":{"requests":1057,"tokens":298000000,"costMicros":146361600,
+			          "pricedRequests":1048,"priceableRequests":1055},
+			"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+			   "claude-code/2.1.270":{"requests":1049,"tokens":297961318,"costMicros":146361600,
+			                          "pricedRequests":1048,"priceableRequests":1048},
+			   "bob-shell/2.0.5":{"requests":8,"tokens":38682,"priceableRequests":7}}}]}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob-shell/2.0.5"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if gotGroup != "agent" {
+		t.Errorf("asked for group=%q, want %q — without it there is no per-agent series to read", gotGroup, "agent")
+	}
+	got := out.String()
+	if !strings.Contains(got, "bob-shell/2.0.5") {
+		t.Errorf("output does not name the agent it reports:\n%s", got)
+	}
+	// The OTHER agent's figures must not appear. This is the whole point of the flag, and the
+	// failure it guards is the one the billing-unit work exists to prevent: Bob's 8 requests
+	// reading as claude-code's 1,049, or the two totals summed.
+	//
+	// "1049", NOT "1,049": this surface's counts go through plainCount, which is %d and inserts
+	// no separator, so the comma-formatted spelling could never appear and that operand could
+	// never fire. The TUI's formatCount is the one that commas; asserting its output shape
+	// against this writer's is how an operand ends up unable to fail.
+	if strings.Contains(got, "1049") || strings.Contains(got, "146.36") {
+		t.Errorf("output leaked the other agent's figures:\n%s", got)
+	}
+	// "8 requests", NOT a bare "8", which the 38.7k token cell satisfies on its own — a mutant
+	// zeroing the scoped Requests left the bare form passing.
+	if !strings.Contains(got, "8 requests") {
+		t.Errorf("output missing this agent's request count:\n%s", got)
+	}
+	// AND THE UNPRICED AGENT READS "cost unavailable", never "$0.00" — the rule the AGENTS pane
+	// keeps with "—", asserted here because scopeToAgent's own comment says the two surfaces
+	// cannot disagree. Bob is priceable-but-unpriced in the fixture above (priceableRequests, no
+	// pricedRequests), which is the case that read as free while the window's Priced bit
+	// travelled along with the copy.
+	if strings.Contains(got, "$0.00") {
+		t.Errorf("an agent nothing priced was reported as free rather than unavailable:\n%s", got)
+	}
+	if !strings.Contains(got, "cost unavailable") {
+		t.Errorf("output does not say cost is unavailable for an agent nothing priced:\n%s", got)
+	}
+}
+
+// The scoped JSON narrows every statement about where the totals came from, and names its axis.
+//
+// A SCRIPT IS THE READER THAT CANNOT EYEBALL THE MISMATCH. scopeToAgent replaces Totals, so a
+// whole-window `priced` or a whole-window by-model map left riding along beside one agent's
+// figures is a claim about other agents' traffic attached to this agent's numbers — and unlike
+// the human path there is no prose next to it to hedge. The maps are dropped rather than
+// narrowed because a bucket's series is keyed by agent and carries no per-model split, so no
+// honest per-agent value exists to put there.
+//
+// `agent` and `ungroupedCostMicros` are the two fields this axis adds, and both are asserted
+// here rather than only in the human summary: the text twin was already guarded and the JSON
+// half was not, which is how a field that is the whole point of the flag shipped with no test.
+func TestRunCost_JSONScopedToAnAgentNarrowsProvenanceAndNamesTheAgent(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":1057,"tokens":298000000,"costMicros":146361600,
+		          "pricedRequests":1048,"priceableRequests":1055,"incompleteRequests":4},
+		"pricedBy":{"authoritative":1048},
+		"unpricedBy":{"api.openai.com gpt-5":7},
+		"incompleteBy":{"truncated_stream":4},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1049,"tokens":297961318,"costMicros":146361600,
+		                          "pricedRequests":1048,"priceableRequests":1048},
+		   "bob-shell/2.0.5":{"requests":8,"tokens":38682,"priceableRequests":7}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob-shell/2.0.5", "--json"},
+		&out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	var decoded struct {
+		Agent               string           `json:"agent"`
+		Priced              bool             `json:"priced"`
+		PricedBy            map[string]int64 `json:"pricedBy"`
+		UnpricedBy          map[string]int64 `json:"unpricedBy"`
+		IncompleteBy        map[string]int64 `json:"incompleteBy"`
+		UngroupedCostMicros *int64           `json:"ungroupedCostMicros"`
+		Totals              struct {
+			Requests       int64 `json:"requests"`
+			CostMicros     int64 `json:"costMicros"`
+			PricedRequests int64 `json:"pricedRequests"`
+		} `json:"totals"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &decoded); err != nil {
+		t.Fatalf("--json output is not valid JSON: %v\n%s", err, out.String())
+	}
+	// The axis, named. Without it a stored document cannot say which agent it describes, and two
+	// runs against different agents are byte-comparable in every other respect.
+	if decoded.Agent != "bob-shell/2.0.5" {
+		t.Errorf("agent = %q, want the agent the figures describe:\n%s", decoded.Agent, out.String())
+	}
+	// FALSE, because nothing priced this agent — even though the window was priced. This is the
+	// machine-path twin of "cost unavailable" and the reason the field cannot simply be copied.
+	if decoded.Priced {
+		t.Errorf("priced = true for an agent with no priced requests, so a script reads $0.00 as free:\n%s",
+			out.String())
+	}
+	if decoded.Totals.PricedRequests != 0 || decoded.Totals.Requests != 8 {
+		t.Errorf("totals = %+v, want this agent's 8 requests and no priced ones:\n%s",
+			decoded.Totals, out.String())
+	}
+	// Absent, not narrowed and not inherited. Checked on the raw bytes too, because a nil map and
+	// an absent key decode identically and only one of them is what omitempty promises.
+	if decoded.PricedBy != nil || decoded.UnpricedBy != nil || decoded.IncompleteBy != nil {
+		t.Errorf("by-model maps survived the scoping: pricedBy=%v unpricedBy=%v incompleteBy=%v\n%s",
+			decoded.PricedBy, decoded.UnpricedBy, decoded.IncompleteBy, out.String())
+	}
+	for _, absent := range []string{"pricedBy", "unpricedBy", "incompleteBy"} {
+		if strings.Contains(out.String(), absent) {
+			t.Errorf("--json emitted %q beside one agent's totals, where it describes the whole window:\n%s",
+				absent, out.String())
+		}
+	}
+	// And the residual IS carried here, because group=agent is reconcilable. Present and equal to
+	// the server's figure — not folded into this agent's cost, which is zero.
+	if decoded.UngroupedCostMicros == nil || *decoded.UngroupedCostMicros != 750000 {
+		t.Errorf("ungroupedCostMicros = %v, want the 750000 no agent carries:\n%s",
+			decoded.UngroupedCostMicros, out.String())
+	}
+	if decoded.Totals.CostMicros != 0 {
+		t.Errorf("costMicros = %d, want the residual stated beside this agent's total and never folded in:\n%s",
+			decoded.Totals.CostMicros, out.String())
+	}
+}
+
+// Without --agent neither field appears, and that absence is load-bearing.
+//
+// The default axis is group=none, which is not reconcilable, so a residual cannot arrive and an
+// `agent` key would name an axis the command did not take. A script reads the absence of
+// ungroupedCostMicros as "the breakdown reconciles"; emitting it on a path that asked for no
+// breakdown quietly retracts that. This is the pair to the test above and the JSON half of the
+// rule TestRunCost_WithoutAgentNoResidualLineIsPrinted pins for the human summary.
+func TestRunCost_JSONWithoutAgentCarriesNeitherTheAxisNorTheResidual(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","priced":true,
+		"totals":{"requests":10,"costMicros":1240000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":750000}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	for _, absent := range []string{"agent", "ungroupedCostMicros"} {
+		if strings.Contains(out.String(), absent) {
+			t.Errorf("--json emitted %q on the default axis, which took no agent and can carry no residual:\n%s",
+				absent, out.String())
+		}
+	}
+}
+
+// An unknown --agent fails and names the agents that do exist.
+//
+// A bare "not found" would leave the reader guessing at a string they cannot see — and the
+// strings here are User-Agents, so they are neither short nor guessable. The label to type is
+// exactly what the error has in hand, so withholding it would be a choice.
+func TestRunCost_UnknownAgentNamesTheOnesThatExist(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":8},
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1},
+		   "bob-shell/2.0.5":{"requests":7}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob"}, &out, &errOut)
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero for an agent that was not seen; stdout = %s", out.String())
+	}
+	msg := errOut.String()
+	for _, want := range []string{"bob", "claude-code/2.1.270", "bob-shell/2.0.5"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error does not mention %q:\n%s", want, msg)
+		}
+	}
+}
+
+// --agent discloses cost that belongs to no agent, when there is any.
+//
+// THIS IS THE OBLIGATION group=agent BRINGS. runCost's default axis is GroupNone, which is
+// non-reconcilable, so no residual can ever arrive — and cmd_cost.go says in as many words
+// that a future change of axis inherits the disclosure. group=agent IS reconcilable, so
+// usage.Snapshot.UngroupedCostMicros can be non-zero: cost the totals include and no agent
+// carries. Without a word about it, a reader adding up --agent for every agent and comparing
+// that against plain `abctl cost` finds a shortfall with nothing to explain it.
+// THE RESIDUAL MUST DIFFER FROM THIS AGENT'S OWN COST, and the first version of this test did
+// not arrange that: it set both to 1_500_000 micros, so "1.50" appeared in the headline whether
+// or not the disclosure printed. Deleting the disclosure left this test GREEN — a dead guard
+// reading as coverage, caught by mutating the line it was supposed to protect. The residual is
+// $0.75 here against the agent's $1.50 so the assertion can only be satisfied by the line it is
+// about, and the sentence is asserted beside the figure because a figure can coincide where a
+// sentence cannot.
+func TestRunCost_AgentDisclosesCostNoAgentCarries(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":10,"costMicros":4250000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":6,"costMicros":2000000,"pricedRequests":6,"priceableRequests":6},
+		   "bob-shell/2.0.5":{"requests":4,"costMicros":1500000,"pricedRequests":4,"priceableRequests":4}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob-shell/2.0.5"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "0.75") {
+		t.Errorf("output does not disclose the $0.75 that no agent carries:\n%s", got)
+	}
+	if !strings.Contains(got, "no agent") {
+		t.Errorf("output carries the figure but not what it means:\n%s", got)
+	}
+	// This agent's own $1.50 must still be the headline: the residual is stated BESIDE the
+	// figure, never folded into it.
+	if !strings.Contains(got, "1.50") {
+		t.Errorf("output lost this agent's own cost:\n%s", got)
+	}
+}
+
+// Without --agent no residual line is printed, even if the server sends the field.
+//
+// The disclosure is gated on the FLAG, not merely on the field being present, and this is the
+// half a mutation would otherwise reach unchallenged: dropping the `agent != ""` term leaves
+// every other test here green, because they all pass the flag. A server sending the field on a
+// group=none answer would then print a line whose own explanation — that per-agent figures do
+// not sum to the total — is nonsense on a document containing no per-agent figures.
+func TestRunCost_WithoutAgentNoResidualLineIsPrinted(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","priced":true,
+		"totals":{"requests":10,"costMicros":4250000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":750000}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if got := out.String(); strings.Contains(got, "no agent") {
+		t.Errorf("unscoped run printed a per-agent residual line:\n%s", got)
+	}
+}
+
+// With no --agent the axis stays GroupNone, so the default path carries no residual.
+//
+// TestRunCost_AsksForAnAxisThatCannotCarryAResidual already asserts the group, and it drives
+// the command WITHOUT the flag — so it keeps passing and is the reason --agent had to be
+// opt-in rather than a change of default. This states the pairing explicitly, because the two
+// tests only mean something together: one says the default is safe, the other says the flag
+// takes on the duty.
+func TestRunCost_WithoutAgentTheDefaultAxisIsUnchanged(t *testing.T) {
+	var gotGroup string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotGroup = r.URL.Query().Get("group")
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"window":"today","totals":{"requests":1},"priced":false}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if gotGroup != "" && gotGroup != string(usage.GroupNone) {
+		t.Errorf("default asked for group=%q, want none — a reconcilable axis owes a residual disclosure", gotGroup)
+	}
+}

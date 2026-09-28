@@ -413,6 +413,7 @@ func TestRemappedKeys_MeanTheSameThingInEveryGroup(t *testing.T) {
 		"P": "pipeline",
 		"C": "plugin catalog",
 		"$": "spend",
+		"A": "agents",
 	}
 	for _, jt := range jumpTargets {
 		if want, ok := wantLabel[jt.key]; !ok {

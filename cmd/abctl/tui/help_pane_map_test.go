@@ -154,6 +154,32 @@ func TestHelpBody_JumpSectionMatchesTheKeysThatActuallyWork(t *testing.T) {
 			case p:
 				// Never advertise a jump to the pane the reader is already on.
 				works = false
+			case paneAgents:
+				// `A` OPENS ASYNCHRONOUSLY, so m.pane cannot be the test here.
+				//
+				// It refetches the per-agent breakdown on every press and decides from the
+				// reply, because the refusal depends on how many agents have been seen and
+				// that changes while abctl runs. Deciding from a cache instead would make the
+				// FIRST press answer "no agent traffic seen yet" — a lie, since nothing had
+				// looked yet.
+				//
+				// So "works" is that the press ISSUED THE FETCH, checked by running the
+				// returned Cmd and typing its message. PRESSED AND RUN, not asked: consulting
+				// the availability rule would compare the implementation with itself, which is
+				// the mistake the paneNone case above records.
+				m := &model{
+					pane:               p,
+					client:             deadClient(),
+					previousPane:       paneNone,
+					pipelineReturnPane: paneNone,
+				}
+				cmd := m.handleKey(keyRune('A'))
+				if cmd != nil {
+					// deadClient() refuses the connection, so this returns promptly with err
+					// set. The message TYPE is what is being asserted — that this key reaches
+					// the agent fetch and not something else.
+					_, works = cmd().(agentRowsLoadedMsg)
+				}
 			default:
 				m := &model{
 					pane:               p,

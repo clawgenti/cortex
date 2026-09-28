@@ -117,6 +117,7 @@ func newPickerModel(ctx context.Context, lister cluster.Lister, pf cluster.PortF
 		eventsTbl:    newEventsTable(),
 		pipelineTbl:  newPipelineTable(),
 		catalogTbl:   newCatalogTable(),
+		agentsTbl:    newAgentsTable(),
 		previousPane: paneNone,
 		// Mirrors New, per this constructor's doc comment. paneNone rather than
 		// the zero value, which is paneNamespaces — see New.

@@ -532,19 +532,28 @@ func TestHelpOverlayScrollKeys(t *testing.T) {
 // helpNoScrollHeight is a terminal tall enough to show the whole reference at
 // helpWideTerminal columns, so the no-affordance case is testable.
 //
-// IT IS BIG, AND THAT IS THE POINT. The body is 91 lines once every pane carries
-// its purpose and its descriptions, and 94 rows is the exact floor. The previous
+// IT IS BIG, AND THAT IS THE POINT. The body is 99 lines once every pane carries
+// its purpose and its descriptions, and 102 rows is the exact floor. The previous
 // version of this test asked for 60 and t.Skip()ed when the content did not fit —
 // which, the moment the body grew, silently took the three short-terminal
 // assertions below with it and reported PASS. A number that has to track the body's
 // height is asserted, never skipped.
 //
-// It has already earned that: adding the MOVING AROUND THIS HELP group took the
-// body from 86 lines to 91, and this failed with the value to use rather than going
-// quiet again.
+// It has earned that twice now. Adding the MOVING AROUND THIS HELP group took the
+// body from 86 lines to 91, and adding the AGENTS pane took it from 91 to 99 — each
+// time this failed naming the value to use rather than going quiet again.
+//
+// A PANE COSTS ITS TITLE, ITS PURPOSE, ITS BINDINGS AND ITS NOTES, so this constant
+// moves whenever a pane is added or its prose changes — and it is only ever right as
+// a MEASURED number. Do not raise it speculatively: the failure message reports the
+// body's real height, and the floor is that plus the frame's three rows. It briefly
+// read 103 here, for an AGENTS entry that advertised two bindings for an agent scope
+// /v1/usage turns out to be unable to express; dropping them took the body back to
+// 99, and a constant left at 103 would have gone on passing while describing a body
+// that no longer existed. Too small fails loudly; too large fails silently.
 const (
 	helpWideTerminal   = 100
-	helpNoScrollHeight = 94
+	helpNoScrollHeight = 102
 )
 
 // With everything visible there must be no scroll affordance — it would be noise

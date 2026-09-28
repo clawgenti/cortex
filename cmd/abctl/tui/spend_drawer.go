@@ -274,6 +274,11 @@ func spendDrawerHostPane(pane paneID) (bool, string) {
 		// reach it. A drawer whose hint line advertises [w] on the one pane where `w` belongs to
 		// something else is a lie printed on screen.
 		return false, "spend: the usage pane is the breakdown — use its own [b] and [w]"
+	case paneAgents:
+		// THE SAME ARGUMENT AS paneUsage: that pane's rows ARE a per-agent cost breakdown, and
+		// the drawer's `a` axis cycles to `agent` — so opening it there offers a reader a way to
+		// reach, in a drawer, the view they are already looking at.
+		return false, "spend: the agents pane is already the per-agent breakdown"
 	}
 	return true, ""
 }
