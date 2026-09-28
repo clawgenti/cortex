@@ -2014,11 +2014,12 @@ func TestRunCost_ByJSONCarriesTheAxisTheSeriesAndTheResidual(t *testing.T) {
 	if !ok {
 		t.Fatalf("series is absent or not an object: %#v", got["series"])
 	}
-	// pricedRequests IS THE FIELD THAT SEPARATES THE TWO READINGS, not costMicros. Both
-	// usage.Counts money fields are omitempty, so "nothing priced this label" and "priced at a
-	// rate of zero" both decode to 0 from costMicros and an assertion on it cannot tell them
-	// apart — zeroing PricedRequests across the fold passed this whole package before this line
-	// existed. It is the machine-path twin of the TUI's four-row agentCostCell table.
+	// pricedRequests IS THE FIELD THAT SEPARATES THE TWO READINGS, not costMicros. costMicros is
+	// omitempty (usage.go:165), so "nothing priced this label" and "priced at a rate of zero" both
+	// decode to 0 from it and an assertion on it cannot tell them apart — zeroing PricedRequests
+	// across the fold passed this whole package before this line existed. pricedRequests is
+	// omitempty too (:241), so it is the PAIR that carries the distinction, not either alone. The
+	// machine-path twin of the TUI's four-row agentCostCell table.
 	for label, want := range map[string]struct{ cost, priced float64 }{
 		"claude-code/2.1.270": {cost: 146361600, priced: 1048},
 		// Unpriced: requests but nothing priced them, so BOTH money and pricedRequests are
@@ -2140,48 +2141,13 @@ func TestRunCost_AgentDropsTheWindowsProvenance(t *testing.T) {
 		}
 	})
 
-	t.Run("an agent nothing priced says unavailable, not $0.00", func(t *testing.T) {
-		// THE SAME NARROWING BUG AS THE MAPS, on the one field that decides the headline.
-		// snap.Priced describes the WINDOW: it is true here because claude-code was priced. The
-		// agent asked for is bob-shell, which has priceable traffic and no priced traffic, so its
-		// scoped Totals carry CostMicros 0 — and writeCostSummary's headline gate reads the
-		// window's Priced, not the agent's. That prints $0.00 for an agent nothing could price,
-		// which is the reading the surface three lines above the gate refuses: "Unavailable
-		// rather than clamped to zero, because $0.00 would assert the traffic was free."
-		srv := fakeUsageServer(t, body)
-		defer srv.Close()
-		var out, errOut strings.Builder
-		if code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob-shell/2.0.5"},
-			&out, &errOut); code != 0 {
-			t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
-		}
-		got := out.String()
-		if strings.Contains(got, "$0.00") {
-			t.Errorf("an agent nothing priced was reported as free:\n%s", got)
-		}
-		if !strings.Contains(got, "cost unavailable") {
-			t.Errorf("want the unavailable headline for an unpriced agent:\n%s", got)
-		}
-	})
-
-	t.Run("json says priced=false for an agent nothing priced", func(t *testing.T) {
-		srv := fakeUsageServer(t, body)
-		defer srv.Close()
-		var out, errOut strings.Builder
-		if code := runCost([]string{"--endpoint", srv.URL, "--agent", "bob-shell/2.0.5", "--json"},
-			&out, &errOut); code != 0 {
-			t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
-		}
-		var got map[string]any
-		if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
-			t.Fatalf("output is not JSON: %v\n%s", err, out.String())
-		}
-		// priced is what tells a script whether costMicros is a figure or a floor. Carrying the
-		// window's true beside this agent's empty total says "priced, and it was free".
-		if priced, _ := got["priced"].(bool); priced {
-			t.Errorf("priced = true beside an agent with no priced requests:\n%s", out.String())
-		}
-	})
+	// NO SUBTEST HERE FOR THE Priced NARROWING, deliberately. main already landed both halves —
+	// TestRunCost_AgentReportsThatAgentOnly asserts "cost unavailable" and never "$0.00" on the
+	// human path, and TestRunCost_JSONScopedToAnAgentNarrowsProvenanceAndNamesTheAgent asserts
+	// priced=false on the machine path, each for this same priceable-but-unpriced shape. Mutant
+	// M28 (scopeToAgent stops narrowing Priced) dies on those. A second pair here would be two
+	// names for one rule, which is the duplication this branch dropped its own agentCostCell
+	// copies to avoid.
 
 	t.Run("human summary carries no window-wide reason", func(t *testing.T) {
 		srv := fakeUsageServer(t, body)

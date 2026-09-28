@@ -229,9 +229,8 @@ Flags:
 // IT REWRITES Totals AND HANDS BACK A SNAPSHOT, rather than rendering the agent itself, so the
 // writers apply to it directly with no second implementation and no chance of the two drifting:
 // the negative-total refusal, the coverage-gap disclosure and the incomplete-read admission each
-// read one agent's numbers. Which fields do NOT survive the narrowing, and why, is at the
-// narrowing itself below — that list is the one place it is stated. A COPY, never the caller's
-// snapshot mutated in place.
+// read one agent's numbers. Which fields do NOT survive the narrowing, and why, is stated at the
+// narrowing itself below. A COPY, never the caller's snapshot mutated in place.
 //
 // The fold is usage.FoldSeriesAcrossWindow, the same one abctl's AGENTS pane uses, so the
 // figure printed here and the row shown there cannot disagree.
