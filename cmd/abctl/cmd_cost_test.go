@@ -2017,14 +2017,13 @@ func TestRunCost_ByJSONCarriesTheAxisTheSeriesAndTheResidual(t *testing.T) {
 	// pricedRequests IS THE FIELD THAT SEPARATES THE TWO READINGS, not costMicros. costMicros is
 	// omitempty (usage.go:165), so "nothing priced this label" and "priced at a rate of zero" both
 	// decode to 0 from it and an assertion on it cannot tell them apart — zeroing PricedRequests
-	// across the fold passed this whole package before this line existed. pricedRequests is
-	// omitempty too (:241), so it is the PAIR that carries the distinction, not either alone. The
-	// machine-path twin of the TUI's four-row agentCostCell table.
+	// across the fold passed this whole package before this line existed. The machine-path twin of
+	// the TUI's four-row agentCostCell table.
 	for label, want := range map[string]struct{ cost, priced float64 }{
 		"claude-code/2.1.270": {cost: 146361600, priced: 1048},
-		// Unpriced: requests but nothing priced them, so BOTH money and pricedRequests are
-		// omitempty-absent. The pair is what makes this row distinguishable from a priced-at-zero
-		// one, which would carry pricedRequests > 0 with the same absent cost.
+		// Unpriced: requests but nothing priced them, so both the money fields and pricedRequests
+		// are omitempty-absent. pricedRequests is what makes this row distinguishable from a
+		// priced-at-zero one, which carries pricedRequests > 0 with the same absent cost.
 		"bob-shell/2.0.5": {cost: 0, priced: 0},
 	} {
 		entry, ok := series[label].(map[string]any)
