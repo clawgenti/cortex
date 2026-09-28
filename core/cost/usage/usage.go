@@ -1646,9 +1646,8 @@ func FoldSeriesAcrossWindow(buckets []Bucket) map[string]Counts {
 // A SLICE, NOT A MAP, and the signature is the point. Ranking straight out of a map takes the
 // tie order from Go's randomised walk, and sort.Slice is unstable, so the tied block is permuted
 // by the sort itself — a test for the tie-break could then only catch its deletion when the
-// random order happened to be wrong. Measured, written that way: 4 runs in 20, and adding tied
-// labels made it worse rather than better. Given a slice the result is a pure function of the
-// input and the assertion holds every run.
+// random order happened to be wrong. Given a slice the result is a pure function of the input and
+// the assertion holds every run.
 //
 // A label absent from series sorts as zero cost: the map lookup yields the zero Counts, which
 // keeps the ordering total rather than panicking, and the label tie-break still places it

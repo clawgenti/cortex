@@ -317,10 +317,8 @@ func TestFoldSeriesAcrossWindow_SaturatesRatherThanWrapping(t *testing.T) {
 // A SLICE IN, NOT A MAP, and that signature is the whole reason this is testable. Ranking
 // straight out of a map means the tie order comes from Go's randomised map walk, and since
 // sort.Slice is unstable the tied block gets permuted by the sort itself — so a test for the
-// tie-break could only catch its deletion when the random order happened to be wrong. Measured
-// when it was written that way: 4 runs in 20, and adding tied labels made it worse rather than
-// better. Given a slice, the output is a pure function of the input and the assertion holds
-// every run.
+// tie-break could only catch its deletion when the random order happened to be wrong. Given a
+// slice, the output is a pure function of the input and the assertion holds every run.
 func TestSortSeriesLabels_ByCostThenLabel(t *testing.T) {
 	series := map[string]Counts{
 		"claude-code/2.1.270": {CostMicros: 500},

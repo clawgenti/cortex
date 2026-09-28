@@ -474,15 +474,6 @@ type costJSON struct {
 	// can check for.
 	Agent string `json:"agent,omitempty"`
 
-	// UngroupedCostMicros is the part of the window's cost that NO agent carries.
-	//
-	// THE DEBT THE STRUCT'S OWN COMMENT RECORDED, now paid. That comment said the field could
-	// never arrive here because this command requested group=none, and closed with "whoever
-	// gives this command an axis owes it a place in this struct" — --agent is that axis.
-	// GroupAgent is reconcilable, so the producers compute this, and a script summing --agent
-	// over every agent and comparing it against an unscoped run would otherwise find a
-	// shortfall with nothing in the document to explain it.
-	//
 	// By names the axis Series is keyed on, present only under --by, and it exists for the
 	// reason Agent does: without it a scripted consumer cannot tell which dimension the labels
 	// belong to, and "claude-code/2.1.270" and "api.anthropic.com" are both just strings.
@@ -491,6 +482,15 @@ type costJSON struct {
 	// Series is one folded Counts per label, present only under --by, keyed on By.
 	Series map[string]usage.Counts `json:"series,omitempty"`
 
+	// UngroupedCostMicros is the part of the window's cost that NO label carries.
+	//
+	// THE DEBT THE STRUCT'S OWN COMMENT RECORDED, now paid. That comment said the field could
+	// never arrive here because this command requested group=none, and closed with "whoever
+	// gives this command an axis owes it a place in this struct" — --agent and --by are those
+	// axes. GroupAgent is reconcilable, so the producers compute this, and a script summing
+	// --agent over every agent and comparing it against an unscoped run would otherwise find a
+	// shortfall with nothing in the document to explain it.
+	//
 	// PRESENT ONLY UNDER --agent OR --by, and a pointer, so the default path serialises no key
 	// and its absence keeps meaning "no breakdown was asked for" rather than "the breakdown
 	// reconciled". Not folded into Totals: this agent's figure is this agent's, and the

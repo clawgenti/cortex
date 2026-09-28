@@ -1846,17 +1846,29 @@ func TestRunCost_ByAgentPrintsARowPerAgent(t *testing.T) {
 	}
 }
 
-// An unpriced row renders "—", never "$0.00".
+// An unpriced row renders "—", and a row priced at a rate of zero renders "$0.00".
 //
-// THE WHOLE POINT OF THE COLUMN. bob-shell here sent 8 requests and nothing could price them —
-// it bills in credits, which the cost model cannot represent — and "$0.00" would assert that
-// its traffic was free. Distinguishing "no rate configured" from "cost was zero" is the rule
-// this codebase keeps everywhere a figure may be unknown.
+// THE WHOLE POINT OF THE COLUMN, and it takes three rows to state. bob-shell here sent 8
+// requests and nothing could price them — it bills in credits, which the cost model cannot
+// represent — and "$0.00" would assert that its traffic was free. Distinguishing "no rate
+// configured" from "cost was zero" is the rule this codebase keeps everywhere a figure may be
+// unknown.
+//
+// freerate IS THAT DISTINCTION: pricedRequests > 0 with costMicros == 0. Keyed on
+// PricedRequests it renders a figure; keyed on CostMicros it renders a dash. It is the only row
+// whose cell differs between the two readings, so without it writeCostBreakdown's stated rule
+// holds by accident and `if c.CostMicros > 0` passes. tui/agents_pane_test.go's
+// TestAgentCostCell_UnpricedIsADashAndAZeroRateIsAFigure says the same thing for the pane; this
+// is the CLI table's half of it.
+//
+// ASSERTED PER ROW, not over the whole table: "an em dash appears" and "$0.00 does not appear"
+// are both satisfied with the two cells on each other's rows.
 func TestRunCost_ByRendersUnpricedAsADashNotZero(t *testing.T) {
 	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
-		"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1049,"priceableRequests":1056},
+		"totals":{"requests":1059,"costMicros":146361600,"pricedRequests":1051,"priceableRequests":1058},
 		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
 		   "claude-code/2.1.270":{"requests":1049,"costMicros":146361600,"pricedRequests":1049,"priceableRequests":1049},
+		   "freerate/1.0":{"requests":2,"pricedRequests":2,"priceableRequests":2},
 		   "bob-shell/2.0.5":{"requests":8,"priceableRequests":7}}}]}`)
 	defer srv.Close()
 
@@ -1865,13 +1877,40 @@ func TestRunCost_ByRendersUnpricedAsADashNotZero(t *testing.T) {
 		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "—") {
-		t.Errorf("unpriced row does not render an em dash:\n%s", got)
+	for _, tc := range []struct {
+		label, want, reject, why string
+	}{
+		{"claude-code/2.1.270", "$146.36", "—", "priced, with a cost"},
+		{"freerate/1.0", "$0.00", "—", "priced at a rate of zero: a real figure, not an unknown"},
+		{"bob-shell/2.0.5", "—", "$0.00", "nothing could price it: unknown, not free"},
+	} {
+		row := costTableRow(t, got, tc.label)
+		if !strings.Contains(row, tc.want) {
+			t.Errorf("%s (%s): row does not carry %q:\n%s", tc.label, tc.why, tc.want, row)
+		}
+		if strings.Contains(row, tc.reject) {
+			t.Errorf("%s (%s): row carries %q:\n%s", tc.label, tc.why, tc.reject, row)
+		}
 	}
-	// The exact string that must never appear for an unpriced row.
-	if strings.Contains(got, "$0.00") {
-		t.Errorf("unpriced row rendered as free:\n%s", got)
+}
+
+// costTableRow returns the one --by table row mentioning label.
+//
+// Fails on 0 or 2+ matches rather than taking the first: a cell assertion scoped to "the output"
+// says nothing about which row carried it, and a label that also appears in the summary above
+// the table would silently widen the scope back out.
+func costTableRow(t *testing.T, out, label string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, label) {
+			found = append(found, line)
+		}
 	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly 1 line mentioning %q, got %d:\n%s", label, len(found), out)
+	}
+	return found[0]
 }
 
 // A grouping the window cannot serve is reported, not silently swallowed.
@@ -1900,6 +1939,41 @@ func TestRunCost_ByDisclosesAGroupingTheServerDowngraded(t *testing.T) {
 	// nowhere to go.
 	if !strings.Contains(combined, "agent") {
 		t.Errorf("output does not name an axis that works:\n%s", combined)
+	}
+}
+
+// An axis the server SERVED but that came back empty says so, in wording a downgrade does not use.
+//
+// TWO ANSWERS A READER MUST NOT CONFUSE: "this window cannot break down by agent" (a downgrade —
+// snap.Group differs from what was asked) and "it can, and there was no traffic" (the axis was
+// served; the buckets were empty). The response here ECHOES group=agent, so reportDowngrade
+// returns false and this arm is the one that answers.
+//
+// Without the arm the command prints the AGENT/REQUESTS/TOKENS/COST heading with nothing under
+// it — the ungrouped-total-under-a-breakdown-heading shape reportDowngrade's own godoc says this
+// surface must not produce. So the heading's absence is asserted too, not just the note's
+// presence: a note printed above a bare heading would still be that shape.
+func TestRunCost_ByServedButEmptySaysSoAndIsNotADowngrade(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":0}}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "no agent breakdown for this window") {
+		t.Errorf("a served-but-empty axis printed no note saying so:\n%s", got)
+	}
+	// reportDowngrade's wording. Its appearance here would tell the reader the axis was refused
+	// when the server in fact served it.
+	if strings.Contains(got, "the server answered with") {
+		t.Errorf("served-but-empty was reported as a downgrade:\n%s", got)
+	}
+	// "REQUESTS" uppercase is the breakdown heading and nothing else in this command prints it.
+	if strings.Contains(got, "REQUESTS") {
+		t.Errorf("printed a breakdown heading with no rows under it:\n%s", got)
 	}
 }
 
@@ -1950,21 +2024,37 @@ func TestRunCost_ByDisclosesCostNoLabelCarries(t *testing.T) {
 	}
 }
 
-// An unknown --by names the axes that are accepted.
+// An unknown --by names the axes that are accepted — and "none" is unknown.
+//
+// "none" IS THE SECOND CASE BECAUSE ParseGroup ACCEPTS IT: it returns GroupNone with a nil
+// error, so the err check alone lets it through and `g == usage.GroupNone` is the only thing
+// rejecting it. Without that arm --by none asks for a breakdown by nothing and prints a heading
+// over an ungrouped total.
+//
+// ASSERTS THE WORDING because the message is the half that names the accepted axes. The endpoint
+// is unreachable on purpose — the axis is parsed before any request, so a typo costs no
+// connection.
 func TestRunCost_UnknownByNamesTheAcceptedAxes(t *testing.T) {
-	var out, errOut strings.Builder
-	code := runCost([]string{"--endpoint", "http://127.0.0.1:1", "--by", "banana"}, &out, &errOut)
-	if code == 0 {
-		t.Fatal("exit = 0, want non-zero for an axis that does not exist")
-	}
-	msg := errOut.String()
-	if !strings.Contains(msg, "banana") {
-		t.Errorf("error does not echo the rejected value:\n%s", msg)
-	}
-	for _, want := range []string{"agent", "model", "endpoint"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error does not name the accepted axis %q:\n%s", want, msg)
-		}
+	for _, by := range []string{"banana", "none"} {
+		t.Run(by, func(t *testing.T) {
+			var out, errOut strings.Builder
+			code := runCost([]string{"--endpoint", "http://127.0.0.1:1", "--by", by}, &out, &errOut)
+			if code == 0 {
+				t.Fatal("exit = 0, want non-zero for an axis that does not exist")
+			}
+			msg := errOut.String()
+			if !strings.Contains(msg, "is not an axis") {
+				t.Errorf("--by %q was not refused as an axis; an unreachable endpoint exits non-zero too:\n%s", by, msg)
+			}
+			if !strings.Contains(msg, by) {
+				t.Errorf("error does not echo the rejected value:\n%s", msg)
+			}
+			for _, want := range []string{"agent", "model", "endpoint"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error does not name the accepted axis %q:\n%s", want, msg)
+				}
+			}
+		})
 	}
 }
 
