@@ -1630,6 +1630,38 @@ func FoldSeriesAcrossWindow(buckets []Bucket) map[string]Counts {
 	return window
 }
 
+// SortSeriesLabels orders labels IN PLACE by what they cost, descending, breaking ties on the
+// label.
+//
+// ONE DEFINITION FOR EVERY SURFACE THAT RANKS A BREAKDOWN. abctl's AGENTS pane and
+// `abctl cost --by` show the same series in the same order, and the rule lives here so the two
+// cannot drift — the spend drawer's rankSeriesByCost records what it cost the last time a
+// consumer wrote its own.
+//
+// THE TIE-BREAK IS LOAD-BEARING, not tidiness. Every UNPRICED series has CostMicros 0, so until
+// billing units land the label is the entire order for all of them; and these rows are rebuilt
+// on every poll, so without it equal-cost entries swap places between reads under a reader
+// trying to compare them.
+//
+// A SLICE, NOT A MAP, and the signature is the point. Ranking straight out of a map takes the
+// tie order from Go's randomised walk, and sort.Slice is unstable, so the tied block is permuted
+// by the sort itself — a test for the tie-break could then only catch its deletion when the
+// random order happened to be wrong. Given a slice the result is a pure function of the input and
+// the assertion holds every run.
+//
+// A label absent from series sorts as zero cost: the map lookup yields the zero Counts, which
+// keeps the ordering total rather than panicking, and the label tie-break still places it
+// stably.
+func SortSeriesLabels(labels []string, series map[string]Counts) {
+	sort.Slice(labels, func(i, j int) bool {
+		a, b := series[labels[i]].CostMicros, series[labels[j]].CostMicros
+		if a != b {
+			return a > b
+		}
+		return labels[i] < labels[j]
+	})
+}
+
 // capSeriesAcrossWindow applies MaxSeriesInResponse to every bucket using ONE ranking taken
 // over the whole window, so a label is either a series everywhere or (other) everywhere.
 //

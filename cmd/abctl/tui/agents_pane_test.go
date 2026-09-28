@@ -45,57 +45,6 @@ func TestAgentRowsFromBuckets_FoldsOneAgentAcrossBuckets(t *testing.T) {
 	}
 }
 
-// Rows order by cost descending, and ties break on the label.
-//
-// The tie-break is not cosmetic. These rows are rebuilt on every poll, and Go map iteration
-// order is randomised per run — so two agents that cost the same would swap places between
-// polls and the pane would flicker under a reader trying to compare them. rankSeriesByCost
-// makes the same guarantee for the spend drawer and for the same reason; this is that rule
-// applied to the surface where the reader is choosing a row to press Enter on.
-//
-// The zero-cost group is the case that matters for Bob specifically: until pricing lands, an
-// unpriced agent's CostMicros is 0, so EVERY Bob row ties with every other unpriced agent and
-// the tie-break is the only thing ordering them.
-//
-// ASSERTED ON sortAgentRows, NOT THROUGH THE FOLD, and the reason is measured rather than
-// stylistic. Inside the fold the input arrives from a map walk that Go randomises per run, and
-// sort.Slice is unstable — so a deleted tie-break survived 4 of 20 runs with two tied labels
-// and 8 of 30 with four. Adding tied labels does not fix it, because the sort permutes the
-// tied block itself. Handing the ordering a FIXED slice, already in the wrong order, makes the
-// assertion deterministic: every run exercises the same permutation, so the guard either holds
-// or fails, never sometimes.
-func TestSortAgentRows_OrdersByCostThenLabel(t *testing.T) {
-	// Deliberately the reverse of the wanted order within the tied group, so a missing
-	// tie-break cannot coincidentally produce the right answer.
-	rows := []agentRow{
-		{label: "zeta/1.0", Counts: usage.Counts{Requests: 1, CostMicros: 0}},
-		{label: "delta/1.0", Counts: usage.Counts{Requests: 1, CostMicros: 0}},
-		{label: "beta/1.0", Counts: usage.Counts{Requests: 1, CostMicros: 0}},
-		{label: "alpha/1.0", Counts: usage.Counts{Requests: 1, CostMicros: 0}},
-		{label: "middle/1.0", Counts: usage.Counts{Requests: 1, CostMicros: 100}},
-		{label: "claude-code/2.1.270", Counts: usage.Counts{Requests: 1, CostMicros: 500}},
-	}
-
-	sortAgentRows(rows)
-
-	want := []string{
-		"claude-code/2.1.270", "middle/1.0",
-		"alpha/1.0", "beta/1.0", "delta/1.0", "zeta/1.0",
-	}
-	if len(rows) != len(want) {
-		t.Fatalf("got %d rows, want %d", len(rows), len(want))
-	}
-	for i, w := range want {
-		if rows[i].label != w {
-			got := make([]string, len(rows))
-			for j, r := range rows {
-				got[j] = r.label
-			}
-			t.Fatalf("row %d = %q, want %q\n  got order:  %v\n  want order: %v", i, rows[i].label, w, got, want)
-		}
-	}
-}
-
 // The fold puts the most expensive agent first.
 //
 // Ordering by cost is deterministic even out of a map walk, because the costs differ — so this

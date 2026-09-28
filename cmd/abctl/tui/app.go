@@ -42,9 +42,10 @@ const (
 	panePluginDetail
 	paneCatalog
 	paneUsage
-	// paneAgents picks which CODING AGENT the cost and usage views are scoped to. Not to be
-	// confused with paneNamespaces, which lists Kubernetes workloads and whose own purpose
-	// line used to call them "agents" too — see paneKeys for how the two are told apart.
+	// paneAgents shows what each CODING AGENT has spent. Read-only: /v1/usage takes no agent
+	// filter, so a selected row cannot scope anything. Not to be confused with paneNamespaces,
+	// which lists Kubernetes workloads and whose own purpose line used to call them "agents"
+	// too — see paneKeys for how the two are told apart.
 	paneAgents
 )
 

@@ -308,3 +308,62 @@ func TestFoldSeriesAcrossWindow_SaturatesRatherThanWrapping(t *testing.T) {
 		t.Error("Saturated = false; a clamped total must disclose it")
 	}
 }
+
+// SortSeriesLabels orders labels by what they cost, descending, breaking ties on the label.
+//
+// ONE DEFINITION FOR TWO SURFACES. abctl's AGENTS pane and `abctl cost --by` both rank the same
+// series the same way, and they used to do it in two places: this is the rule, and both call it.
+//
+// A SLICE IN, NOT A MAP, and that signature is the whole reason this is testable. Ranking
+// straight out of a map means the tie order comes from Go's randomised map walk, and since
+// sort.Slice is unstable the tied block gets permuted by the sort itself — so a test for the
+// tie-break could only catch its deletion when the random order happened to be wrong. Given a
+// slice, the output is a pure function of the input and the assertion holds every run.
+func TestSortSeriesLabels_ByCostThenLabel(t *testing.T) {
+	series := map[string]Counts{
+		"claude-code/2.1.270": {CostMicros: 500},
+		"middle/1.0":          {CostMicros: 100},
+		// Four at the same cost. This is not a corner case: every UNPRICED series has
+		// CostMicros 0, so until billing units land the label is the entire order for all of
+		// them.
+		"alpha/1.0": {CostMicros: 0},
+		"beta/1.0":  {CostMicros: 0},
+		"delta/1.0": {CostMicros: 0},
+		"zeta/1.0":  {CostMicros: 0},
+	}
+	// Deliberately the reverse of the wanted order inside the tied group, so a missing
+	// tie-break cannot coincidentally produce the right answer.
+	labels := []string{
+		"zeta/1.0", "delta/1.0", "beta/1.0", "alpha/1.0",
+		"middle/1.0", "claude-code/2.1.270",
+	}
+
+	SortSeriesLabels(labels, series)
+
+	want := []string{
+		"claude-code/2.1.270", "middle/1.0",
+		"alpha/1.0", "beta/1.0", "delta/1.0", "zeta/1.0",
+	}
+	for i, w := range want {
+		if labels[i] != w {
+			t.Fatalf("position %d = %q, want %q\n  got:  %v\n  want: %v", i, labels[i], w, labels, want)
+		}
+	}
+}
+
+// A label with no entry in the series sorts as zero cost rather than panicking.
+//
+// Reachable rather than defensive: a caller may hold a label list from one read and a series map
+// from another, and Go's map lookup yields the zero Counts for a miss. Sorting it as free is the
+// only answer that keeps the ordering total — and it lands in the tied block, where the label
+// tie-break still gives it a stable position.
+func TestSortSeriesLabels_UnknownLabelSortsAsFree(t *testing.T) {
+	series := map[string]Counts{"paid/1.0": {CostMicros: 10}}
+	labels := []string{"ghost/1.0", "paid/1.0"}
+
+	SortSeriesLabels(labels, series)
+
+	if labels[0] != "paid/1.0" {
+		t.Errorf("labels = %v, want the priced one first", labels)
+	}
+}

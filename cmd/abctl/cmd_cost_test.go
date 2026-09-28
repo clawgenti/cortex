@@ -1808,3 +1808,451 @@ func TestRunCost_WithoutAgentTheDefaultAxisIsUnchanged(t *testing.T) {
 		t.Errorf("default asked for group=%q, want none — a reconcilable axis owes a residual disclosure", gotGroup)
 	}
 }
+
+// --by prints a row per label, ordered by cost, with the axis it asked for on the wire.
+func TestRunCost_ByAgentPrintsARowPerAgent(t *testing.T) {
+	var gotGroup string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotGroup = r.URL.Query().Get("group")
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"window":"today","group":"agent","priced":true,
+			"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1048,"priceableRequests":1055},
+			"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+			   "claude-code/2.1.270":{"requests":1049,"tokens":297961318,"costMicros":146361600,
+			                          "pricedRequests":1048,"priceableRequests":1048},
+			   "bob-shell/2.0.5":{"requests":8,"tokens":38682,"priceableRequests":7}}}]}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	if gotGroup != "agent" {
+		t.Errorf("asked for group=%q, want agent", gotGroup)
+	}
+	got := out.String()
+	for _, want := range []string{"claude-code/2.1.270", "bob-shell/2.0.5"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("table missing row %q:\n%s", want, got)
+		}
+	}
+	// Costliest first, which is usage.SortSeriesLabels' rule. Asserted by POSITION, because
+	// both labels being present says nothing about the order a reader scans.
+	if i, j := strings.Index(got, "claude-code/2.1.270"), strings.Index(got, "bob-shell/2.0.5"); i > j {
+		t.Errorf("rows are not ordered by cost descending:\n%s", got)
+	}
+}
+
+// An unpriced row renders "—", and a row priced at a rate of zero renders "$0.00".
+//
+// THE WHOLE POINT OF THE COLUMN, and it takes three rows to state. bob-shell here sent 8
+// requests and nothing could price them — it bills in credits, which the cost model cannot
+// represent — and "$0.00" would assert that its traffic was free. Distinguishing "no rate
+// configured" from "cost was zero" is the rule this codebase keeps everywhere a figure may be
+// unknown.
+//
+// freerate IS THAT DISTINCTION: pricedRequests > 0 with costMicros == 0. Keyed on
+// PricedRequests it renders a figure; keyed on CostMicros it renders a dash. It is the only row
+// whose cell differs between the two readings, so without it writeCostBreakdown's stated rule
+// holds by accident and `if c.CostMicros > 0` passes. tui/agents_pane_test.go's
+// TestAgentCostCell_UnpricedIsADashAndAZeroRateIsAFigure says the same thing for the pane; this
+// is the CLI table's half of it.
+//
+// ASSERTED PER ROW, not over the whole table: "an em dash appears" and "$0.00 does not appear"
+// are both satisfied with the two cells on each other's rows.
+func TestRunCost_ByRendersUnpricedAsADashNotZero(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":1059,"costMicros":146361600,"pricedRequests":1051,"priceableRequests":1058},
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1049,"costMicros":146361600,"pricedRequests":1049,"priceableRequests":1049},
+		   "freerate/1.0":{"requests":2,"pricedRequests":2,"priceableRequests":2},
+		   "bob-shell/2.0.5":{"requests":8,"priceableRequests":7}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	for _, tc := range []struct {
+		label, want, reject, why string
+	}{
+		{"claude-code/2.1.270", "$146.36", "—", "priced, with a cost"},
+		{"freerate/1.0", "$0.00", "—", "priced at a rate of zero: a real figure, not an unknown"},
+		{"bob-shell/2.0.5", "—", "$0.00", "nothing could price it: unknown, not free"},
+	} {
+		row := costTableRow(t, got, tc.label)
+		if !strings.Contains(row, tc.want) {
+			t.Errorf("%s (%s): row does not carry %q:\n%s", tc.label, tc.why, tc.want, row)
+		}
+		if strings.Contains(row, tc.reject) {
+			t.Errorf("%s (%s): row carries %q:\n%s", tc.label, tc.why, tc.reject, row)
+		}
+	}
+}
+
+// costTableRow returns the one --by table row mentioning label.
+//
+// Fails on 0 or 2+ matches rather than taking the first: a cell assertion scoped to "the output"
+// says nothing about which row carried it, and a label that also appears in the summary above
+// the table would silently widen the scope back out.
+func costTableRow(t *testing.T, out, label string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, label) {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly 1 line mentioning %q, got %d:\n%s", label, len(found), out)
+	}
+	return found[0]
+}
+
+// A grouping the window cannot serve is reported, not silently swallowed.
+//
+// The server DOWNGRADES rather than refusing — ledger-backed windows serve only the axes a Row
+// has a field for, and core/sessionapi reports the grouping IN EFFECT instead of a 400, which is
+// a considered decision and not one to undo from here. So the duty on this side is to notice:
+// compare what was asked for against snap.Group and say so, naming the axes that do work.
+// Without that the command prints an ungrouped total under a heading claiming a breakdown.
+func TestRunCost_ByDisclosesAGroupingTheServerDowngraded(t *testing.T) {
+	// Asked for host; the response says group=none, which is what a ledger window does.
+	srv := fakeUsageServer(t, `{"window":"today","group":"none","priced":true,
+		"totals":{"requests":10,"costMicros":5000000,"pricedRequests":10,"priceableRequests":10}}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--by", "host"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	combined := out.String() + errOut.String()
+	if !strings.Contains(combined, "host") {
+		t.Errorf("output does not name the grouping that was refused:\n%s", combined)
+	}
+	// And it must name at least one axis that DOES work, or the reader is told no and given
+	// nowhere to go.
+	if !strings.Contains(combined, "agent") {
+		t.Errorf("output does not name an axis that works:\n%s", combined)
+	}
+}
+
+// An axis the server SERVED but that came back empty says so, in wording a downgrade does not use.
+//
+// TWO ANSWERS A READER MUST NOT CONFUSE: "this window cannot break down by agent" (a downgrade —
+// snap.Group differs from what was asked) and "it can, and there was no traffic" (the axis was
+// served; the buckets were empty). The response here ECHOES group=agent, so reportDowngrade
+// returns false and this arm is the one that answers.
+//
+// Without the arm the command prints the AGENT/REQUESTS/TOKENS/COST heading with nothing under
+// it — the ungrouped-total-under-a-breakdown-heading shape reportDowngrade's own godoc says this
+// surface must not produce. So the heading's absence is asserted too, not just the note's
+// presence: a note printed above a bare heading would still be that shape.
+func TestRunCost_ByServedButEmptySaysSoAndIsNotADowngrade(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":0}}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "no agent breakdown for this window") {
+		t.Errorf("a served-but-empty axis printed no note saying so:\n%s", got)
+	}
+	// reportDowngrade's wording. Its appearance here would tell the reader the axis was refused
+	// when the server in fact served it.
+	if strings.Contains(got, "the server answered with") {
+		t.Errorf("served-but-empty was reported as a downgrade:\n%s", got)
+	}
+	// "REQUESTS" uppercase is the breakdown heading and nothing else in this command prints it.
+	if strings.Contains(got, "REQUESTS") {
+		t.Errorf("printed a breakdown heading with no rows under it:\n%s", got)
+	}
+}
+
+// --by and --agent are contradictory and refused.
+//
+// One asks for every label as a table, the other for a single label's figures. Silently letting
+// one win would print an answer to a question the operator did not ask — and which one won
+// would be an implementation detail.
+func TestRunCost_ByAndAgentTogetherAreRefused(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","totals":{"requests":1},"priced":false}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	code := runCost([]string{"--endpoint", srv.URL, "--by", "agent", "--agent", "bob-shell/2.0.5"}, &out, &errOut)
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero for two contradictory flags; stdout = %s", out.String())
+	}
+	if msg := errOut.String(); !strings.Contains(msg, "--by") || !strings.Contains(msg, "--agent") {
+		t.Errorf("error does not name both flags:\n%s", msg)
+	}
+}
+
+// --by discloses cost that no label in the table carries.
+//
+// THIS is the case the residual exists for, and the one cmd_cost.go's own comment predicted: a
+// table that sums to less than the headline above it, with nothing to explain the difference.
+// The residual is $0.75 against a $4.25 total, deliberately not equal to any row, so only the
+// disclosure can satisfy the assertion.
+func TestRunCost_ByDisclosesCostNoLabelCarries(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":10,"costMicros":4250000,"pricedRequests":10,"priceableRequests":10},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":6,"costMicros":2000000,"pricedRequests":6,"priceableRequests":6},
+		   "bob-shell/2.0.5":{"requests":4,"costMicros":1500000,"pricedRequests":4,"priceableRequests":4}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "0.75") {
+		t.Errorf("table does not disclose the $0.75 no row carries:\n%s", got)
+	}
+	if !strings.Contains(got, "no ") {
+		t.Errorf("figure is present but unexplained:\n%s", got)
+	}
+}
+
+// An unknown --by names the axes that are accepted — and "none" is unknown.
+//
+// "none" IS THE SECOND CASE BECAUSE ParseGroup ACCEPTS IT: it returns GroupNone with a nil
+// error, so the err check alone lets it through and `g == usage.GroupNone` is the only thing
+// rejecting it. Without that arm --by none asks for a breakdown by nothing and prints a heading
+// over an ungrouped total.
+//
+// ASSERTS THE WORDING because the message is the half that names the accepted axes. The endpoint
+// is unreachable on purpose — the axis is parsed before any request, so a typo costs no
+// connection.
+func TestRunCost_UnknownByNamesTheAcceptedAxes(t *testing.T) {
+	for _, by := range []string{"banana", "none"} {
+		t.Run(by, func(t *testing.T) {
+			var out, errOut strings.Builder
+			code := runCost([]string{"--endpoint", "http://127.0.0.1:1", "--by", by}, &out, &errOut)
+			if code == 0 {
+				t.Fatal("exit = 0, want non-zero for an axis that does not exist")
+			}
+			msg := errOut.String()
+			if !strings.Contains(msg, "is not an axis") {
+				t.Errorf("--by %q was not refused as an axis; an unreachable endpoint exits non-zero too:\n%s", by, msg)
+			}
+			if !strings.Contains(msg, by) {
+				t.Errorf("error does not echo the rejected value:\n%s", msg)
+			}
+			for _, want := range []string{"agent", "model", "endpoint"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error does not name the accepted axis %q:\n%s", want, msg)
+				}
+			}
+		})
+	}
+}
+
+// --by --json carries the axis, the folded series and the residual.
+//
+// THE HALF WITH NO READER UNTIL NOW. The human table is well covered, but costJSON is the shape
+// the struct's own comments argue hardest for — "a script is the reader that needs it most" — and
+// --by's three JSON-only producers (seriesForBreakdown, costJSON.By, and ungroupedForBreakdown's
+// by term) were reachable with nothing pointed at them. Each is asserted here by VALUE, not by
+// presence: a `by` key holding "" and a `series` key holding null both satisfy "the key is there"
+// while telling a script nothing.
+//
+// Decoded into map[string]any rather than costJSON, because unmarshalling into the struct that
+// produced it would agree with any renaming the struct made. The keys a script reads are the
+// assertion.
+func TestRunCost_ByJSONCarriesTheAxisTheSeriesAndTheResidual(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"agent","priced":true,
+		"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1048,"priceableRequests":1055},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1049,"tokens":297961318,"costMicros":146361600,
+		                          "pricedRequests":1048,"priceableRequests":1048}}},
+		          {"at":"2026-09-27T11:00:00Z","series":{
+		   "bob-shell/2.0.5":{"requests":8,"tokens":38682,"priceableRequests":7}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--by", "agent", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+
+	// The axis itself. Without it a consumer sees labels with no dimension, and
+	// "claude-code/2.1.270" and "api.anthropic.com" are both just strings.
+	if by, _ := got["by"].(string); by != "agent" {
+		t.Errorf("by = %q, want %q", by, "agent")
+	}
+
+	// The series, keyed on that axis and FOLDED ACROSS BUCKETS — the two labels arrive in
+	// different buckets above, so a producer handing over snap.Buckets verbatim, or one taking
+	// only the last bucket, fails here rather than looking plausible.
+	series, ok := got["series"].(map[string]any)
+	if !ok {
+		t.Fatalf("series is absent or not an object: %#v", got["series"])
+	}
+	// pricedRequests IS THE FIELD THAT SEPARATES THE TWO READINGS, not costMicros. costMicros is
+	// omitempty (usage.go:165), so "nothing priced this label" and "priced at a rate of zero" both
+	// decode to 0 from it and an assertion on it cannot tell them apart — zeroing PricedRequests
+	// across the fold passed this whole package before this line existed. The machine-path twin of
+	// the TUI's four-row agentCostCell table.
+	for label, want := range map[string]struct{ cost, priced float64 }{
+		"claude-code/2.1.270": {cost: 146361600, priced: 1048},
+		// Unpriced: requests but nothing priced them, so both the money fields and pricedRequests
+		// are omitempty-absent. pricedRequests is what makes this row distinguishable from a
+		// priced-at-zero one, which carries pricedRequests > 0 with the same absent cost.
+		"bob-shell/2.0.5": {cost: 0, priced: 0},
+	} {
+		entry, ok := series[label].(map[string]any)
+		if !ok {
+			t.Errorf("series is missing label %q: %#v", label, series)
+			continue
+		}
+		cost, _ := entry["costMicros"].(float64)
+		if cost != want.cost {
+			t.Errorf("series[%q].costMicros = %v, want %v", label, cost, want.cost)
+		}
+		priced, _ := entry["pricedRequests"].(float64)
+		if priced != want.priced {
+			t.Errorf("series[%q].pricedRequests = %v, want %v — this is the field that tells "+
+				"\"nothing priced it\" from \"priced at a rate of zero\"", label, priced, want.priced)
+		}
+	}
+
+	// The residual, which --by now owes for the same reason --agent does: without it a script
+	// summing the series against the total finds a shortfall with nothing to explain it.
+	if res, _ := got["ungroupedCostMicros"].(float64); res != 750000 {
+		t.Errorf("ungroupedCostMicros = %v, want 750000", res)
+	}
+}
+
+// Without --by, --json serialises none of the three breakdown keys.
+//
+// THE OTHER HALF OF THE CONTRACT, and the reason the positive test above is not enough: costJSON
+// spends forty lines arguing that the ABSENCE of these keys means "no breakdown was asked for",
+// so a producer that emitted `"by":""` or `"series":null` on the default path would break a
+// promise while still passing any present-and-correct assertion. Same fixture, flag removed.
+func TestRunCost_WithoutByJSONCarriesNoBreakdownKeys(t *testing.T) {
+	srv := fakeUsageServer(t, `{"window":"today","group":"none","priced":true,
+		"totals":{"requests":1057,"costMicros":146361600,"pricedRequests":1048,"priceableRequests":1055},
+		"ungroupedCostMicros":750000,
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":1049,"costMicros":146361600,
+		                          "pricedRequests":1048,"priceableRequests":1048}}}]}`)
+	defer srv.Close()
+
+	var out, errOut strings.Builder
+	if code := runCost([]string{"--endpoint", srv.URL, "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	// ungroupedCostMicros is in the fixture and still must not be serialised: the field's own
+	// comment says the default path asks for group=none, which cannot produce a residual, so a
+	// value arriving there means the producer changed and dropping it keeps the promise.
+	for _, absent := range []string{"by", "series", "ungroupedCostMicros"} {
+		if _, present := got[absent]; present {
+			t.Errorf("default path serialised %q = %#v; its absence is what means "+
+				"\"no breakdown was asked for\"", absent, got[absent])
+		}
+	}
+}
+
+// --agent does not carry the WINDOW's provenance beside ONE AGENT's figure.
+//
+// A MISATTRIBUTION, NOT A MISSING FEATURE. pricedBy, unpricedBy and incompleteBy describe the
+// whole window — only the ring populates them, keyed by reason rather than by agent, so a
+// snapshot holds nothing to re-derive one agent's share from. Copied through unchanged they sit
+// beside a costMicros that is one agent's, and the human path is worse than the machine one:
+// writeCostSummary prints "N of M priced requests carry an inexact figure" from the AGENT's
+// totals and then indents the WINDOW's reasons under it, which can account for more requests
+// than the line above them.
+//
+// This is writeCostSummary's own rule applied to itself — "a caveat printed beside a figure it is
+// not about is not a warning but a misattribution". The fixture is a ring-shaped window (a
+// duration, which is the kind that populates the maps at all) and the agent asked for owns 4 of
+// the window's 10 requests, so a leaked map is arithmetically visible and not just present.
+func TestRunCost_AgentDropsTheWindowsProvenance(t *testing.T) {
+	body := `{"window":"1h","group":"agent","priced":true,
+		"totals":{"requests":10,"costMicros":1240000,"pricedRequests":7,"priceableRequests":10},
+		"pricedBy":{"authoritative":4,"bundled":3},
+		"unpricedBy":{"api.openai.com gpt-5":3},
+		"incompleteBy":{"floor":2},
+		"buckets":[{"at":"2026-09-27T10:00:00Z","series":{
+		   "claude-code/2.1.270":{"requests":4,"costMicros":500000,"pricedRequests":4,"priceableRequests":4},
+		   "bob-shell/2.0.5":{"requests":6,"priceableRequests":6}}}]}`
+
+	t.Run("json carries no window-wide map", func(t *testing.T) {
+		srv := fakeUsageServer(t, body)
+		defer srv.Close()
+		var out, errOut strings.Builder
+		if code := runCost([]string{"--endpoint", srv.URL, "--agent", "claude-code/2.1.270", "--json"},
+			&out, &errOut); code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+			t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+		}
+		// The agent's own figure must still be there — otherwise this test would pass against a
+		// scopeToAgent that returned an empty snapshot.
+		if agent, _ := got["agent"].(string); agent != "claude-code/2.1.270" {
+			t.Fatalf("agent = %q, want the one asked for", agent)
+		}
+		totals, ok := got["totals"].(map[string]any)
+		if !ok {
+			t.Fatalf("totals is absent or not an object: %#v", got["totals"])
+		}
+		if cost, _ := totals["costMicros"].(float64); cost != 500000 {
+			t.Fatalf("totals.costMicros = %v, want this agent's 500000 (not the window's 1240000)", cost)
+		}
+		for _, leaked := range []string{"pricedBy", "unpricedBy", "incompleteBy"} {
+			if v, present := got[leaked]; present {
+				t.Errorf("--agent shipped the window's %q = %#v beside one agent's costMicros",
+					leaked, v)
+			}
+		}
+	})
+
+	// NO SUBTEST HERE FOR THE Priced NARROWING, deliberately. main already landed both halves —
+	// TestRunCost_AgentReportsThatAgentOnly asserts "cost unavailable" and never "$0.00" on the
+	// human path, and TestRunCost_JSONScopedToAnAgentNarrowsProvenanceAndNamesTheAgent asserts
+	// priced=false on the machine path, each for this same priceable-but-unpriced shape. Mutant
+	// M28 (scopeToAgent stops narrowing Priced) dies on those. A second pair here would be two
+	// names for one rule, which is the duplication this branch dropped its own agentCostCell
+	// copies to avoid.
+
+	t.Run("human summary carries no window-wide reason", func(t *testing.T) {
+		srv := fakeUsageServer(t, body)
+		defer srv.Close()
+		var out, errOut strings.Builder
+		if code := runCost([]string{"--endpoint", srv.URL, "--agent", "claude-code/2.1.270"},
+			&out, &errOut); code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr = %s", code, errOut.String())
+		}
+		got := out.String()
+		// The named gap and the inexactness reason are the two the window's maps would supply.
+		for _, leaked := range []string{"api.openai.com gpt-5", "floor"} {
+			if strings.Contains(got, leaked) {
+				t.Errorf("--agent printed the window's caveat %q beside one agent's figure:\n%s",
+					leaked, got)
+			}
+		}
+	})
+}
