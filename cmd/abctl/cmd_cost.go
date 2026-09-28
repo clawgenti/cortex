@@ -258,16 +258,36 @@ func scopeToAgent(snap *usage.Snapshot, agent string) (*usage.Snapshot, error) {
 	}
 	scoped := *snap
 	scoped.Totals = counts
-	// THE PROVENANCE MAPS DO NOT SURVIVE THE NARROWING, and dropping them is the only honest
-	// option. PricedBy, UnpricedBy and IncompleteBy describe the WHOLE WINDOW — only the ring
-	// populates them (core/cost/usage/snapshot.go), and it keys them by reason, not by agent, so
-	// there is nothing in a snapshot to re-derive one agent's share from. Carried over unchanged
-	// they would sit beside a CostMicros that is one agent's: writeCostSummary would print the
-	// window's reasons indented under the agent's count, which can account for more requests than
-	// the line above them, and costJSON would ship window-wide provenance next to an `agent` key.
-	// That is the rule writeCostSummary states about itself — "a caveat printed beside a figure it
-	// is not about is not a warning but a misattribution".
-	scoped.PricedBy, scoped.UnpricedBy, scoped.IncompleteBy = nil, nil, nil
+	// EVERY WHOLE-WINDOW STATEMENT ABOUT WHERE THE TOTALS CAME FROM GOES WITH Totals, or it is
+	// printed beside one agent's figure while describing all of them. Replacing only Totals left
+	// `--agent <an agent nothing priced>` printing $0.00 — the window was priced, just not this
+	// agent's traffic — for exactly the agent the AGENTS pane prints "—" for, which breaks both
+	// writeCostSummary's "cost unavailable rather than $0.00" rule and this function's own claim
+	// that the figure here and the row there cannot disagree.
+	//
+	// Priced is RE-DERIVED with the producers' own rule rather than one invented here: both
+	// snapshot.go and sessionapi set it to Totals.PricedRequests > 0, so the narrowed snapshot is
+	// the one they would have emitted had this agent's traffic been the whole window.
+	scoped.Priced = counts.PricedRequests > 0
+	// The three by-model maps are DROPPED, not narrowed, because nothing here can narrow them: a
+	// bucket's series is keyed by agent and carries no per-model breakdown, so the only available
+	// readings are the window's maps — which describe other agents' traffic — or none. They are
+	// omitempty on the wire, and costIncompleteReasonLines already treats an absent map as
+	// nothing to say, which is its common case for a ledger-backed window anyway.
+	scoped.PricedBy = nil
+	scoped.UnpricedBy = nil
+	scoped.IncompleteBy = nil
+	// Degraded and DaysOutsideRetention STAY, and the asymmetry is the point: they describe the
+	// READ and the retention configuration, which are the same facts whichever agent is scoped
+	// to. Dropping them would hide a short sum behind a narrower question.
+	//
+	// SeriesOvershootMicros and SeriesAvoidedOvershootMicros stay too, and they are the two the
+	// "every" above has to account for rather than pass over. Both are defect reports about a
+	// breakdown — the series summed to MORE than the total — so they belong with Degraded rather
+	// than with the provenance maps. A correct producer never sends either on this path:
+	// residualOf leaves them nil unless the series overshoots, which cannot happen where the
+	// figures reconcile. Where one does arrive it is upstream's bug, and forwarding it says so;
+	// narrowing it to an agent would be inventing a per-agent overshoot nothing computed.
 	return &scoped, nil
 }
 
@@ -408,7 +428,8 @@ type costJSON struct {
 	//
 	// HERE THOUGH UngroupedCostMicros IS NOT, and the difference is what the ABSENCE means
 	// rather than how likely the presence is. Both can only be populated where
-	// usage.Group.Reconcilable is true, so neither can arrive on this command's group=none. But
+	// usage.Group.Reconcilable is true, so neither arrives on the DEFAULT axis's group=none —
+	// --agent's group=agent is reconcilable, which is why the cost residual is carried there. But
 	// a missing residual is AMBIGUOUS — "the breakdown accounts for every dollar" and "no
 	// breakdown was asked for" are different answers wearing the same absence — and that is the
 	// promise a script would misread. A missing overshoot has one reading on every axis
@@ -437,9 +458,11 @@ type costJSON struct {
 	// a saving and NO COST moves only this one, leaving the cost residual at zero, which reads
 	// as "the breakdown accounts for everything". See usage.Snapshot.SeriesAvoidedOvershootMicros.
 	//
-	// Its positive twin is absent for the same reason UngroupedCostMicros is: this command asks
-	// for group=none, where a missing residual cannot be told apart from "no breakdown was
-	// asked for".
+	// Its positive twin, UngroupedAvoidedMicros, is absent — and no longer for the reason it
+	// once was. That reason was "this command asks for group=none"; --agent gave it a
+	// reconcilable axis, so the savings residual CAN now be populated and neither surface
+	// discloses it. The absence is a gap rather than a consequence, and the same argument that
+	// made UngroupedCostMicros due applies to it.
 	SeriesAvoidedOvershootMicros *int64 `json:"seriesAvoidedOvershootMicros,omitempty"`
 
 	// Agent names the coding agent Totals is scoped to, present only under --agent.

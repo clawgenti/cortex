@@ -255,6 +255,9 @@ func TestAgentsPane_EscReturnsToTheCaller(t *testing.T) {
 		{"opened from sessions", paneSessions, paneSessions},
 		{"opened from events", paneEvents, paneEvents},
 		{"opened from detail", paneDetail, paneDetail},
+		// Usage is the one caller with a tail beyond the pane swap: its polling chain has to be
+		// restarted on the way back, so without this row that branch is unexercised.
+		{"opened from usage", paneUsage, paneUsage},
 		{"no caller recorded falls back to sessions", paneNone, paneSessions},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,63 +275,170 @@ func TestAgentsPane_EscReturnsToTheCaller(t *testing.T) {
 	}
 }
 
-// An agent nothing could price renders "—", and a genuine zero renders "$0.00".
+// The caller `esc` returns to is the pane `A` was pressed on, not the pane the reply lands on.
 //
-// THE TWO READINGS THIS SEPARATES are the whole reason agentCostCell tests PricedRequests rather
-// than CostMicros: "nothing priced this agent" and "this agent was priced, and it cost nothing"
-// are different answers, and only the first is unknown. A guard written on the money field would
-// collapse them, and so would a test that only banned the string "$0.00" — the genuine-zero row
-// below is what makes this able to tell a correct implementation from that one.
+// THE FETCH IS A ROUND TRIP, so these are two different panes whenever the reader navigates
+// while it is in flight — and `A` pressed ON the pane is the case that bit: it recorded
+// paneAgents as its own caller, so the esc arm set pane to the pane it was already on and the
+// key read as broken. agentRowsLoadedMsg.from carries the press-time answer across, which is the
+// same reasoning the struct's `open` field already documents.
 //
-// The CLI twin of this rule is pinned by TestRunCost_ByRendersUnpricedAsADashNotZero. This is the
-// TUI half, which the AGENTS pane's COST column exists for.
-func TestAgentCostCell_UnpricedIsADashAndAGenuineZeroIsNot(t *testing.T) {
+// Driven through handleKey and Update rather than by calling enterAgentsOrRefuse directly: the
+// defect was in WHEN the caller was read, so a test that passes `from` itself cannot see it.
+func TestAgentsPane_RecordsTheCallerAtPressTimeNotAtReplyTime(t *testing.T) {
+	rows := []agentRow{
+		{label: "claude-code/2.1.270", Counts: usage.Counts{Requests: 1049, PricedRequests: 1048}},
+		{label: "bob-shell/2.0.5", Counts: usage.Counts{Requests: 8}},
+	}
 	for _, tc := range []struct {
-		name   string
-		counts usage.Counts
-		want   string
+		name string
+		// pressedOn is where `A` is pressed; movedTo is where the reader has navigated to by
+		// the time the reply lands. wantBack is where esc must then go.
+		pressedOn, movedTo, wantBack paneID
+		// previousPane seeds the model, so the refetch case can prove it is PRESERVED rather
+		// than merely not overwritten with paneAgents.
+		previousPane paneID
 	}{
-		{"nothing priced", usage.Counts{Requests: 8, PriceableRequests: 7}, emptyCell},
-		{"priced at a rate of zero", usage.Counts{Requests: 4, PricedRequests: 4, CostMicros: 0}, "$0.00"},
-		{"priced and charged", usage.Counts{Requests: 4, PricedRequests: 4, CostMicros: 1_500_000}, "$1.50"},
-		// Sub-cent, because the column's own comment says formatUSDTotalMicros "carries the floor
-		// that keeps a known sub-cent charge from printing as free". Note the third distinct
-		// answer: a known charge under a cent is "<$0.01", which is neither the "$0.00" of a
-		// genuine zero nor the "—" of an unpriced agent. All three readings stay separable.
-		{"priced below a cent", usage.Counts{Requests: 1, PricedRequests: 1, CostMicros: 400}, "<$0.01"},
+		// NOT paneSessions AS THE CALLER in either of the first two rows, and that is the
+		// difference between a guard and a decoration. The esc arm falls back to paneSessions
+		// when no caller was recorded, so a row that presses `A` FROM Sessions gets the right
+		// answer out of the fallback as well — deleting the assignment outright left all three
+		// rows green (mutant `enter-no-previouspane` SURVIVED) until these two moved off it. A
+		// caller the fallback cannot coincide with is what makes the row able to fail.
+		{
+			name:      "reader stays put",
+			pressedOn: paneDetail, movedTo: paneDetail, wantBack: paneDetail,
+			previousPane: paneNone,
+		},
+		{
+			// The reply-time read returned paneEvents here — the later pane, which never
+			// asked for anything.
+			name:      "reader navigates while the fetch is in flight",
+			pressedOn: paneDetail, movedTo: paneEvents, wantBack: paneDetail,
+			previousPane: paneNone,
+		},
+		{
+			// A refetch. The reply-time read made the pane its own caller and esc went nowhere.
+			name:      "A pressed again while already on the pane keeps the original caller",
+			pressedOn: paneAgents, movedTo: paneAgents, wantBack: paneUsage,
+			previousPane: paneUsage,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := agentCostCell(tc.counts); got != tc.want {
-				t.Errorf("agentCostCell(%+v) = %q, want %q", tc.counts, got, tc.want)
+			m := &model{
+				pane:               tc.pressedOn,
+				previousPane:       tc.previousPane,
+				agents:             rows,
+				agentsTbl:          newAgentsTable(),
+				client:             deadClient(),
+				pipelineReturnPane: paneNone,
+			}
+			// The press, and then its command is RUN, so the `from` under test is the one
+			// keys.go resolved rather than one this test recomputed. deadClient points at a
+			// refused port, so the reply carries an error — and `from` alongside it, which is
+			// the only field wanted here. Recomputing the press-time rule locally would make
+			// this pass no matter what keys.go decided.
+			cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+			if cmd == nil {
+				t.Fatalf("`A` on %v returned no fetch command", tc.pressedOn)
+			}
+			failed, ok := cmd().(agentRowsLoadedMsg)
+			if !ok {
+				t.Fatalf("`A`'s command did not produce an agentRowsLoadedMsg")
+			}
+			// The reader moves before the reply arrives. A reply-time read of m.pane sees this
+			// pane; the press never did.
+			m.pane = tc.movedTo
+			updated, _ := m.Update(agentRowsLoadedMsg{rows: rows, open: true, from: failed.from})
+			m = updated.(*model)
+			if m.pane != paneAgents {
+				t.Fatalf("reply did not open the pane: pane = %v", m.pane)
+			}
+			m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+			if m.pane != tc.wantBack {
+				t.Errorf("esc after `A` from %v (reader moved to %v) landed on %v, want %v",
+					tc.pressedOn, tc.movedTo, m.pane, tc.wantBack)
 			}
 		})
 	}
 }
 
-// The rule survives the trip through the table the pane actually renders.
+// The COST cell says "—" for an agent nothing priced and a real figure for one priced at zero.
 //
-// agentCostCell is correct in isolation above; this pins that rebuildAgentsTable puts its output
-// in the COST cell rather than formatting the money a second way. Two rows, one priced and one
-// not, so a builder that dropped the helper would have to reproduce both answers to pass.
-func TestRebuildAgentsTable_CarriesTheCostCellRuleIntoTheRow(t *testing.T) {
+// THE ZERO-RATE ROW IS THE WHOLE TEST. "unpriced renders —" alone is satisfied by keying on
+// CostMicros, which is the wrong field and the mistake this cell was written to avoid: a request
+// CAN be priced at a rate of zero, and collapsing that into "not priced" throws away the one
+// distinction the column exists to make. Only a row with PricedRequests > 0 AND CostMicros == 0
+// separates the two readings, so without it both a CostMicros key and no guard at all pass.
+//
+// Bob is the live instance of the unpriced row — it bills in credits, which the cost model
+// cannot represent — and `abctl cost --agent` makes the same call through snapshot.Priced, which
+// is why TestRunCost_AgentReportsThatAgentOnly asserts "cost unavailable" on the same shape.
+func TestAgentCostCell_UnpricedIsADashAndAZeroRateIsAFigure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		usage.Counts
+		want string
+	}{
+		{
+			// Bob: priceable traffic, nothing priced it.
+			"nothing priced it",
+			usage.Counts{Requests: 8, PriceableRequests: 7},
+			emptyCell,
+		},
+		{
+			// The case that fails a CostMicros key: priced, and it genuinely cost nothing.
+			"priced at a rate of zero",
+			usage.Counts{Requests: 4, PricedRequests: 4, PriceableRequests: 4},
+			"$0.00",
+		},
+		{
+			"priced with a cost",
+			usage.Counts{Requests: 1049, PricedRequests: 1048, CostMicros: 146_361_600},
+			"$146.36",
+		},
+		{
+			// Sub-half-cent: the floor formatUSDTotalMicros carries, so a known charge never
+			// prints as free. A dash here would be the same lie from the other direction.
+			"priced below half a cent",
+			usage.Counts{Requests: 1, PricedRequests: 1, CostMicros: 400},
+			"<$0.01",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentCostCell(tc.Counts); got != tc.want {
+				t.Errorf("agentCostCell(%+v) = %q, want %q", tc.Counts, got, tc.want)
+			}
+		})
+	}
+}
+
+// And the cell the table actually renders is that function's answer, not a second spelling.
+//
+// agentCostCell could be correct while rebuildAgentsTable formatted the money itself — the
+// mutation that deleted the guard would then still show $0.00 on screen with the unit test
+// green. This walks the built rows so the assertion covers the path a reader sees.
+func TestRebuildAgentsTable_RendersTheUnpricedAgentAsADash(t *testing.T) {
 	m := &model{
 		agentsTbl: newAgentsTable(),
 		agents: []agentRow{
-			{label: "claude-code/2.1.270", Counts: usage.Counts{Requests: 9, PricedRequests: 9, CostMicros: 2_250_000}},
-			{label: "bob-shell/2.0.5", Counts: usage.Counts{Requests: 8, PriceableRequests: 7}},
+			{label: "claude-code/2.1.270", Counts: usage.Counts{
+				Requests: 1049, Tokens: 297_961_318, PricedRequests: 1048, CostMicros: 146_361_600}},
+			{label: "bob-shell/2.0.5", Counts: usage.Counts{
+				Requests: 8, Tokens: 38_682, PriceableRequests: 7}},
 		},
 	}
 	m.rebuildAgentsTable()
-
 	rows := m.agentsTbl.Rows()
 	if len(rows) != 2 {
-		t.Fatalf("rebuilt %d rows, want 2", len(rows))
+		t.Fatalf("rows = %d, want 2", len(rows))
 	}
-	// Column 3 is COST — see newAgentsTable's column list.
-	if got, want := rows[0][3], "$2.25"; got != want {
-		t.Errorf("priced row COST = %q, want %q", got, want)
+	// Cost is the last column; see newAgentsTable for why it is the widest.
+	const costCol = 3
+	if got := rows[1][costCol]; got != emptyCell {
+		t.Errorf("unpriced agent's COST cell = %q, want %q — $0.00 would read as free", got, emptyCell)
 	}
-	if got, want := rows[1][3], emptyCell; got != want {
-		t.Errorf("unpriced row COST = %q, want %q (never $0.00)", got, want)
+	if got := rows[0][costCol]; got != "$146.36" {
+		t.Errorf("priced agent's COST cell = %q, want %q", got, "$146.36")
 	}
 }

@@ -1609,10 +1609,12 @@ func CapSeries(series map[string]Counts, n int) map[string]Counts {
 // window total means.
 //
 // THROUGH Counts.Add, which is the reason it is worth sharing rather than retyping: Add
-// saturates and records it in Saturated, where a hand-written `+=` wraps negative. Every
-// consumer here ranks or compares the result, so a wrapped cost total sorts BELOW a ten-micro
-// one — in the pane that orders agents by spend, that silently moves the biggest spender to
-// the bottom. rankSeriesByCost's godoc in abctl records the same trap being hit for real.
+// saturates and records it in Saturated, where a hand-written `+=` wraps negative. The
+// consumers that RANK OR COMPARE the result are the ones that argument is for: a wrapped cost
+// total sorts BELOW a ten-micro one, so in the pane that orders agents by spend it silently
+// moves the biggest spender to the bottom. rankSeriesByCost's godoc in abctl records the same
+// trap being hit for real. `abctl cost --agent` looks up a single label and does neither, and
+// wants the same saturating answer anyway — one definition of a window total, not two.
 //
 // Returns an empty map rather than nil for no buckets, so "no traffic" is an empty answer and
 // not something a caller has to nil-check.

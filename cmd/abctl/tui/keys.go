@@ -850,7 +850,20 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case paneNamespaces, panePods:
 			return nil
 		}
-		return m.fetchAgentRowsCmd(true)
+		// THE CALLER IS RESOLVED HERE, AT PRESS TIME, the way `case "C":` below resolves its
+		// own — and then carried on the message rather than re-read when the reply lands. The
+		// fetch is a round trip, so m.pane at reply time is whatever pane the reader has since
+		// navigated to, which is not who pressed the key.
+		//
+		// A press while already ON the pane is a refetch, not a new entry, so it keeps the
+		// caller it already has. Recording paneAgents as its own caller is what made the first
+		// esc afterwards a no-op — the arm sets pane to previousPane, which was the pane it was
+		// already on — and a key-opened surface owes its caller a way back.
+		from := m.pane
+		if from == paneAgents {
+			from = m.previousPane
+		}
+		return m.fetchAgentRowsCmd(true, from)
 
 	case "C":
 		// Open the registered-plugin catalog. Available from any

@@ -1325,7 +1325,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// fail silently either — see agentsPaneRefusal on why no refusal here may be mute.
 			m.setFlash("agents: " + msg.err.Error())
 		default:
-			if entered, why := m.enterAgentsOrRefuse(); !entered {
+			// msg.from, not m.pane: the caller was resolved when `A` was pressed, and this
+			// runs a round trip later. See agentRowsLoadedMsg.from.
+			if entered, why := m.enterAgentsOrRefuse(msg.from); !entered {
 				m.setFlash(why)
 			}
 		}
