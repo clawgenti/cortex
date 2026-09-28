@@ -1,4 +1,4 @@
-# Weather Agent — Advanced AuthBridge Demo (UI)
+# Weather Agent — Advanced Cortex Demo (UI)
 
 UI-driven companion to the beginner [Weather Agent demo](demo-ui.md). Same agent
 and tool images, but with the full **token-exchange + ingress validation** story

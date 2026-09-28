@@ -39,7 +39,7 @@ type Config struct {
 	// SPIFFE, when non-nil, configures the in-process Provider that
 	// supplies X.509-SVIDs to the mTLS listeners and a JWT-SVID to the
 	// token-exchange plugin (when configured). Pointer so absent block
-	// = today's spiffe-helper-driven behavior (until the chart/operator
+	// = no Provider and no mirrored SVID files (until the chart/operator
 	// follow-ups land and start populating the block).
 	SPIFFE *SPIFFEConfig `yaml:"spiffe,omitempty" json:"spiffe,omitempty"`
 	// TLSBridge, when non-nil and Enabled, terminates agent outbound TLS so the
@@ -342,8 +342,9 @@ func (m *MTLSConfig) Validate() error {
 // drives the in-process Provider that supplies X.509-SVIDs to the mTLS
 // listeners and a JWT-SVID to the token-exchange plugin (when configured).
 //
-// Defaults match today's spiffe-helper-driven setup so existing
-// deployments boot without changes once chart/operator follow-ups land.
+// Defaults match the file layout spiffe-helper used to write. They apply
+// only when this block is present: Load() gates them on non-nil, and an
+// absent block constructs no Provider at all.
 //
 // The audience for the JWT-SVID used by token-exchange as a client
 // assertion is per-plugin (tokenexchange.identity.jwt_audience) and is

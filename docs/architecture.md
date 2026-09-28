@@ -1,6 +1,6 @@
-# AuthBridge
+# Cortex
 
-AuthBridge provides **secure, transparent token management** for Kubernetes workloads. The shared library is at [`core/`](../core/); the sidecar binaries live under [`cmd/`](../cmd/) (see [`cmd/README.md`](../cmd/README.md) for which pins which mode). Keycloak client registration is handled by the [operator](https://github.com/rossoctl/operator)'s `ClientRegistrationReconciler` (no in-pod registration sidecar). Together with [SPIFFE/SPIRE](https://spiffe.io), this enables zero-trust authentication flows.
+Cortex provides **secure, transparent token management** for Kubernetes workloads. The shared library is at [`core/`](../core/); the sidecar binaries live under [`cmd/`](../cmd/) (see [`cmd/README.md`](../cmd/README.md) for which pins which mode). Keycloak client registration is handled by the [operator](https://github.com/rossoctl/operator)'s `ClientRegistrationReconciler` (no in-pod registration sidecar). Together with [SPIFFE/SPIRE](https://spiffe.io), this enables zero-trust authentication flows.
 
 > **📘 Looking to run the demo?** See the [Weather Agent](../demos/weather-agent/demo-ui.md) or [GitHub Issue Agent](../demos/github-issue/demo.md) demos for step-by-step instructions, and [Token-Exchange Routes](../demos/token-exchange-routes/README.md) for route configuration.
 
@@ -85,9 +85,9 @@ See [`docs/plugin-catalog.md`](./plugin-catalog.md) for the full list of impleme
 
 The following describes the operator-injected sidecar deployment. After cortex#411 each mode is served by its own image (one container per pod). SPIRE credentials are fetched **in-process** by `core/spiffe`'s Provider over the Workload API. The legacy `authbridge-unified`, `authbridge-light`, `envoy-with-processor`, and standalone `client-registration` / `spiffe-helper` sidecars are gone — there is no bundled `spiffe-helper` binary and `SPIRE_ENABLED` no longer gates anything.
 
-### What AuthBridge Does
+### What Cortex Does
 
-AuthBridge solves the challenge of **secure service-to-service authentication** in Kubernetes:
+Cortex solves the challenge of **secure service-to-service authentication** in Kubernetes:
 
 1. **Automatic Identity** - Workloads automatically obtain their identity from SPIFFE/SPIRE and register as Keycloak clients using their SPIFFE ID (e.g., `spiffe://example.com/ns/default/sa/myapp`)
 
@@ -437,7 +437,7 @@ AuthBridge supports per-host token exchange configuration via `routes.yaml`:
 Use `keycloak_sync.py` to reconcile routes.yaml with Keycloak configuration:
 
 ```bash
-python keycloak_sync.py --config routes.yaml --agent-client "spiffe://..." --yes
+python scripts/keycloak_sync.py --config routes.yaml --agent-client "spiffe://..." --yes
 ```
 
 This creates target clients, audience scopes, and assigns scopes to the agent.

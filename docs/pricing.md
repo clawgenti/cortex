@@ -19,7 +19,7 @@ Neither owns the cost model. One owner of rates means `tool-prune`,
 | Settling one request's cost | `core/cost/settle` | this page ([Cost records](#cost-records)) |
 | The published record | `core/cost/event` | this page ([Cost records](#cost-records)) |
 | Durable per-minute ledger (`cost_ledger:`) | `core/cost/ledger` | [`laptop-service.md`](laptop-service.md) for the config; [`framework-architecture.md`](framework-architecture.md) for why it is not hot-reloadable |
-| Windowed aggregation, `/v1/usage` | `core/cost/usage` | **not yet documented** — `GET /` on the session API lists the endpoint, and [`litellm-budgettrack-plugin.md`](litellm-budgettrack-plugin.md) covers reading `unpricedBy` |
+| Windowed aggregation, `/v1/usage` | `core/cost/usage` | this page ([Reading usage over HTTP](#reading-usage-over-http)) |
 | Daily caps, drift check | `core/plugins/litellm_budgettrack` | [`litellm-budgettrack-plugin.md`](litellm-budgettrack-plugin.md) |
 
 > **Terminology.** *Rate* — money per token for one tier of one model at one endpoint.
@@ -167,6 +167,53 @@ carries `[bundled]` or `[configured]` when a total is wholly one provenance, and
 dominant source when it is mixed. A wholly `authoritative` total is left unannotated,
 since that is the baseline a reader already assumes. Note this annotation is in the TUI
 only — `abctl cost` does not print it.
+
+## Reading usage over HTTP
+
+`GET /v1/usage` on the session API (`:9094` in Kubernetes, `:47601` for the laptop
+install) is the aggregate behind `abctl cost`. Query parameters:
+
+| Parameter | Values | Notes |
+|---|---|---|
+| `window` | `today`, `month`, `7d`, or a duration (`1h`, `6h`) | `today`, `month` and `7d` are served from the durable ledger. A duration is served from the in-memory ring. |
+| `group` | `none`, `model`, `endpoint`, `session`, `agent`, `status`, `plugin`, `host` (`method` aliases `model`) | See the caveat below. |
+| `resolution` | a duration | Bucket size on a ring-served window. A ledger-backed window is answered as one bucket spanning the whole window and does not read this at all; `bucketSeconds` reports the span actually served. |
+| `session` | a session id | Combining it with a symbolic window (`today`, `month`, `7d`) is rejected with 400. |
+
+Response envelope: `window`, `bucketSeconds`, `group`, `buckets[]`, `totals` and `priced` are
+always present. Every other field is `omitempty` and appears only when it applies, so a clean
+response is shorter than the struct — among them `degraded`, `ungroupedCostMicros` and
+`daysOutsideRetention`, which is where dropped ledger rows, unattributable spend and a window
+reaching past retention are disclosed. Do not code against a closed field list.
+
+`pricedBy`, `unpricedBy` and `incompleteBy` are absent on a ledger-backed window even when
+pricing gaps exist — a per-minute row cannot say which requests could not be priced, and
+emitting one map without the other would read as "no gaps here". Read `totals.pricedRequests`
+against `totals.priceableRequests` for that instead. `pricedBy` is keyed by provenance —
+`bundled`, `discovered`, `configured`, `authoritative`, plus `unlabelled` for a producer that
+settled a figure without naming its level. Nothing produces `discovered` today; it is a defined
+level kept so that anything which later learns rates from a gateway has a slot in the precedence
+order. `unpricedBy` is keyed by `<endpoint> <model>`.
+
+**The response reports the `group` it SERVED, not the one you asked for — and the
+difference is silent.** On a ledger-backed window (`today`, `month`, `7d`) only
+`endpoint`, `agent` and `model` are actually grouped; `host`, `session`, `status`
+and `plugin` fall back to `group: "none"` with no error and HTTP 200. Always read the `group` field
+back:
+
+```sh
+curl -s 'localhost:47601/v1/usage?window=today&group=endpoint' | jq .group
+# "endpoint"    <- honoured
+
+curl -s 'localhost:47601/v1/usage?window=today&group=host' | jq .group
+# "none"        <- silently degraded
+```
+
+Two aggregates answer the same question and may disagree slightly, which is not a bug
+and is not spend: the ring prices a request nothing else priced from the rate table,
+while the ledger reports it unpriced instead. `abctl cost --help` documents the window
+semantics in more depth than this page, including why the two must never be subtracted
+from each other.
 
 ## Getting the numbers
 

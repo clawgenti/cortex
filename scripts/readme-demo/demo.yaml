@@ -3,8 +3,11 @@
 # Regenerate the asset after editing:  go run .
 # CI fails if docs/assets/cortex-demo.svg does not match this file.
 #
-# Every string in the shell act is copied from the real source, not paraphrased:
-#   install.sh:376,892,1048,1157   cmd_claudecode.go:462,464,724,495
+# Every string in the shell act is copied from the real source, not paraphrased.
+# The sources are scripts/install.sh and cmd/abctl/cmd_claudecode.go; grep a quoted
+# fragment below to find the line it came from, rather than trusting a line number here.
+# Most of these strings interpolate a variable at source, so grep a literal prefix of one
+# rather than the whole rendered line.
 # If those strings change, change them here too — the demo claims to be cortex.
 
 total: 50s
@@ -15,14 +18,14 @@ grid:
 acts:
   # Acts 1 and 2 of the storyboard are one continuous terminal, because
   # --claude-code does not merely suggest `abctl claude-code enable`: the
-  # installer RUNS it (install.sh:1227-1233) and only prints the "run this
-  # yourself" hint when it is not doing so (install.sh:1219). So the consent
+  # installer RUNS it and only prints the "run this yourself" hint when it is
+  # not doing so — grep `claude-code enable` in scripts/install.sh. So the consent
   # prompt arrives as the tail of the install, with nothing typed but the y.
   - name: install
     kind: shell
     runtime: 14s
     steps:
-      - cmd: "curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/install.sh | sh -s -- --claude-code"
+      - cmd: "curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh | sh -s -- --claude-code"
         out:
           - "Resolving newest release..."
           - "Downloading v0.9.3 for darwin/arm64..."

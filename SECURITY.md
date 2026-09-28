@@ -39,5 +39,5 @@ This project implements several security controls:
 ## Security-Related Configuration
 
 For deployment security configuration, see:
-- [AuthBridge architecture](docs/architecture.md) - Authentication bridge architecture
+- [Cortex architecture](docs/architecture.md) - Cortex authentication architecture
 - [operator](https://github.com/rossoctl/operator) - Admission webhook configuration (migrated from this repo)

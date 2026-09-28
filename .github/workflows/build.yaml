@@ -32,16 +32,16 @@ jobs:
             dockerfile: Dockerfile.init
 
           # AuthBridge envoy-sidecar combined image —
-          # Envoy + authbridge-envoy (ext_proc) + spiffe-helper.
-          # Spiffe-helper starts conditionally based on SPIRE_ENABLED.
+          # Envoy + authbridge-envoy (ext_proc). SVIDs are fetched
+          # in-process over the SPIRE Workload API; no spiffe-helper.
           - name: authbridge-envoy
             context: .
             dockerfile: cmd/authbridge-envoy/Dockerfile
 
           # AuthBridge proxy-sidecar combined image (default mode) —
-          # authbridge-proxy (full plugin set, includes parsers) +
-          # spiffe-helper. No Envoy, no gRPC. Spiffe-helper starts
-          # conditionally based on SPIRE_ENABLED.
+          # authbridge-proxy (full plugin set, includes parsers).
+          # No Envoy, no gRPC. SVIDs are fetched in-process over the
+          # SPIRE Workload API; no spiffe-helper.
           - name: authbridge
             context: .
             dockerfile: cmd/authbridge-proxy/Dockerfile

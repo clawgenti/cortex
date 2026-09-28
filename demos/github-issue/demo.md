@@ -1,7 +1,7 @@
-# GitHub Issue Agent Demo with AuthBridge
+# GitHub Issue Agent Demo with Cortex
 
-This demo shows the **GitHub Issue Agent** running with **AuthBridge** for transparent,
-zero-trust token management. AuthBridge provides automatic identity registration,
+This demo shows the **GitHub Issue Agent** running with **Cortex** for transparent,
+zero-trust token management. Cortex provides automatic identity registration,
 inbound JWT validation, and outbound token exchange — all without changing the
 agent code.
 
@@ -14,8 +14,9 @@ For a simpler getting-started demo without token exchange, see the
 |-------|-------------|----------|
 | **[Manual Deployment](demo-manual.md)** | Deploy everything via `kubectl` and YAML manifests | Full control, debugging, understanding internals |
 | **[UI Deployment](demo-ui.md)** | Import agent and tool via the Rossoctl dashboard | Quick start, UI-driven workflow |
+| **[AI Access Control](demo-aiac.md)** | Generate Keycloak RBAC policies from natural language with an LLM, on top of this demo | Policy-as-code, AI-driven access control |
 
-Both guides share the same infrastructure setup (webhook, Keycloak, ConfigMaps) and
+The Manual and UI guides share the same infrastructure setup (webhook, Keycloak, ConfigMaps) and
 produce identical AuthBridge security behavior.
 
 ## What This Demo Shows
@@ -79,6 +80,7 @@ Common names used by both:
 |------|-------------|
 | [demo-manual.md](demo-manual.md) | Full manual deployment guide |
 | [demo-ui.md](demo-ui.md) | UI-driven deployment guide |
+| [demo-aiac.md](demo-aiac.md) | AI-generated access-control policies (`aiac/`) |
 | [setup_keycloak.py](setup_keycloak.py) | Keycloak configuration script |
 | [k8s/configmaps.yaml](k8s/configmaps.yaml) | ConfigMaps for AuthBridge sidecars |
 | [k8s/git-issue-agent-deployment.yaml](k8s/git-issue-agent-deployment.yaml) | Agent deployment YAML (manual) |
@@ -86,7 +88,7 @@ Common names used by both:
 
 ## Related
 
-- [All Demos](../README.md) — index of all AuthBridge demos
+- [All Demos](../README.md) — index of all Cortex demos
 - [Weather Agent Demo](../weather-agent/demo-ui.md) — simpler getting-started demo (no token exchange)
 - [Token-Exchange Routes](../token-exchange-routes/README.md) — route-based token exchange to multiple tools
-- [AuthBridge Overview](../../docs/architecture.md) — architecture and design
+- [Cortex Overview](../../docs/architecture.md) — architecture and design

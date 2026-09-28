@@ -28,7 +28,7 @@
 
   <rect width="1380" height="1500" fill="#f8fafc"/>
 
-  <text x="40" y="44" class="title">AuthBridge — Plugin Pipeline Sequence (inbound validation → outbound exchange)</text>
+  <text x="40" y="44" class="title">Cortex — Plugin Pipeline Sequence (inbound validation → outbound exchange)</text>
   <text x="40" y="66" class="sub">A request enters the agent (inbound pass), the agent calls a tool (outbound pass). Pipelines dispatch in declaration order on the request phase (pipeline.go:104).</text>
 
   <!-- Example config box -->

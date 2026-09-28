@@ -1,11 +1,11 @@
 ---
 name: demo
-description: Use when building, debugging, or running an AuthBridge demo end-to-end on a Kind cluster with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh — covers the demo directory layout, the Keycloak setup scripts, and the recurring failure modes (ext_proc header ordering, ambient-mesh inbound path, Keycloak scope assignment).
+description: Use when building, debugging, or running a Cortex demo end-to-end on a Kind cluster with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh — covers the demo directory layout, the Keycloak setup scripts, and the recurring failure modes (ext_proc header ordering, ambient-mesh inbound path, Keycloak scope assignment).
 ---
 
-# Skill: AuthBridge Demo Development
+# Skill: Cortex Demo Development
 
-This skill captures knowledge from building, debugging, and running AuthBridge demos end-to-end on Kind clusters with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh.
+This skill captures knowledge from building, debugging, and running Cortex demos end-to-end on Kind clusters with SPIFFE/SPIRE, Keycloak, and Istio ambient mesh.
 
 > **Some entries below are historical.** They describe failures from the
 > pre-cortex#411 multi-sidecar shape, when `spiffe-helper` and
@@ -82,10 +82,9 @@ gone), and `demos/github-issue/k8s/configmaps.yaml` has shrunk to
 `authbridge-config` + `authproxy-routes` with no listener in it at all.
 
 Inbound interception is configured through `authbridge-config` and rendered by
-the operator, not hand-written into demo ConfigMaps. The one hand-maintained
-Envoy filter chain left in the repo is
-`demos/mtls/k8s/envoy-config-mtls.yaml`; nothing needs lockstep edits
-any more.
+the operator, not hand-written into demo ConfigMaps. No hand-maintained Envoy filter chain is left in the repo — the last one,
+`demos/mtls/k8s/envoy-config-mtls.yaml`, was retired with that demo — so
+nothing needs lockstep edits any more.
 
 ## Critical Bugs and Fixes
 

@@ -74,9 +74,44 @@ The sidecar injection webhook lives in a separate repo: [rossoctl/operator](http
 **Container registry:** `ghcr.io/rossoctl/cortex/<image-name>`
 **License:** Apache 2.0
 
-## What AuthBridge Does
+### Naming: Cortex is the product, AuthBridge is the sidecar
 
-AuthBridge provides **zero-trust, transparent token management** for Kubernetes workloads. It combines three capabilities:
+Two renames have happened and only one of them finished. **Kagenti → Rossoctl is
+complete** — apart from this rule, every remaining `kagenti` string is inside
+`docs/superpowers/`, a frozen archive. Treat a new one as a mistake.
+
+**AuthBridge → Cortex is deliberately partial, and the boundary is the point.**
+`Cortex` is the product: this repo, the registry namespace, the laptop service,
+`~/.cortex/`. `AuthBridge` is the name of the **injected sidecar component**, and it
+survives inside artifact identifiers that other things address by name:
+
+| Frozen — do not rename | Where it is defined |
+|---|---|
+| `authbridge`, `authbridge-envoy`, `authbridge-lite`, `authbridge-cpex` | published image names; the operator selects images **by name** |
+| `authbridge-{proxy,envoy,cpex,praxis}` | binary names, `cmd/` dirs, Go module paths, release tarballs |
+| `x-authbridge-{direction,secret}`, `x-authbridge-unmapped-<name>` | wire protocol |
+| `AUTHBRIDGE_*` | env vars users may already have set |
+| `authbridge-config{,-<agent>}`, `authbridge-runtime{,-config,-mtls}`, `authproxy-routes` | ConfigMaps the operator creates and mounts |
+| `/etc/authbridge/config.yaml` | the operator's volume spec; also this repo's entrypoint and manifests |
+| `abph_` | credential-handle prefix, on the wire |
+| `Spec.AuthBridgeMode`, `rossoctl.io/authbridge-mode` | **another repo's API** — the operator's AgentRuntime CRD field and its annotation |
+
+That last row is why "just rename it everywhere" is not on the table: two of these are
+a CRD field and a Kubernetes annotation owned by `rossoctl/operator`. Retiring them
+needs a deprecation window and coordinated PRs in at least two repositories.
+
+**The rule for prose and comments:** say **Cortex** when the sentence is about the
+product — what it is, what it does, what a demo demonstrates. Keep **AuthBridge** when
+the phrase names a concrete artifact: a sidecar, an image, a binary, a container, that
+container's logs, a mode field, a ConfigMap, a literal UI label. Both of these are correct: "Cortex
+provides zero-trust token management", "the AuthBridge sidecar validates the JWT".
+
+`install.sh` is the reference implementation — zero prose "AuthBridge", with
+`authbridge-proxy` appearing only as the name of the binary it installs.
+
+## What Cortex Does
+
+Cortex provides **zero-trust, transparent token management** for Kubernetes workloads. It combines three capabilities:
 
 1. **Automatic Identity** -- Workloads obtain SPIFFE IDs from SPIRE and auto-register as Keycloak clients
 2. **Inbound JWT Validation** -- Incoming requests are validated (signature, issuer, audience) by the authbridge binary
@@ -154,6 +189,8 @@ cortex/
 │                                     #   not an inert archive.
 │
 ├── scripts/
+│   ├── install.sh                    # Laptop installer (abctl + the local proxy service)
+│   ├── keycloak_sync.py              # Declarative Keycloak sync tool (routes.yaml driven)
 │   ├── dev/                          # Loose dev-only shell scripts
 │   │   ├── local-build-and-test.sh   #   Build every image and load it into Kind
 │   │   ├── verify-spire-keycloak.sh  #   Platform preflight for a local dev cluster
@@ -171,21 +208,18 @@ cortex/
 │   ├── sparc-service/                #   Python SPARC reflection service (own image)
 │   └── lineage-attach/               #   OTel shim + scripts for lineage propagation
 │
-├── demos/                            # 12 scenarios — see demos/README.md for the order
+├── demos/                            # 10 scenarios — see demos/README.md for the order
 │   ├── weather-agent/                #   Getting started (+ advanced, + abctl walkthrough)
 │   ├── github-issue/                 #   Token exchange + scope-based access (largest)
 │   ├── token-exchange-routes/        #   Routes config reference
-│   ├── mcp-parser/                   #   Enabling the outbound mcp-parser plugin
 │   ├── ibac/, hr-cpex/,              #   Guardrail / policy demos
 │   │   finance-sparc/                #   (echo, ibac and finance-sparc are
-│   ├── echo/, mtls/, lineage/        #    self-contained Go modules)
+│   ├── echo/, lineage/               #    self-contained Go modules)
 │   ├── session-budget/               #   Redis-backed budget tracking
 │   └── context-guru/                 #   Opt-in context-guru plugin
 │
-├── keycloak_sync.py                  # Declarative Keycloak sync tool (routes.yaml driven)
 ├── tests/                            # Python tests (keycloak_sync)
 ├── go.work                           # Workspace linking 9 of the 12 Go modules
-├── install.sh                        # Laptop installer (abctl + the local proxy service)
 ├── .github/
 │   ├── workflows/                    # CI/CD (ci.yaml, build.yaml, release-binaries.yaml,
 │   │                                 # security-scans, scorecard, spellcheck)
@@ -641,10 +675,10 @@ other permissive on inbound only.
 
 The operator's AgentRuntime CR's `Spec.MTLSMode` flows
 through to a per-agent rendered envoy-config with the matching TLS
-blocks (operator companion PR). The [`demos/mtls/`](demos/mtls/)
-envoy-sidecar variant (`make demo-mtls-envoy*`) ships a hand-crafted
-demo that proves the same Envoy YAML design at the data-plane level
-without needing a CR.
+blocks (operator companion PR). **This design has no end-to-end
+verification in-tree.** The `demos/mtls/` demo used to exercise it — six
+make targets including negative checks on both deployment shapes — and was
+retired as superseded. Nothing in-tree exercises the Envoy filter chains. Re-verify by hand after changing them.
 
 ## CI/CD Workflows
 
@@ -838,7 +872,7 @@ kind load docker-image authbridge-lite:latest  --name rossoctl
 
 1. Set up a Kind cluster with SPIRE + Keycloak (use [Rossoctl installer](https://www.rossoctl.dev/docs/overview/quickstart))
 2. Deploy the webhook via [operator](https://github.com/rossoctl/operator)
-3. See the [AuthBridge demos index](demos/README.md) for a recommended learning path:
+3. See the [Cortex demos index](demos/README.md) for a recommended learning path:
    - **Getting started**: `demos/weather-agent/demo-ui.md` (inbound validation, UI deployment)
    - **Full flow**: `demos/github-issue/demo-ui.md` (token exchange + scope-based access)
    - **Routes config reference**: `demos/token-exchange-routes/README.md` (single + multi-target route patterns)

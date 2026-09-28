@@ -1,6 +1,6 @@
-# GitHub Issue Agent Demo with AuthBridge (UI Deployment)
+# GitHub Issue Agent Demo with Cortex (UI Deployment)
 
-This guide walks through deploying the **GitHub Issue Agent** with **AuthBridge**
+This guide walks through deploying the **GitHub Issue Agent** with **Cortex**
 using the **Rossoctl UI** for agent and tool deployment. Infrastructure setup
 (webhook, Keycloak, ConfigMaps) is done via CLI, while the agent and tool are
 imported and deployed through the Rossoctl dashboard.
@@ -113,7 +113,7 @@ This lets you demonstrate finer-grained authorization: a user with full access
 can see issues on all repositories, while a user with partial access can only
 see issues on public repositories.
 
-### Rossoctl version notes (UI import and AuthBridge)
+### Rossoctl version notes (UI import and Cortex)
 
 - **Outbound routes from the UI (Step 5, item 12):** The API must write `authproxy-routes`
   `routes.yaml` as a **YAML list** of route objects (same shape as
@@ -198,7 +198,7 @@ can be configured in two ways:
 **Option A (recommended): Via the Rossoctl UI** — configure outbound routing
 rules directly during agent import in Step 5 (item 12). No manual ConfigMap
 creation needed. Requires a Rossoctl backend that writes list-shaped `routes.yaml`
-(see [Rossoctl version notes](#rossoctl-version-notes-ui-import-and-authbridge) above);
+(see [Rossoctl version notes](#rossoctl-version-notes-ui-import-and-cortex) above);
 otherwise use Option B or upgrade.
 
 **Option B: Via kubectl** — apply the demo-specific ConfigMap that configures
@@ -1214,4 +1214,4 @@ kubectl delete namespace team1
   JWT validation and outbound token exchange internals
 - **Token-Exchange Routes**: See the [routes-configuration guide](../token-exchange-routes/README.md) for
   route-based token exchange to multiple tool services
-- **AuthBridge Overview**: See the [AuthBridge architecture](../../docs/architecture.md) for details
+- **Cortex Overview**: See the [Cortex architecture](../../docs/architecture.md) for details

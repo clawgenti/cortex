@@ -292,7 +292,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Run install.sh tests
-        run: sh install_test.sh
+        run: sh scripts/install_test.sh
 
   # `go mod tidy -diff` on every module in the repo. GOWORK=off so
   # replace directives resolve as they do in build.yaml and

@@ -1,8 +1,8 @@
-# AuthBridge Demos
+# Cortex Demos
 
-This directory contains demo scenarios showing AuthBridge providing zero-trust
+This directory contains demo scenarios showing Cortex providing zero-trust
 authentication for Kubernetes agent workloads. Each demo progressively introduces
-more AuthBridge capabilities.
+more Cortex capabilities.
 
 > **Note:** These demos use the operator-injected combined sidecar (after
 > cortex#411 — `authbridge` for proxy-sidecar, `authbridge-envoy`
@@ -17,12 +17,11 @@ more AuthBridge capabilities.
 | Demo | Difficulty | What It Shows | Deployment |
 |------|:----------:|---------------|:----------:|
 | **[Weather Agent](weather-agent/demo-ui.md)** | Beginner | Inbound JWT validation, automatic identity registration, outbound passthrough | UI |
-| **[Weather Agent (advanced)](weather-agent/demo-ui-advanced.md)** | Intermediate | Inbound on agent **and** tool, outbound token exchange, ingress JWT verification on the tool | [kubectl + script](weather-agent/demo-ui-advanced.md#automated-deploy-and-verify-ci-oriented) |
+| **[Weather Agent (advanced)](weather-agent/demo-ui-advanced.md)** | Intermediate | Inbound on agent **and** tool, outbound token exchange, ingress JWT verification on the tool | [kubectl + script](weather-agent/demo-ui-advanced.md#step-5-optional-verify-via-cli) |
 | **[GitHub Issue Agent](github-issue/demo.md)** | Intermediate | Inbound validation + outbound token exchange + scope-based access control | [UI](github-issue/demo-ui.md) or [Manual](github-issue/demo-manual.md) |
 | **[Token-Exchange Routes](token-exchange-routes/README.md)** | Reference | How to write `authproxy-routes` for single- and multi-target token exchange | Configuration only |
-| **[MCP Parser Plugin](mcp-parser/README.md)** | Reference | Enable the `mcp-parser` plugin to surface tool calls / resource reads in session events | Configuration only |
 | **[Session Budget](session-budget/README.md)** | Reference | Test assets for the `session-budget` plugin, including a pause-mode webhook stub. Also see [`hitl-local.md`](session-budget/hitl-local.md) for a laptop-only walkthrough of `on_exceed: pause` (no Kubernetes required). | kubectl or local |
-| **[abctl Walkthrough](weather-agent/demo-with-abctl.md)** | Reference | Watch the AuthBridge plugin pipeline live with the `abctl` TUI | Tooling only |
+| **[abctl Walkthrough](weather-agent/demo-with-abctl.md)** | Reference | Watch the Cortex plugin pipeline live with the `abctl` TUI | Tooling only |
 | **[IBAC](ibac/README.md)** | Intermediate | Intent-Based Access Control: LLM judge denies outbound HTTP that doesn't align with the user's recorded intent. Reproduces the email-poison / prompt-injection attack from `huang195/ibac`; chat with the agent through the rossoctl UI and see the exfiltration blocked, then `make show-result` for a pipeline-level forensic | UI + kubectl |
 | **[SPARC (finance)](finance-sparc/README.md)** | Intermediate | SPARC pre-tool reflection: the `sparc` plugin blocks a hallucinated/ungrounded tool argument (an invented transaction id) before it executes and transparently asks the user to clarify, then approves the corrected call. Complements IBAC — SPARC verifies argument grounding, IBAC verifies intent alignment | UI + kubectl |
 | **[Lineage](lineage/README.md)** | Intermediate | Per-request lineage on the Weather Agent pair: attach the sidecar with the lineage attach kit and see one turn first as 19 separate traces (the app forwards no `traceparent`), then as one trace of 70 spans with one root once the app's own propagation is switched on. Deploys the two stock images plain; edits nothing else | kubectl + scripts |
@@ -30,19 +29,18 @@ more AuthBridge capabilities.
 | **[CPEX Bridge (HR)](hr-cpex/README.md)** | Advanced | CPEX/APL declarative policy: one route chains a coarse APL predicate, an embedded Cedar PDP, RFC 8693 token exchange with a post-check, PII redaction and audit plugins. Same request, different data per caller (Bob sees an SSN, Eve gets it redacted). Self-contained: its own kind cluster + namespace, deployed via `make` rather than operator injection | [kubectl (make)](hr-cpex/README.md#quick-start) |
 | **[Echo](echo/README.md)** | Beginner | Credential placeholder swap: the user's real token never reaches the agent — inbound `jwt-validation` forwards only an opaque placeholder — yet the agent's outbound call still carries a correctly exchanged real token to the upstream, which echoes what it received as ground truth | UI + kubectl (make) |
 | **[Context Guru](context-guru/README.md)** | Intermediate | Context engineering: the `context-guru` outbound plugin compacts an agent's growing tool-output context before it reaches the LLM, so a task whose raw context exceeds the model's window still fits. Same agent/model/window in three modes (`off` / `observe` / `enforce`) shows the agent's answer flip from wrong to right | UI + kubectl (script) |
-| **[mTLS](mtls/README.md)** | Reference | Agent-to-agent encryption via SPIRE X.509 SVIDs: authbridge's in-process `spiffe.Provider` mirrors SVIDs to disk on rotation and mTLS-encrypts both inbound and outbound traffic between two pods, in both proxy-sidecar and envoy-sidecar variants. Intentionally minimal — proves the mTLS layer only | kubectl (make) |
 
 ## Recommended Path
 
-**New to AuthBridge?** Start with the demos in this order:
+**New to Cortex?** Start with the demos in this order:
 
-1. **[Weather Agent](weather-agent/demo-ui.md)** — Fastest way to see AuthBridge
+1. **[Weather Agent](weather-agent/demo-ui.md)** — Fastest way to see Cortex
    in action. Deploys via the Rossoctl UI with inbound JWT validation protecting
    the agent. No token exchange configuration needed; outbound traffic uses the
    default passthrough policy.
 
-2. **[GitHub Issue Agent](github-issue/demo.md)** — Full AuthBridge demo with
-   inbound validation *and* outbound token exchange. Shows how AuthBridge
+2. **[GitHub Issue Agent](github-issue/demo.md)** — Full Cortex demo with
+   inbound validation *and* outbound token exchange. Shows how Cortex
    transparently exchanges tokens when the agent calls the GitHub tool, with
    scope-based access control (Alice vs Bob).
 
@@ -69,7 +67,7 @@ more AuthBridge capabilities.
 - `deploy_and_verify_advanced.sh` for reproducible CI-style verification (Keycloak
   exchange + MCP `initialize` without requiring a working LLM)
 
-### GitHub Issue Agent (Full AuthBridge Flow)
+### GitHub Issue Agent (Full Cortex Flow)
 - Deploy agent + tool via **Rossoctl UI** or **kubectl**
 - Keycloak configuration for token exchange (realm, clients, scopes)
 - Inbound JWT validation protecting the agent
@@ -171,5 +169,5 @@ pip install -r requirements.txt
 
 ## Related Documentation
 
-- [AuthBridge Overview](../docs/architecture.md) — Architecture and design
+- [Cortex Overview](../docs/architecture.md) — Architecture and design
 - [Rossoctl Operator](https://github.com/rossoctl/operator) — Admission webhook for sidecar injection (migrated from this repo)

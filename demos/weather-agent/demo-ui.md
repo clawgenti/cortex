@@ -1,11 +1,11 @@
-# Weather Agent Demo with AuthBridge
+# Weather Agent Demo with Cortex
 
-This guide walks through deploying the **Weather Service Agent** with **AuthBridge**
+This guide walks through deploying the **Weather Service Agent** with **Cortex**
 using the **Rossoctl UI** for agent and tool deployment. Infrastructure setup
 (webhook, Keycloak, ConfigMaps) is done via CLI, while the agent and tool are
 imported and deployed through the Rossoctl dashboard.
 
-This is the recommended **getting-started** demo for AuthBridge. It demonstrates
+This is the recommended **getting-started** demo for Cortex. It demonstrates
 inbound JWT validation and automatic identity registration with a simple agent
 that doesn't require token exchange. For a more advanced demo showing outbound
 token exchange and scope-based access control, see the
@@ -50,8 +50,8 @@ plugin pipeline in real time while chatting with the agent, see
 │  │                        │    - HTTP: Passthrough (default policy)      │    │   │
 │  │                        │    - HTTPS: TLS passthrough (no interception)│    │   │
 │  │                        │                                              │    │   │
-│  │                        │  spiffe-helper is bundled inside the image  │    │   │
-│  │                        │  and gated per-workload by SPIRE_ENABLED.   │    │   │
+│  │                        │  SVIDs are fetched in-process over the      │    │   │
+│  │                        │  SPIRE Workload API (no spiffe-helper).     │    │   │
 │  │                        │  Keycloak client registration is             │    │   │
 │  │                        │  operator-managed (no in-pod sidecar);      │    │   │
 │  │                        │  the operator mounts the resulting Secret    │    │   │
@@ -258,9 +258,8 @@ weather-tool-7f8c9d6b44-yyyyy     1/1     Running   0          5m
 > **Note:** AuthBridge ships as a single combined sidecar image (since
 > cortex#411). `weather-service` runs `agent` + the combined
 > AuthBridge sidecar — `2/2` — regardless of whether SPIRE identity is
-> enabled. The `spiffe-helper` is bundled inside the combined image and
-> activated per workload via `SPIRE_ENABLED` (driven by the
-> `rossoctl.io/spire: enabled` label); it is not a separate container. In
+> enabled. SVIDs are fetched in-process over the SPIRE Workload API; there
+> is no bundled `spiffe-helper` binary and no `SPIRE_ENABLED` gate. In
 > `envoy-sidecar` mode the pod is still `2/2` (`agent` + the combined
 > sidecar) plus a `proxy-init` init container for iptables setup. See the
 > [AuthBridge deployment guide](https://github.com/rossoctl/rossoctl/blob/main/docs/authbridge/deployment-guide.md)
@@ -284,8 +283,7 @@ Or, in `envoy-sidecar` mode:
 agent envoy-proxy
 ```
 
-The container *names* don't change with SPIRE — `spiffe-helper` runs inside
-the combined sidecar, not as a separate container.
+The container *names* don't change with SPIRE.
 
 ### Check operator-managed client registration
 
@@ -844,4 +842,4 @@ kubectl delete namespace team1
   JWT validation and outbound token exchange internals
 - **Token-Exchange Routes**: See the [routes-configuration guide](../token-exchange-routes/README.md) for
   route-based token exchange to multiple tool services
-- **AuthBridge Overview**: See the [AuthBridge architecture](../../docs/architecture.md) for details
+- **Cortex Overview**: See the [Cortex architecture](../../docs/architecture.md) for details
