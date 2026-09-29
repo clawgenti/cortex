@@ -34,7 +34,7 @@ type Matcher struct {
 
 type compiled struct {
 	raw  string
-	glob glob.Glob
+	glob *glob.Pattern
 }
 
 // New compiles a skip-host matcher from raw glob patterns. Returns an

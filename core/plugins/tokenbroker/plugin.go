@@ -86,7 +86,7 @@ type brokerRouter struct {
 
 type compiledBrokerRoute struct {
 	pattern               string
-	glob                  glob.Glob
+	glob                  *glob.Pattern
 	action                string // "broker" or "passthrough"
 	authorizationEndpoint string
 	tokenEndpoint         string
