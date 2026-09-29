@@ -262,7 +262,7 @@ weather-tool-7f8c9d6b44-yyyyy     1/1     Running   0          5m
 > is no bundled `spiffe-helper` binary and no `SPIRE_ENABLED` gate. In
 > `envoy-sidecar` mode the pod is still `2/2` (`agent` + the combined
 > sidecar) plus a `proxy-init` init container for iptables setup. See the
-> [AuthBridge deployment guide](https://github.com/rossoctl/rossoctl/blob/main/docs/authbridge/deployment-guide.md)
+> [AuthBridge deployment guide](https://github.com/rossoctl/rossoctl/blob/main/docs/_internal/authbridge/deployment-guide.md)
 > for the full mode/label reference.
 
 ### Verify injected containers
