@@ -56,7 +56,7 @@ type row struct {
 // matcher.
 type modelMatcher struct {
 	pattern string
-	g       glob.Glob
+	g       *glob.Pattern
 	// gPrefixed matches the same pattern behind a provider prefix, so a literal
 	// key also matches "anthropic/<key>" and "aws/<key>".
 	//
@@ -67,7 +67,7 @@ type modelMatcher struct {
 	// generated table exists to fix — opus-4-1 priced at opus-5's $5/Mtok instead
 	// of $15 — for every gateway that echoes a provider-prefixed model name, and
 	// long-context thresholds were lost the same way.
-	gPrefixed glob.Glob
+	gPrefixed *glob.Pattern
 	exact     bool // no metacharacters: names exactly one model
 }
 

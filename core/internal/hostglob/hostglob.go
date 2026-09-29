@@ -33,7 +33,7 @@ import (
 const Separator = '.'
 
 // Compile compiles an operator-supplied host pattern.
-func Compile(pattern string) (glob.Glob, error) {
+func Compile(pattern string) (*glob.Pattern, error) {
 	return glob.Compile(pattern, Separator)
 }
 
@@ -73,7 +73,7 @@ var fqdnProbes = []string{
 //	"**", "***", and longer runs of stars
 //	"{**}", "{*,**}"          — super-star in braces or alternation
 //	"?*"                      — one character then anything
-func MatchesEverySingleLabel(g glob.Glob) bool {
+func MatchesEverySingleLabel(g *glob.Pattern) bool {
 	return matchesAll(g, singleLabelProbes)
 }
 
@@ -84,11 +84,11 @@ func MatchesEverySingleLabel(g glob.Glob) bool {
 // want this rather than MatchesEverySingleLabel: "*" matches every single
 // label but no FQDN, so it shadows a later "github-tool-mcp" while leaving a
 // later "*.svc.cluster.local" perfectly reachable.
-func IsMatchAll(g glob.Glob) bool {
+func IsMatchAll(g *glob.Pattern) bool {
 	return matchesAll(g, singleLabelProbes) && matchesAll(g, fqdnProbes)
 }
 
-func matchesAll(g glob.Glob, hosts []string) bool {
+func matchesAll(g *glob.Pattern, hosts []string) bool {
 	for _, h := range hosts {
 		if !g.Match(h) {
 			return false
@@ -134,7 +134,7 @@ func IsLiteral(pattern string) bool {
 // after "*.*.com") is not reported. Deciding that in general means deciding
 // glob subsumption, and a false positive here fails the pod at boot — so the
 // check stays sound rather than complete.
-func Shadows(earlier glob.Glob, laterPattern string) bool {
+func Shadows(earlier *glob.Pattern, laterPattern string) bool {
 	if IsMatchAll(earlier) {
 		return true
 	}

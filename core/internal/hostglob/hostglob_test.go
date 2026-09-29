@@ -1,8 +1,12 @@
 package hostglob
 
-import "testing"
+import (
+	"testing"
 
-func mustCompile(t *testing.T, pattern string) interface{ Match(string) bool } {
+	"github.com/gobwas/glob"
+)
+
+func mustCompile(t *testing.T, pattern string) *glob.Pattern {
 	t.Helper()
 	g, err := Compile(pattern)
 	if err != nil {

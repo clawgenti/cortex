@@ -32,7 +32,7 @@ type ResolvedRoute struct {
 
 type compiledRoute struct {
 	pattern string
-	glob    glob.Glob
+	glob    *glob.Pattern
 	route   Route
 }
 
