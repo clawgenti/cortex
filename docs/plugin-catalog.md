@@ -25,6 +25,7 @@ AuthBridge pipeline YAML, not whether it is compiled into the binary
 | [`a2a-parser`](#a2a-parser) | Parses A2A messages into `pctx.Extensions.A2A` for downstream plugins. | Beta | Inbound | No |
 | [`context-guru`](#context-guru) | Compacts the outbound LLM request context before forwarding. | Opt-in | Outbound | No |
 | [`cpex`](#cpex) | APL DSL + named [CPEX](https://github.com/contextforge-org/cpex) plugins (Cedar, PII, audit, …) over a single chain step. | Opt-in | Outbound | No |
+| [`discovery-exchange`](#discovery-exchange) | Outbound token exchange with no routes: the audience comes from the destination host, and Keycloak decides which hosts are targets. | Alpha | Outbound | No |
 | [`ibac`](#ibac) | LLM-judge intent-based access control for outbound tool calls. | Alpha | Outbound | No |
 | [`inference-parser`](#inference-parser) | Parses LLM completions into `pctx.Extensions.Inference`. | Alpha | Outbound | No |
 | [`inference-router`](#inference-router) | Sends each coding agent's new sessions to the inference server chosen for it; a session stays on the server it started on. | Alpha | Outbound | No |
@@ -79,6 +80,26 @@ see also the plugin's [README](../core/plugins/cpex/README.md).
 - `fail_open` (bool) — allow traffic through if CPEX itself errors/panics. A CPEX policy *deny* is always honored regardless. Default `false`.
 - `worker_threads` (int) — size of CPEX's tokio worker pool; `0` = automatic.
 - `bypass_hosts` / `bypass_paths` (`[]string`) — globs skipped entirely (outbound only for hosts); default to Keycloak/SPIRE/observability infra.
+
+## `discovery-exchange`
+
+Outbound token exchange that needs no routes. The audience comes from the
+in-cluster destination host through `audience_template`. Keycloak issuing a
+token means exchange; "Audience not found" means passthrough; any other answer
+means deny. An alternative to [`token-exchange`](#token-exchange), not a
+complement. Full details, including the Keycloak setup it requires, in
+[discovery-exchange-plugin.md](./discovery-exchange-plugin.md).
+
+- `token_url` (string) — OAuth token endpoint; required unless `keycloak_url` + `keycloak_realm` are set.
+- `keycloak_url` / `keycloak_realm` (string) — derive `token_url` (Keycloak convention).
+- `client_id` / `client_id_file` — client ID, inline or from file (default `/shared/client-id.txt`).
+- `client_secret` / `client_secret_file` — client secret, inline or from file (default `/shared/client-secret.txt`).
+- `audience_template` (string) — audience for a destination; placeholders `{service}`, `{namespace}`. Default `{service}`.
+- `namespace` (string) — namespace assumed for short service names, for templates using `{namespace}`.
+- `cluster_domain` (string) — cluster DNS domain. Default `cluster.local`.
+- `no_token_policy` (string) — no bearer on the request: `client-credentials` (default; own token, narrowed by an exchange), `passthrough`, or `deny`.
+- `unknown_audience_ttl` (string) — how long an unknown destination is passed through without asking again. Default `5m`.
+- `timeout` (string) — per-call timeout for the token endpoint. Default `5s`.
 
 ## `ibac`
 

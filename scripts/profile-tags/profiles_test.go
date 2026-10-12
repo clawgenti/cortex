@@ -25,7 +25,7 @@ func TestTags_Local(t *testing.T) {
 
 // TestTags_ReproduceTodaysDefaults is the invariant for this refactor: the
 // convention change must not alter what any published artifact contains. Each
-// want list is the set that binary links today — proxy's 14 default-on tagged
+// want list is the set that binary links today — proxy's 15 default-on tagged
 // plugins, and envoy's and cpex's tagged-plus-unconditional imports. If one of
 // these drifts, a shipped artifact silently gained or lost a plugin.
 func TestTags_ReproduceTodaysDefaults(t *testing.T) {
@@ -34,23 +34,23 @@ func TestTags_ReproduceTodaysDefaults(t *testing.T) {
 		want    []string
 	}{
 		{"full", []string{
-			"a2aparser", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation", "lineage",
+			"a2aparser", "discoveryexchange", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation", "lineage",
 			"litellm_budgettrack", "mcpparser", "opa", "sparc", "staticinject",
 			"tokenbroker", "tokenexchange", "toolprune",
 		}},
 		{"envoy", []string{
-			"a2aparser", "ibac", "inferenceparser", "jwtvalidation", "lineage",
+			"a2aparser", "discoveryexchange", "ibac", "inferenceparser", "jwtvalidation", "lineage",
 			"mcpparser", "opa", "sparc", "tokenbroker", "tokenexchange", "toolprune",
 		}},
 		{"cpex", []string{
-			"a2aparser", "cpex", "ibac", "inferenceparser", "jwtvalidation",
+			"a2aparser", "cpex", "discoveryexchange", "ibac", "inferenceparser", "jwtvalidation",
 			"mcpparser", "sparc", "tokenbroker", "tokenexchange",
 		}},
 		// lite reproduces the retired lite-tags generator's keep set exactly, so
 		// the published -lite artifact does not change in this refactor. It is a
 		// sidecar minimum and shares no plugin with `local`.
 		{"lite", []string{
-			"jwtvalidation", "litellm_budgettrack", "staticinject", "tokenexchange",
+			"discoveryexchange", "jwtvalidation", "litellm_budgettrack", "staticinject", "tokenexchange",
 		}},
 	} {
 		t.Run(tc.profile, func(t *testing.T) {
