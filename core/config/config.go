@@ -533,14 +533,24 @@ func (s SessionConfig) SessionIDHeaders() []string {
 
 // SessionIDHeadersFor is SessionIDHeaders for a deployment that knows whether every listener
 // binds loopback only. On a laptop install (loopbackOnly) the unset default also reads
-// session.SessionIDHeader — X-Session-Id, which OpenCode, Pi and similar frameworks send — the
-// list the laptop installer writes. Everywhere else the default is SessionIDHeaders' own:
-// X-Session-Id is a generic name, and an in-cluster agent that sends it for its own reasons
-// (the IBAC demo's does, with an id it minted) would otherwise have its calls filed away from
-// the session that holds its user's intent. An explicit list is used as it is, either way.
+// session.SessionIDHeader — X-Session-Id, which OpenCode, Pi and similar frameworks send —
+// and session.CodexSessionHeader, the bare Session-Id Codex sends. Everywhere else the
+// default is SessionIDHeaders' own: both are generic names, and an in-cluster agent that
+// sends one for its own reasons (the IBAC demo's does, with an id it minted) would otherwise
+// have its calls filed away from the session that holds its user's intent. An explicit list
+// is used as it is, either way.
+//
+// CodexSessionHeader goes LAST, and the order is the point rather than an accident: it is
+// the least namespaced of the four, so every client sending a dedicated header still wins
+// the bucket. See session.IDFromHeaders for what the precedence means.
 func (s SessionConfig) SessionIDHeadersFor(loopbackOnly bool) []string {
 	if s.IDHeaders == nil && loopbackOnly {
-		return []string{session.ClaudeCodeSessionHeader, session.BobSessionHeader, session.SessionIDHeader}
+		return []string{
+			session.ClaudeCodeSessionHeader,
+			session.BobSessionHeader,
+			session.SessionIDHeader,
+			session.CodexSessionHeader,
+		}
 	}
 	return s.SessionIDHeaders()
 }

@@ -21,17 +21,69 @@ import (
 	"github.com/rossoctl/cortex/core/cost/pricing"
 )
 
-// AnthropicProvider is the litellm_provider value we keep. Only the first-party
-// Anthropic endpoint's rates are vendor list prices; the vertex_ai/ and bedrock/
-// mirrors carry their own, and mixing them under one "*" host scope would make the
-// bundled table's numbers depend on map iteration order.
-const AnthropicProvider = "anthropic"
+// AnthropicProvider and OpenAIProvider are the litellm_provider values we keep:
+// the first-party endpoints, whose rates are the vendor's own list prices.
+//
+// WHY THE PROVIDER AND NOT THE KEY NAME. Every model upstream appears once per
+// reseller — claude-opus-4-5 under six providers, gpt-6-luna under eight — and
+// the rates DIFFER between them (bedrock prices gpt-6-luna at 1.1e-07 against
+// openai's 1e-07). Those mirrors carry a key prefix (vertex_ai/, bedrock/,
+// azure/) but filtering on the prefix would be guessing at a naming convention;
+// the provider field is the row's own statement of whose price this is. Keeping
+// more than one provider per model under a single "*" host scope would make the
+// table's numbers depend on map iteration order, which is the hazard this
+// filter exists to prevent — and the reason it stays a strict allow-list rather
+// than becoming "everything except the obvious mirrors".
+const (
+	AnthropicProvider = "anthropic"
+	OpenAIProvider    = "openai"
+)
 
-// contextThreshold is the one long-context breakpoint in scope. LiteLLM also
-// publishes _above_272k and _above_512k variants for other providers, and an
-// _above_1hr cache-write premium; both are deliberately out of scope (see
-// pricing.Tier), so their fields are ignored rather than silently flattened.
-const contextThreshold = 200_000
+// keepProvider reports whether a row's litellm_provider is one we bundle.
+func keepProvider(p string) bool {
+	return p == AnthropicProvider || p == OpenAIProvider
+}
+
+// BundledProviders names the allow-list for an error message, as "anthropic or
+// openai".
+//
+// Exported and shared rather than spelled out at each site: three messages say
+// which providers a usable list has to carry — this package's own "no entries in
+// the price map" and both of pricelist's "has no row with a rate" — and two of
+// them went on naming anthropic alone after openai joined, telling an operator
+// debugging a rejected download to look for the wrong thing. One function means
+// the next provider added cannot leave a message behind.
+func BundledProviders() string {
+	return AnthropicProvider + " or " + OpenAIProvider
+}
+
+// The long-context breakpoints in scope, one per bundled provider that publishes
+// one: Anthropic prices above 200k prompt tokens, OpenAI above 272k. No upstream
+// row carries both today, but Rates.At picks the highest breakpoint a prompt
+// exceeds rather than the first listed, so a row that did would resolve correctly
+// instead of by slice order.
+//
+// 272K JOINED WHEN OPENAI DID, because ignoring it is not neutral. 18 of the
+// OpenAI rows price input and cache-read at 2x and output at 1.5x above it
+// (gpt-5.5: $5 -> $10/Mtok input, $30 -> $45 output) on models that accept
+// 922k-1.05M tokens, so a long session crosses it easily. Read at the base rate
+// those requests would be priced too low and still labelled bundled — which is
+// the "unpriced, never under-priced" promise broken silently, a worse answer than
+// the coverage gap it replaced. A row whose above-272k rate exceeds what
+// pricing.BundleableRate allows is therefore dropped whole rather than carried at
+// its base rate; see ratesOf.
+//
+// STILL NOT EVERY VARIANT UPSTREAM PUBLISHES. _above_512k, the _above_1hr
+// cache-write premium, and the per-service-tier suffixes (_flex, _priority,
+// _batches, _decisions, including their _above_272k combinations) remain out of
+// scope — see pricing.Tier. Exact JSON tags are what keeps them out: a tag of
+// input_cost_per_token_above_272k_tokens does not match that field's _flex
+// sibling, so a suffix added upstream is ignored rather than silently flattened
+// into the tier it resembles.
+const (
+	contextThreshold200k = 200_000
+	contextThreshold272k = 272_000
+)
 
 // tokensPerMillion renders rates in the unit providers publish.
 const tokensPerMillion = 1_000_000
@@ -45,15 +97,25 @@ type modelInfo struct {
 	CacheRead  *float64 `json:"cache_read_input_token_cost"`
 	Output     *float64 `json:"output_cost_per_token"`
 
-	InputAbove      *float64 `json:"input_cost_per_token_above_200k_tokens"`
-	CacheWriteAbove *float64 `json:"cache_creation_input_token_cost_above_200k_tokens"`
-	CacheReadAbove  *float64 `json:"cache_read_input_token_cost_above_200k_tokens"`
-	OutputAbove     *float64 `json:"output_cost_per_token_above_200k_tokens"`
+	// Anthropic's long-context tier.
+	InputAbove200      *float64 `json:"input_cost_per_token_above_200k_tokens"`
+	CacheWriteAbove200 *float64 `json:"cache_creation_input_token_cost_above_200k_tokens"`
+	CacheReadAbove200  *float64 `json:"cache_read_input_token_cost_above_200k_tokens"`
+	OutputAbove200     *float64 `json:"output_cost_per_token_above_200k_tokens"`
+
+	// OpenAI's. Named by their own breakpoint rather than sharing the fields
+	// above: the two are different rates at different prompt sizes, and folding
+	// them into one set would price a 250k-token OpenAI request at the premium
+	// it does not owe until 272k.
+	InputAbove272      *float64 `json:"input_cost_per_token_above_272k_tokens"`
+	CacheWriteAbove272 *float64 `json:"cache_creation_input_token_cost_above_272k_tokens"`
+	CacheReadAbove272  *float64 `json:"cache_read_input_token_cost_above_272k_tokens"`
+	OutputAbove272     *float64 `json:"output_cost_per_token_above_272k_tokens"`
 }
 
-// Filter reduces a full price map to the Anthropic-provider entries, so the
-// committed snapshot is kilobytes rather than the 2.3 MB upstream file, and stamps
-// the upstream commit into it under SnapshotCommitKey.
+// Filter reduces a full price map to the first-party entries of the providers
+// keepProvider names, so the committed snapshot is a fraction of the 2.8 MB
+// upstream file, and stamps the upstream commit into it under SnapshotCommitKey.
 //
 // Idempotent: filtering an already-filtered map is a no-op, which is what lets the
 // generator and the golden test run the same Entries transform over different
@@ -74,7 +136,7 @@ func Filter(raw []byte, commit string) ([]byte, error) {
 		var header struct {
 			Provider string `json:"litellm_provider"`
 		}
-		if json.Unmarshal(body, &header) != nil || header.Provider != AnthropicProvider {
+		if json.Unmarshal(body, &header) != nil || !keepProvider(header.Provider) {
 			continue // sample_spec, non-model rows, and other providers
 		}
 		var mi modelInfo
@@ -82,13 +144,13 @@ func Filter(raw []byte, commit string) ([]byte, error) {
 			// Provider-verified and still unusable: dropping it removes the row from
 			// the snapshot too, and nothing downstream can then notice it is gone.
 			// Upstream changing a cost field's JSON type is exactly how this arrives.
-			return nil, fmt.Errorf("pricegen: %s entry %q failed to decode, which would silently drop it from the snapshot: %w", AnthropicProvider, name, err)
+			return nil, fmt.Errorf("pricegen: %s entry %q failed to decode, which would silently drop it from the snapshot: %w", header.Provider, name, err)
 		}
 		_ = mi // decoded to prove it is usable; the raw body is what gets stored
 		keep[name] = body
 	}
 	if len(keep) == 0 {
-		return nil, fmt.Errorf("pricegen: no %s entries in the price map", AnthropicProvider)
+		return nil, fmt.Errorf("pricegen: no %s entries in the price map", BundledProviders())
 	}
 	if commit != "" {
 		stamp, err := json.Marshal(commit)
@@ -108,10 +170,11 @@ func Filter(raw []byte, commit string) ([]byte, error) {
 //     already distinguishes claude-opus-4-1 ($15/Mtok input) from claude-opus-5
 //     ($5/Mtok), which the three hand-measured family globs it replaces priced
 //     identically — a 3x error on every opus-4-1 request.
-//   - One family GLOB row per family, carrying the newest member's rates, so a
-//     model released after this table was generated still prices instead of
-//     dropping out of the dollar total. Exact beats glob within a provenance
-//     level, so a known version always wins over its family's extrapolation.
+//   - One family GLOB row per Anthropic family, carrying the newest member's
+//     rates, so a model released after this table was generated still prices
+//     instead of dropping out of the dollar total. Exact beats glob within a
+//     provenance level, so a known version always wins over its family's
+//     extrapolation. OpenAI rows get no glob — see the gate in the loop below.
 //
 // The family rows are an extrapolation and are the reason provenance exists: they
 // are bundled, not authoritative, and an operator whose gateway disagrees pins it
@@ -137,7 +200,7 @@ func Entries(raw []byte) ([]pricing.Entry, error) {
 		var header struct {
 			Provider string `json:"litellm_provider"`
 		}
-		if json.Unmarshal(body, &header) != nil || header.Provider != AnthropicProvider {
+		if json.Unmarshal(body, &header) != nil || !keepProvider(header.Provider) {
 			continue // sample_spec, non-model rows, and other providers
 		}
 		var mi modelInfo
@@ -153,8 +216,8 @@ func Entries(raw []byte) ([]pricing.Entry, error) {
 	if len(skipped) > 0 {
 		// Everything reaching here is already provider-verified, so any failure is a
 		// row we meant to keep — no name heuristic needed to tell them apart.
-		return nil, fmt.Errorf("pricegen: %d %s entr(ies) failed to decode, which would silently drop them from the table: %s",
-			len(skipped), AnthropicProvider, strings.Join(skipped, "; "))
+		return nil, fmt.Errorf("pricegen: %d bundled-provider entr(ies) failed to decode, which would silently drop them from the table: %s",
+			len(skipped), strings.Join(skipped, "; "))
 	}
 
 	var out []pricing.Entry
@@ -171,7 +234,7 @@ func Entries(raw []byte) ([]pricing.Entry, error) {
 			continue // the generator's provenance stamp, not a model
 		}
 		mi := all[name]
-		if mi.Provider != AnthropicProvider {
+		if !keepProvider(mi.Provider) {
 			continue
 		}
 		rates, ok := ratesOf(mi)
@@ -184,7 +247,15 @@ func Entries(raw []byte) ([]pricing.Entry, error) {
 			Rates: rates,
 			Prov:  pricing.ProvBundled,
 		})
-		if fam, ver, dated := parseName(name); fam != "" {
+		// FAMILY GLOBS ARE ANTHROPIC-ONLY, and deliberately so. The glob template
+		// below embeds the literal "claude", and parseName's family extraction is
+		// shaped for Anthropic's naming: on an OpenAI key it returns the vendor
+		// token, so gpt-6-luna, gpt-6-sol and gpt-6-astra all report family "gpt"
+		// and would collapse into one row whose glob — "*claude-*gpt-*" — matches
+		// nothing at all. Extrapolating a model OpenAI has not released yet would
+		// need its own naming rule and its own evidence; an exact row per published
+		// model is what this provider gets until someone writes that.
+		if fam, ver, dated := parseName(name); fam != "" && mi.Provider == AnthropicProvider {
 			cur, seen := newest[fam]
 			if !seen {
 				newest[fam] = name
@@ -233,21 +304,53 @@ func ratesOf(mi modelInfo) (pricing.Rates, bool) {
 	set(pricing.TierCacheRead, mi.CacheRead)
 	set(pricing.TierOutput, mi.Output)
 
-	var th pricing.ContextThreshold
-	th.AbovePromptTokens = contextThreshold
-	setAbove := func(tier pricing.Tier, v *float64) {
-		if v != nil && *v > 0 {
-			th.Rate[tier], th.Set[tier] = *v, true
+	// One threshold per breakpoint in scope, ascending, and only for a breakpoint
+	// this row actually prices — a row carrying neither set contributes none, which
+	// is what keeps the common case a Thresholds-free table.
+	for _, bp := range []struct {
+		above                                int
+		input, cacheWrite, cacheRead, output *float64
+	}{
+		{contextThreshold200k, mi.InputAbove200, mi.CacheWriteAbove200, mi.CacheReadAbove200, mi.OutputAbove200},
+		{contextThreshold272k, mi.InputAbove272, mi.CacheWriteAbove272, mi.CacheReadAbove272, mi.OutputAbove272},
+	} {
+		th := pricing.ContextThreshold{AbovePromptTokens: bp.above}
+		setAbove := func(tier pricing.Tier, v *float64) {
+			if v != nil && *v > 0 {
+				th.Rate[tier], th.Set[tier] = *v, true
+			}
+		}
+		setAbove(pricing.TierInput, bp.input)
+		setAbove(pricing.TierCacheWrite, bp.cacheWrite)
+		setAbove(pricing.TierCacheRead, bp.cacheRead)
+		setAbove(pricing.TierOutput, bp.output)
+		for _, s := range th.Set {
+			if s {
+				r.Thresholds = append(r.Thresholds, th)
+				break
+			}
 		}
 	}
-	setAbove(pricing.TierInput, mi.InputAbove)
-	setAbove(pricing.TierCacheWrite, mi.CacheWriteAbove)
-	setAbove(pricing.TierCacheRead, mi.CacheReadAbove)
-	setAbove(pricing.TierOutput, mi.OutputAbove)
-	for _, s := range th.Set {
-		if s {
-			r.Thresholds = []pricing.ContextThreshold{th}
-			break
+	// A ROW THE COST PIPELINE WOULD REFUSE IS NOT EMITTED, on the rate alone and so
+	// for every provider alike — see pricing.BundleableRate for why a bundled rate is
+	// held to a stricter bound than a configured one. Reported as unusable rather than
+	// as unpriced, which is the same answer a row with no rate at all gets: the model
+	// then shows up priceable-but-unpriced, where an operator who needs it adds a
+	// `pricing:` entry of their own.
+	//
+	// Checked here rather than at the two call sites so the family GLOB inherits it:
+	// a glob carries its newest member's rates, so a dear model that is dropped as an
+	// exact row must not reappear as its family's extrapolation.
+	for tier, isSet := range r.Set {
+		if isSet && !pricing.BundleableRate(r.Base[tier]) {
+			return pricing.Rates{}, false
+		}
+	}
+	for _, t := range r.Thresholds {
+		for tier, isSet := range t.Set {
+			if isSet && !pricing.BundleableRate(t.Rate[tier]) {
+				return pricing.Rates{}, false
+			}
 		}
 	}
 	return r, r.Base != [4]float64{} || len(r.Thresholds) > 0
@@ -366,12 +469,23 @@ var bundledEntries = []Entry{
 		fmt.Fprintf(&b, "\t{Host: %q, Model: %q, Prov: ProvBundled, Rates: Rates{\n", e.Host, e.Model)
 		fmt.Fprintf(&b, "\t\tBase: %s,\n", renderFloats(e.Rates.Base))
 		fmt.Fprintf(&b, "\t\tSet:  %s,\n", renderBools(e.Rates.Set))
-		for _, th := range e.Rates.Thresholds {
-			b.WriteString("\t\tThresholds: []ContextThreshold{{\n")
-			fmt.Fprintf(&b, "\t\t\tAbovePromptTokens: %d,\n", th.AbovePromptTokens)
-			fmt.Fprintf(&b, "\t\t\tRate:              %s,\n", renderFloats(th.Rate))
-			fmt.Fprintf(&b, "\t\t\tSet:               %s,\n", renderBools(th.Set))
-			b.WriteString("\t\t}},\n")
+		// ONE Thresholds field holding every threshold, not one field per
+		// threshold. The loop used to open and close the slice literal on each
+		// pass, which is correct only while no row carries more than one
+		// breakpoint — a second would emit a duplicate `Thresholds:` key and
+		// format.Source below would refuse the file. That became reachable when
+		// OpenAI's 272k tier joined Anthropic's 200k one, so the shape is fixed
+		// here rather than left to fail on the first row that has both.
+		if len(e.Rates.Thresholds) > 0 {
+			b.WriteString("\t\tThresholds: []ContextThreshold{\n")
+			for _, th := range e.Rates.Thresholds {
+				b.WriteString("\t\t\t{\n")
+				fmt.Fprintf(&b, "\t\t\t\tAbovePromptTokens: %d,\n", th.AbovePromptTokens)
+				fmt.Fprintf(&b, "\t\t\t\tRate:              %s,\n", renderFloats(th.Rate))
+				fmt.Fprintf(&b, "\t\t\t\tSet:               %s,\n", renderBools(th.Set))
+				b.WriteString("\t\t\t},\n")
+			}
+			b.WriteString("\t\t},\n")
 		}
 		b.WriteString("\t}},\n")
 	}

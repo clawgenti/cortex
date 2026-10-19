@@ -14,7 +14,10 @@ import (
 func TestAgentSnapshot_NarrowsTheRingToOneAgent(t *testing.T) {
 	now := time.Now().Truncate(BucketWidth)
 	a := twoUnitRing(t, now)
-	const bob = "bob-shell"
+	// The ring records Bob under the pre-convergence spelling "bob-shell" (see
+	// twoUnitRing), and the query names today's "bob" — the AgentName fold is what
+	// joins them, which is the production situation for every stored row.
+	const bob = "bob"
 
 	snap := a.AgentSnapshot(10*BucketWidth, BucketWidth, "", bob, GroupNone)
 	if snap.Agent != bob {
@@ -37,10 +40,10 @@ func TestAgentSnapshot_NarrowsTheRingToOneAgent(t *testing.T) {
 // narrowing: Bob's models, and none of Claude's.
 func TestAgentSnapshot_ARecognisedAgentKeepsItsGrouping(t *testing.T) {
 	now := time.Now().Truncate(BucketWidth)
-	snap := twoUnitRing(t, now).AgentSnapshot(10*BucketWidth, BucketWidth, "", "bob-shell", GroupModel)
+	snap := twoUnitRing(t, now).AgentSnapshot(10*BucketWidth, BucketWidth, "", "bob", GroupModel)
 
-	if snap.Group != GroupModel || snap.Agent != "bob-shell" {
-		t.Fatalf("Group = %q, Agent = %q, want model and the bob-shell echo", snap.Group, snap.Agent)
+	if snap.Group != GroupModel || snap.Agent != "bob" {
+		t.Fatalf("Group = %q, Agent = %q, want model and the bob echo", snap.Group, snap.Agent)
 	}
 	series := FoldSeriesAcrossWindow(snap.Buckets)
 	if _, ok := series["claude-opus-5"]; ok || series["premium-ide"].CostMicros != 7_800 || series["llama3"].Requests != 1 {
@@ -54,7 +57,7 @@ func TestAgentSnapshot_TheAgentRingAgreesWithTheAgentAxis(t *testing.T) {
 	now := time.Now().Truncate(BucketWidth)
 	a := twoUnitRing(t, now)
 	axis := a.Snapshot(10*BucketWidth, BucketWidth, "", GroupAgent)
-	for _, agent := range []string{"bob-shell", "claude-code"} {
+	for _, agent := range []string{"bob", "claude-code"} {
 		got := a.AgentSnapshot(10*BucketWidth, BucketWidth, "", agent, GroupModel).Totals
 		if want := NarrowToAgent(axis, agent).Totals; got != want {
 			t.Errorf("%s: ring totals %+v, want the agent axis's %+v", agent, got, want)
@@ -98,9 +101,9 @@ func TestAgentSnapshot_AnUnrecognisedAgentIsServedAsNone(t *testing.T) {
 // it is served as none.
 func TestAgentSnapshot_UnderASessionIsServedAsNone(t *testing.T) {
 	now := time.Now().Truncate(BucketWidth)
-	snap := twoUnitRing(t, now).AgentSnapshot(10*BucketWidth, BucketWidth, "bob-task", "bob-shell", GroupModel)
+	snap := twoUnitRing(t, now).AgentSnapshot(10*BucketWidth, BucketWidth, "bob-task", "bob", GroupModel)
 	if snap.Group != GroupNone || snap.Totals.CostMicros != 7_800 {
-		t.Errorf("bob-task scoped to bob-shell = group %q cost %d, want none and Bob's 7800",
+		t.Errorf("bob-task scoped to bob = group %q cost %d, want none and Bob's 7800",
 			snap.Group, snap.Totals.CostMicros)
 	}
 }

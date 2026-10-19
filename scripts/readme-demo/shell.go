@@ -46,16 +46,30 @@ func ShellStates(a Act, start time.Duration, g Grid) ([]State, error) {
 			})
 			at += dur + afterCommand
 		}
+		if step.Bar != nil && (*step.Bar < 0 || *step.Bar >= len(step.Out)) {
+			return nil, fmt.Errorf("act %q: bar is line %d but out has %d lines", a.Name, *step.Bar, len(step.Out))
+		}
 		for i, line := range step.Out {
 			delay := outputRate
 			if i < len(step.Slow) && step.Slow[i] > 0 {
 				delay = step.Slow[i]
 			}
+			runs := []Run{{Text: line, FG: outputColor(line)}}
+			if step.ANSI {
+				runs = DecodeLine(line)
+			}
+			reveal := Reveal{Kind: "fill", At: at + delay}
+			if step.Bar != nil && *step.Bar == i {
+				// The bar fills while the line's delay runs, rather than appearing
+				// at its end: the delay is the download.
+				from, to, ok := barCells(PlainText(runs))
+				if !ok {
+					return nil, fmt.Errorf("act %q: bar line %d has no run of ━ to fill", a.Name, i)
+				}
+				reveal = Reveal{Kind: "bar", At: at, Dur: delay, From: from, To: to}
+			}
 			at += delay
-			rows = append(rows, Row{
-				Runs:   []Run{{Text: line, FG: outputColor(line)}},
-				Reveal: Reveal{Kind: "fill", At: at},
-			})
+			rows = append(rows, Row{Runs: runs, Reveal: reveal, SolidBlocks: step.ANSI})
 		}
 	}
 	if len(rows) > g.Rows {
@@ -70,6 +84,21 @@ func ShellStates(a Act, start time.Duration, g Grid) ([]State, error) {
 		rows = append(rows, Row{})
 	}
 	return []State{{Label: a.Name, Rows: rows, At: start, Dur: a.Runtime}}, nil
+}
+
+// barCells is the columns of a progress bar's first run of ━: from its first cell
+// to just past its last.
+func barCells(line string) (from, to int, ok bool) {
+	for i, r := range []rune(line) {
+		switch {
+		case r == '━' && !ok:
+			from, ok = i, true
+		case r != '━' && ok:
+			return from, i, true
+		}
+		to = i + 1
+	}
+	return from, to, ok
 }
 
 // outputColor gives installer output a little shape without asking the script to

@@ -75,7 +75,7 @@ more Cortex capabilities.
   for tool-scoped token
 - Subject preservation through exchange (`sub` claim maintained)
 - Scope-based access control: Alice (public repos) vs Bob (all repos)
-- Comprehensive CLI testing and AuthProxy log verification
+- Comprehensive CLI testing and AuthBridge sidecar log verification
 
 ### Token-Exchange Routes (Configuration Reference)
 - How AuthBridge resolves the request `Host` header to a route entry
@@ -84,13 +84,6 @@ more Cortex capabilities.
 - Multi-target example (multiple routes, one agent → multiple tools)
 - Mixing exchange and passthrough; tightening to `default_policy: exchange`
 - Troubleshooting: `Host` mismatches, missing scopes, audience errors
-
-### MCP Parser Plugin (Configuration Reference)
-- How to enable the `mcp-parser` outbound plugin
-- Surfaces MCP tool calls / resource reads / prompt invocations in
-  session events for `agentop` and the `:9094` API
-- Required `allow_mode_override: true` on the outbound ext_proc filter
-  in envoy-sidecar mode
 
 ### Session Budget
 - Cap how much an agent can spend per session — inference calls,

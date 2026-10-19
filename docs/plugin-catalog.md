@@ -31,7 +31,7 @@ AuthBridge pipeline YAML, not whether it is compiled into the binary
 | [`inference-router`](#inference-router) | Sends each coding agent's new sessions to the inference server chosen for it; a session stays on the server it started on. | Alpha | Outbound | No |
 | [`jwt-validation`](#jwt-validation) | Inbound JWT validation (signature, issuer, audience) against JWKS. | Ready | Inbound | YES |
 | [`lineage-telemetry`](#lineage-telemetry) | Emits two facts-only OTel lineage spans per HTTP exchange, parented across pods through one `tracestate` member. | Alpha | Both | No |
-| [`litellm-budget-track`](#litellm-budget-track) | Tracks `x-litellm-response-cost` (with `-original` fallback) and enforces a daily budget limit. Place on whichever chain carries LLM traffic — inbound when fronting the LLM endpoint, outbound when hosting an agent via `authbridge exec`. | Alpha | Both | No |
+| [`litellm-budget-track`](#litellm-budget-track) | Accumulates the cost record `inference-parser` settles (authoritative where LiteLLM's cost header is present) and enforces a daily budget limit. Place on whichever chain carries LLM traffic — inbound when fronting the LLM endpoint, outbound when hosting an agent via `agentop exec`. | Alpha | Both | No |
 | [`mcp-parser`](#mcp-parser) | Parses MCP tool calls/results into `pctx.Extensions.MCP`. | Beta | Outbound | No |
 | [`opa`](#opa) | [OPA](https://www.openpolicyagent.org/docs) policy enforcement for inbound and outbound requests. | Alpha | Both | No |
 | [`sparc`](#sparc) | Pre-tool reflection: blocks ungrounded/hallucinated tool calls. | Alpha | Outbound | No |
@@ -46,7 +46,7 @@ AuthBridge pipeline YAML, not whether it is compiled into the binary
 Parses A2A JSON-RPC 2.0 request bodies into `pctx.Extensions.A2A`
 (method, session ID, message parts, role) for downstream guardrails.
 
-No configuration — registered as a bare plugin name, no `config:` block.
+Full reference: [`a2a-parser-plugin.md`](a2a-parser-plugin.md).
 
 ## `context-guru`
 
@@ -56,14 +56,7 @@ pass-through; model-driven expand/restore is a later integration.
 Opt-in at build time (`-tags include_plugin_contextguru`) because its
 engine pulls a large transitive dependency set.
 
-- `paths` (`[]string`) — inference request paths to compact. Default: `/v1/chat/completions`, `/v1/completions`, `/v1/messages`.
-- `model` (object) — optional "cheap" LLM endpoint for model-backed components (summarize, extract:code); omitted means those degrade to deterministic/no-op.
-  - `base_url` — OpenAI-compatible endpoint base.
-  - `model` — model name to call.
-  - `api_key` — optional bearer token.
-  - `max_tokens` — completion cap, default 4096.
-  - `timeout_ms` — per-call timeout, default 150000.
-- `engine` (object) — native context-guru config (preset / pipeline / per-component / store), passed through verbatim. Default: `preset: balanced`.
+Full reference: [`context-guru-plugin.md`](context-guru-plugin.md).
 
 ## `cpex`
 
@@ -74,32 +67,15 @@ CPEX policy plugins (Cedar, PII, audit, …). Requires the separate
 `libcpex_ffi.a`). Full details in [cpex-plugin.md](./cpex-plugin.md);
 see also the plugin's [README](../core/plugins/cpex/README.md).
 
-- `hooks.on_request` / `hooks.on_response` (`[]string`) — [CPEX hook names](https://contextforge-org.github.io/cpex/docs/0.1.x/hook-types/) to fire on each phase, in order (AuthBridge classifies traffic onto the `cmf.*` hooks — see [Hook chains](./cpex-plugin.md#hook-chains)).
-- `config` (string) — inline CPEX runtime YAML (`plugins:`/`global:`/`plugin_settings:`); mutually exclusive with `config_file`.
-- `config_file` (string) — path to a file with the CPEX runtime YAML; mutually exclusive with `config`.
-- `fail_open` (bool) — allow traffic through if CPEX itself errors/panics. A CPEX policy *deny* is always honored regardless. Default `false`.
-- `worker_threads` (int) — size of CPEX's tokio worker pool; `0` = automatic.
-- `bypass_hosts` / `bypass_paths` (`[]string`) — globs skipped entirely (outbound only for hosts); default to Keycloak/SPIRE/observability infra.
-
 ## `discovery-exchange`
 
 Outbound token exchange that needs no routes. The audience comes from the
 in-cluster destination host through `audience_template`. Keycloak issuing a
 token means exchange; "Audience not found" means passthrough; any other answer
 means deny. An alternative to [`token-exchange`](#token-exchange), not a
-complement. Full details, including the Keycloak setup it requires, in
-[discovery-exchange-plugin.md](./discovery-exchange-plugin.md).
+complement; its reference covers the Keycloak setup it requires.
 
-- `token_url` (string) — OAuth token endpoint; required unless `keycloak_url` + `keycloak_realm` are set.
-- `keycloak_url` / `keycloak_realm` (string) — derive `token_url` (Keycloak convention).
-- `client_id` / `client_id_file` — client ID, inline or from file (default `/shared/client-id.txt`).
-- `client_secret` / `client_secret_file` — client secret, inline or from file (default `/shared/client-secret.txt`).
-- `audience_template` (string) — audience for a destination; placeholders `{service}`, `{namespace}`. Default `{service}`.
-- `namespace` (string) — namespace assumed for short service names, for templates using `{namespace}`.
-- `cluster_domain` (string) — cluster DNS domain. Default `cluster.local`.
-- `no_token_policy` (string) — no bearer on the request: `client-credentials` (default; own token, narrowed by an exchange), `passthrough`, or `deny`.
-- `unknown_audience_ttl` (string) — how long an unknown destination is passed through without asking again. Default `5m`.
-- `timeout` (string) — per-call timeout for the token endpoint. Default `5s`.
+Full reference: [`discovery-exchange-plugin.md`](discovery-exchange-plugin.md).
 
 ## `ibac`
 
@@ -116,227 +92,36 @@ allow/deny verdict from the reply — see
 model to point it at, see
 [Choosing a Judge Model](./ibac-plugin.md#choosing-a-judge-model).
 
-- `judge_endpoint` (string) — base URL of the LLM-judge service (`{endpoint}/v1/chat/completions`).
-- `judge_model` (string) — model name passed to the judge.
-- `judge_bearer` (string) — optional bearer token; empty for unauthenticated local LLMs.
-- `system_prompt` (string) — override the built-in judge system prompt.
-- `timeout_ms` (int) — per-call timeout; values below 100 rejected. Default 5000.
-- `judge_max_tokens` (int) — cap on judge reply length. Default 1024.
-- `judge_json_mode` (`*bool`) — force `response_format: json_object`. Default `true`.
-- `judge_inference` (bool) — also judge outbound LLM-reasoning traffic (high cost). Default `false`.
-- `agent_llm_host` (string) — the agent's own LLM host; auto-added to `bypass_hosts`.
-- `bypass_hosts` / `bypass_paths` (`[]string`) — globs skipped without judging.
-- `no_intent_policy` (string) — behavior when an action has no recorded intent: `allow` (default) or `deny`.
-- `unclassified_policy` (string) — behavior when no parser claimed the request: `passthrough` (default) or `judge`.
-
 ## `inference-parser`
 
 Parses outbound LLM inference requests/responses into `pctx.Extensions.Inference` for
 downstream policy plugins, **and prices the finished response** — it is the one place
 tokens become dollars.
 
-It reads two dialects, chosen by how the request path ends, under any prefix: a path ending
-in `/completions` is OpenAI chat completions (or legacy completions), and one ending in
-`/v1/messages` is Anthropic Messages. That covers providers that mount the same API under a
-prefix of their own — IBM Bob's `/inference`, OpenCode Zen's `/zen`, OpenRouter's `/api`,
-Groq's `/openai`, Azure's `/openai/deployments/<d>` — with no code change. A body is taken
-for inference only if it carries a `messages` array, or a `prompt` for legacy completions.
-A body that fails that check is recorded the way an unrecognised path is: with no inference
-record, and still priced from a gateway's cost header. Other dialects — the Responses API,
-Gemini's native API, Bedrock's native API — are not parsed.
-
-Costing lives here because this is the only component that knows when usage is *final*: it
-owns the three response-finalization paths and the assembled-usage handling (Claude Code's
-`?beta=true` path reports cache counts on `message_delta`, not `message_start`). It also means a
-priced request can no longer be missing its record: previously the figure came from
-`litellm-budget-track`, so a pipeline without that plugin showed tokens and no money, with
-the same field silently meaning "modelled" rather than "authoritative" depending on
-configuration.
-
-A record is not the same as a price. Where no rate resolves for the model, the record is
-still published — carrying the token counts, any avoided cost, and no dollar figure — and the
-gap is named in `/v1/usage`'s `unpricedBy` so an operator knows which `pricing:` entry to
-add. An absent figure is reported as absent, never as `$0.00`.
-
-The arithmetic and the gateway header semantics are in `core/cost/settle`, not in the parser:
-a provider-shaped body parser has no business knowing one gateway's header names. The result
-is published as a cost record keyed `cost` on the session event (see
-[Cost records](pricing.md#cost-records)).
-
-No configuration — no config struct, does not implement `Configurable`. Rates arrive by
-injection from the top-level [`pricing:`](pricing.md#overriding-in-config) section; with none configured the parser
-still parses and reports the traffic as unpriced.
+Full reference: [`inference-parser-plugin.md`](inference-parser-plugin.md).
 
 ## `inference-router`
 
 Sends a coding agent's new sessions to the inference server chosen for it — a
-LiteLLM gateway, say, with its own URL and key — and keeps every session on the
+LiteLLM gateway or a local model server such as Ollama, with its own URL and key —
+and keeps every session on the
 server it started on, wherever the agent addressed its requests: its provider,
 Anthropic, OpenCode Zen or Bob's gateway, so the agent needs no setting of its own
-beyond going through the proxy. Routing is opt-in per agent: an agent not listed
-under `agents` is not routed, and its requests, keys included, pass untouched. Manage it
+beyond going through the proxy. A `sessions:` entry moves one running session to
+another server, dropping the reasoning only its old server can read. Routing is opt-in per agent: an agent not listed
+under `agents` is not routed, and its requests go where it sent them, keys untouched. Manage it
 with [`agentop server`](../cmd/agentop/README.md#choosing-an-inference-server-agentop-server);
 the config stays hand-editable. Built for the laptop: it needs a listener that
 honors a redirect, so `cortex-envoy` and a config with an `mtls:` block refuse it
 at startup, and in-cluster use has not been examined.
 
-- `servers` (map, required) — inference servers by name: lowercase letters, digits, `.`, `_` and `-`. Each has:
-  - `url` (string, required) — `scheme://host[:port]`, `http` or `https`, no path, query or fragment. A port must be 1–65535; the scheme's default is dropped, so `https://x:443` is `x`. No two servers may share a host, compared without port or case: a session's server is named from the host its requests went to. A plain-`http` server on another machine logs a WARN at load, since routed requests would cross the network decrypted.
-  - `key` (string, required) — the API key sent to this server in place of the client's, in the header the client used: `X-Api-Key` when it sent one, `Authorization: Bearer` otherwise, both when it sent both. Printable ASCII, no spaces. `/config` and `/v1/pipeline` redact it.
-  - `main` (string, required) — a word naming this server's model for an agent's main work, a request that carries tools, sent in place of a model the server refuses (see **Models**). It resolves to the newest model on the server's list whose name, without its provider prefix, contains the word, case ignored: `opus` against `aws/claude-opus-5-5` and `claude-opus-4-8` is the first. No `/` and no whitespace. The fields `opus`, `sonnet` and `haiku` it replaced are refused by name.
-  - `helper` (string, required) — the same for a request without tools, such as a title.
-- `agents` (map) — agent name, as agentop shows it (`claude-code`, `opencode`), to a server name. Each value must name a listed server. `unknown`, the name for requests with no User-Agent, cannot be routed.
-
-```yaml
-      - name: inference-router
-        config:
-          servers:
-            ete:
-              url: https://ete-litellm.example.com
-              key: sk-…
-              main: opus          # the newest listed model whose name contains it
-              helper: haiku
-            glm:
-              url: https://glm-litellm.example.com
-              key: sk-…
-              main: glm
-              helper: nemotron
-          agents:
-            claude-code: glm     # only agents listed here are routed
-            opencode: glm
-```
-
-**What it does to a request.** Only a request the forward proxy re-sends — a plain
-proxied one, or one decrypted by the TLS bridge — can be routed. A `CONNECT` or a
-transparently redirected connection is dialed where the client chose, and is
-`skip/not_redirectable`. On a server's host every path is handled,
-`/v1/models` and `count_tokens` included. A request to any other host is
-**captured** when it is a routed agent's `POST` that `inference-parser` read as
-inference, with a path ending in `/chat/completions`, `/v1/messages` or
-`/responses`: it is sent to the agent's server at `/v1/chat/completions`,
-`/v1/messages` or `/v1/responses`, the query string kept, and its `modify/routed`
-carries `captured` with that path. The parse is required, not just the path: an
-agent's own tools can `POST` to any API whose path ends the same way. Anything else
-to a host no server has is `skip/not_an_inference_server`. Then the session
-decides:
-
-- A session is pinned by the first request that decides it, by the order below,
-  to where that request went: a server when the redirect took effect, or "not
-  routed" when the request stayed where the client sent it — because the agent is
-  not routed, or because the router runs under `on_error: observe`, even for an
-  agent with a server. A session started under observe therefore stays unrouted
-  after a switch to enforce. A request whose redirect failed pins nothing, and the
-  next one decides again. Every request renews
-  the pin, which lapses 30 days after the last. On a local install pins are kept in
-  `~/.cortex/plugin-state.json`, which a restart keeps; elsewhere in the process
-  store, which a restart empties.
-- A request in a session its agent has not pinned is decided in this order, for a
-  routed agent:
-  1. The session's history: the latest earlier inference request, other than a
-     side request (3), that agent sent in the session to a server's host keeps
-     the session on that server, from then with that server's key. The history
-     is the session store's and, where the proxy keeps a session archive, up to
-     2000 of the archive's events from before the oldest the store holds. A
-     request the router would capture, recorded where the agent sent it, was
-     made while the router was not routing the agent — before it was routed, or
-     under observe — so the session ran unrouted and is not routed now: routing
-     an agent does not move a conversation already running on its provider. Any
-     other request is no evidence.
-  2. A request `inference-parser` did not read as inference — `count_tokens`,
-     `/v1/models` — goes to its agent's current server and pins nothing.
-  3. A Claude Code request's own turn: an opening turn, with no assistant reply
-     yet, goes to its agent's current server; a continuation, a conversation the
-     router did not see begin, is not routed, and is pinned so; a one-shot with no
-     tools, or a subagent's request, pins nothing. A one-shot — the title request,
-     auto mode's classifier, the permission monitor — goes to its agent's current
-     server, since it is no part of the conversation and a new session's title
-     request can arrive before its opening turn. A subagent's request to a server's
-     host is not routed: it is a conversation of its own, which a `/clear` can carry
-     onto a new session id mid-task.
-  4. Otherwise its agent's current server.
-
-  The router reads the `inference` record `inference-parser` puts on each request,
-  so a chain without `inference-parser` before the router is refused.
-- A pin is its agent's. A request from another agent filed under the same session
-  id — by process attribution, which files a command an agent runs under that
-  agent's session and is on by default on a laptop; by the active-session fallback
-  with client affinity off; or by a header id two clients share — is decided as if
-  the session were unpinned, from that agent's own history and server, and leaves
-  the pin alone.
-- Changing `agents` therefore moves only new sessions: the pins and the history
-  survive a hot reload, and on a local install a restart too. A proxy with neither
-  a plugin store nor a session archive loses both on restart, and a running
-  session's next request is then decided as an unpinned one's. The store also drops
-  quiet sessions while the proxy runs — `session.max_sessions` (100 by default)
-  evicts the least recently used, and a configured `session.ttl` expires them — and
-  a session dropped before the router pinned it has only the archive's history,
-  where there is one; a pin outlives that. A request with no session follows its agent's
-  current server, unpinned, and so does one filed under a synthetic session — the
-  `default` bucket or a `pending:<agent>` id — since each holds many conversations,
-  not one.
-- Not routed: `skip/not_routed`, and the request is left as the client sent it.
-- Pinned to a server since removed: `deny/pinned_server_removed`, a 503 asking for
-  a new session. The conversation is never moved to another server.
-- Otherwise the request is redirected to the server, and the key is replaced only
-  once the redirect has taken effect, so it goes to the server and nowhere else.
-  Every routed request is redirected, even one that already names the server's
-  host: the `Host` header is the client's word, and a TLS-bridged request is
-  otherwise dialed to the host the client `CONNECT`ed to, which need not be the
-  same. Each therefore carries the framework's `modify/redirected` record — with
-  `from` equal to `to` when the agent's base URL (`ANTHROPIC_BASE_URL`, for Claude
-  Code) already names the server — followed by the router's `modify/routed` with
-  `server` and `pin` (`new`, `existing` or `none`).
-- **Models.** A routed request goes with the model the agent asked for: the router
-  does not read the server's list to judge it, because a LiteLLM server serves
-  aliases it does not list. When the server refuses the model, the router records the refusal for an
-  hour and, through `pipeline.Resender`, has the forward proxy send the request
-  again, once and before the agent sees anything, with the server's substitute:
-  `main` for a request with tools, `helper` for one without, as the server's list
-  resolves them. The re-sent request's row carries `modify/resent` with `server`,
-  `model` and `substitute`, after the framework's `modify/body_rewritten` and
-  `modify/model_rewritten`; the refused attempt has rows of its own, under its own
-  request id. While a refusal is recorded, requests for that model are sent with
-  the substitute from the start, with no refused round trip. A session keeps the
-  substitute it was given, so a conversation never changes model part-way. The
-  inference record's `model` becomes the server's, with `requestedModel` keeping
-  the agent's: settlement prices the server's model, and agentop's detail pane
-  shows both.
-
-  A request already sent with a substitute is never sent again, so a refused
-  substitute reaches the agent; so does a refusal when the server's list names no
-  model for the word, or none has been read yet, recorded as `skip/no_substitute`.
-  Any other answer — a bad key's `401`, a rate limit, a server error — reaches the
-  agent as the server sent it. The lists are fetched from `GET /v1/models` with
-  each server's key when the router starts and hourly after, the last good one
-  kept in the plugin store. A request whose body names no model is routed as it is.
-- A redirect the listener refuses: `deny/redirect_failed`, a 503.
-- Under `on_error: observe` nothing moves, the client's key stays and no model is
-  chosen or re-sent. The timeline shows two rows: the framework's shadow
-  `modify/redirected`, and the router's `observe/would_route`.
-
-**Put it last in the outbound chain**, where `agentop server add` puts it. A
-redirect moves `pctx.Host`, so the plugins before the router decide on the host
-the client asked for, and a plugin after it would see the server's instead; put
-nothing after it that keys on the host. Session events, usage and cost follow the
-server's host, and each event's `requestedHost` keeps the one asked for when it
-differs. The router also rewrites the request body to send a substitute, so the
-framework holds it after every body reader: a chain with a parser after the router
-is refused, at startup and on reload.
+Full reference: [`inference-router-plugin.md`](inference-router-plugin.md).
 
 ## `jwt-validation`
 
 Validates inbound JWTs: signature via JWKS, issuer, and audience.
 
-- `issuer` (string) — expected `iss` claim; required.
-- `jwks_url` (string) — JWKS endpoint; derived from Keycloak URL/realm or issuer when omitted.
-- `keycloak_url` / `keycloak_realm` (string) — used to derive `jwks_url` when omitted.
-- `audience` (string) — expected `aud` claim; one of `audience` / `audience_file` / `audience_mode=per-host` required.
-- `audience_file` (string) — file to read expected audience from. Default `/shared/client-id.txt`.
-- `audience_mode` (string) — `static` (default) or `per-host` (derived from the `Host` header).
-- `allowed_audiences` (`[]string`) — extra audience values accepted (OR semantics).
-- `bypass_paths` (`[]string`) — path globs skipped. Default `/healthz`, `/readyz`, `/livez`, `/metrics`, `/.well-known/*`.
-- `placeholder_mode` (bool) — replace the validated inbound token with an opaque placeholder before forwarding, for later outbound resolution. Default `false`.
-- `placeholder_ttl` (string) — how long the real token is retained. Default `1h`.
+Full reference: [`jwt-validation-plugin.md`](jwt-validation-plugin.md).
 
 ## `lineage-telemetry`
 
@@ -352,57 +137,28 @@ the protocol parsers (declared in `RequiresAny`) and after
 `jwt-validation` when the principal facts are wanted; a request-phase
 denial by a plugin ordered before it emits no spans.
 
-- `otel_endpoint` (string) — OTLP gRPC target: `host:port`, `http://host:port` or `https://host:port`; any other scheme is refused. Default `localhost:4317`.
-- `otel_tls` (bool) — dial the collector with TLS, verified against the system roots or `otel_ca_file`. An `https://` endpoint implies it; `https://` with `otel_tls: false`, and `http://` with `otel_tls: true` or `otel_ca_file`, are refused. A plaintext dial to a non-loopback collector is allowed and logged as a WARN at start. Default `false`.
-- `otel_ca_file` (string) — PEM bundle to verify the collector's certificate against (a private CA, e.g. cert-manager issued). Implies `otel_tls`; with an explicit `otel_tls: false` it is refused; an unreadable file or one with no certificate refuses to start. Default: system roots.
-- `capture_io` (bool) — attach the parsed request/response content as `input.value` / `output.value`. Default `false`.
-- `max_payload_bytes` (int) — cap on those two values, cut on a UTF-8 boundary with a `…[truncated]` marker; `0` or unset takes the default, `-1` attaches whole, any other negative is refused at start. Default `4096`.
-- `max_attr_bytes` (int) — cap on every variable-content string attribute (`url.path`, `lineage.peer.host`, `mcp.tool`, …) and the span name — except the two identity facts `lineage.self.id` and `lineage.self.namespace`, which are operator configuration and never truncated; same `0` / `-1` / negative semantics as `max_payload_bytes`. Default `256`.
-- `mint_traceparent` (bool) — forward a `traceparent` naming this request span when the request carried no valid one; `false` = a pure observer that writes no `traceparent`. Default `true`.
-- `bypass_paths` (`[]string`) — path globs (`path.Match`, query stripped, path normalized — the shared bypass matcher `jwt-validation` and `sparc` use) that produce no spans. Default `/.well-known/*`, `/healthz`, `/readyz`, `/health`. Setting either bypass key replaces its default list rather than extending it, as in `ibac` / `sparc` / `cpex`; an entry matching everything is refused at start.
-- `bypass_hosts` (`[]string`) — outbound host globs (`path.Match`, port stripped, case folded) that produce no spans; ignored inbound, where `Host` is caller-controlled. Default `otel-collector`, `otel-collector.*`, `jaeger`, `jaeger.*`, `zipkin`, `zipkin.*`, `prometheus`, `prometheus.*`.
-- `self_id` (string) — this workload's identity, emitted as `lineage.self.id` (a SPIFFE ID reduced to its last path segment); a blank value, or one with no non-empty `/`-segment (`/`), is refused at start.
-- `self_id_file` (string) — read when `self_id` is empty. Until it is readable and carries an identity the plugin is not ready and skips every exchange (no span, no header), re-reading the file in the background while `/readyz` names it — the same handling `jwt-validation` gives this path, so a late Secret mount never fails the sidecar (a pod probing `/readyz` stays out of rotation until the file lands). Refused at start only when `self_id` is also empty. Default `/shared/client-id.txt`.
-- `namespace` (string) — this workload's Kubernetes namespace (an RFC 1123 DNS label), emitted as `lineage.self.namespace` on every span: the other half of its identity, since `self_id` is the last segment of a SPIFFE ID and the same segment in two namespaces is two workloads. **Required** (or `namespace_file`) — absent, blank, or not a DNS label is refused at start; never derived from the SPIFFE path. The attach kit writes its `NAMESPACE`; a sidecar older than this key rejects a config that carries it, so image and config flip together.
-- `namespace_file` (string) — read once at start when `namespace` is empty; meant for `/var/run/secrets/kubernetes.io/serviceaccount/namespace`, the file the kubelet projects from the pod's own metadata — the one source that is right in every copy of a ConfigMap shared across namespaces (the platform's `authbridge-runtime-config`), where an inline literal would be wrong everywhere but one. Absent, blank, or not a DNS label refuses at start; no default, no poller.
+Full reference: [`lineage-telemetry-plugin.md`](lineage-telemetry-plugin.md).
 
 ## `litellm-budget-track`
 
 Keeps the daily spend ledger and enforces a spend budget, from the cost record
-`inference-parser` publishes. Full details in
-[litellm-budgettrack-plugin.md](./litellm-budgettrack-plugin.md).
+`inference-parser` publishes.
 
 **Provider-specific:** `x-litellm-response-cost` is emitted only by
-[LiteLLM](https://docs.litellm.ai/), so this plugin works only when
-LiteLLM is the inference provider in front of the model. Against a
-provider that doesn't set the header (raw OpenAI, Ollama, vLLM, …), no
-cost is ever accumulated and the budget never trips.
+[LiteLLM](https://docs.litellm.ai/), so the *authoritative* cost figure — and
+the drift check against it — exists only when LiteLLM is the inference
+provider in front of the model. Against a provider that doesn't set the
+header, `inference-parser` prices token usage from the [`pricing:`](pricing.md)
+table and this plugin accumulates the modelled figure.
 
-- `spend_file` (string) — path to the JSON spend ledger file; required. The ledger is a small JSON file the plugin creates and rewrites, holding the current UTC date plus the cumulative spend and call count for that day (it resets automatically at midnight UTC) — see [Ledger Format](./litellm-budgettrack-plugin.md#ledger-format).
-- `max_budget` (float64) — daily budget in USD; required, must be > 0.
-- **No rate options, and no pricing at all.** This plugin bills a figure it does not compute: `inference-parser` settles the cost and publishes the record, and this plugin adds the day's total, enforces the cap, and warns when the rate table disagrees with what the gateway charged. Rates live in the top-level [`pricing:`](pricing.md#overriding-in-config) section.
-- **Requires `inference-parser` LATER in the chain** (`RequiresLater`). The response passes walk the chain in reverse, so the parser must sit at a higher index to fold each frame before this plugin settles the cost. A chain without it — or with it earlier — fails to build.
+Full reference: [`litellm-budget-track-plugin.md`](litellm-budget-track-plugin.md).
 
 ## `mcp-parser`
 
 Parses MCP tool calls/results into `pctx.Extensions.MCP` for downstream
 policy plugins.
 
-This plugin makes no decisions of its own — it exists to feed others. The
-plugins that consume `pctx.Extensions.MCP` are:
-
-| Consumer | How it uses the MCP extension |
-|---|---|
-| [`ibac`](#ibac) | Reads the tool name and arguments to judge the call against user intent. Declares `mcp-parser` in `RequiresAny`. |
-| [`sparc`](#sparc) | Extracts the tool name/arguments to reflect on, and returns clarifications as MCP results. Declares `mcp-parser` in `RequiresAny`; required in `enforcement: mcp` mode. |
-| [`cpex`](#cpex) | Converts the parsed call/result into a CMF message for the `cmf.tool_pre_invoke` / `cmf.tool_post_invoke` hooks. Declares `mcp-parser` in `RequiresAny`. |
-| [`opa`](#opa) | Exposes the parsed call as `input.mcp` for policy (add `mcp.params` to `include` for arguments). |
-
-Place `mcp-parser` **before** these plugins on the outbound chain;
-without it they see no MCP data and pass the traffic through
-unclassified.
-
-- `paths` (`[]string`) — URL path globs treated as MCP endpoints (for body-less transport detection: SSE GET, session-terminate DELETE). Default `["/mcp"]`.
+Full reference: [`mcp-parser-plugin.md`](mcp-parser-plugin.md).
 
 ## `opa`
 
@@ -411,11 +167,7 @@ policy bundles against inbound and outbound requests, using an embedded
 OPA engine and four fixed decision paths. Full details in the plugin's
 [README](../core/plugins/opa/README.md).
 
-- `bundle_url` (string) — base URL of the Rossoctl Bundle Server, the in-cluster service that serves per-agent [OPA policy bundles](https://www.openpolicyagent.org/docs/management-bundles) keyed by SPIFFE ID (see [how it works](../core/plugins/opa/README.md#how-it-works)); required.
-- `agent_id_file` (string) — path to the agent's client-ID file. Default `/shared/client-id.txt`.
-- `agent_id` (string) — inline agent ID; overrides `agent_id_file` when set.
-- `polling_min_delay` / `polling_max_delay` (int) — bundle polling interval bounds in seconds. Defaults 10 / 120.
-- `include` (`[]string`) — optional field groups exposed in the OPA input document (e.g. `mcp.params`, `a2a.content`, `inference.messages`); default lean/empty.
+Full reference: [`opa-plugin.md`](opa-plugin.md).
 
 ## `sparc`
 
@@ -427,52 +179,16 @@ HTTP service wrapping the `SPARCReflectionComponent` from the
 must be deployed once per cluster before enabling this plugin. Full
 details in [sparc-plugin.md](./sparc-plugin.md).
 
-- `reflector_endpoint` (string) — base URL of the SPARC reflection service (`{endpoint}/reflect`); required.
-- `reflector_bearer` (string) — optional bearer token.
-- `enforcement` (string) — `mcp` (gate outbound MCP `tools/call`, default) or `inference` (gate/rewrite LLM completions).
-- `track` (string) — reflection track: `fast_track` (default), `slow_track`, `syntax`, `spec_free`, `transformations_only`.
-- `timeout_ms` (int) — per-call timeout; values below 100 rejected. Default 30000.
-- `on_reject_action` (string) — `observe` (log only), `reflect` (default, return clarification), or `deny` (hard block).
-- `deny_score_threshold` (float64) — escalate a reject to hard deny when the grounding score is at or below this value. `0` disables escalation.
-- `fail_policy` (string) — behavior when SPARC is unreachable: `open` (default, allow + record) or `closed` (block).
-- `skip_tools` / `reflect_tools` (`[]string`) — tool-name globs to exclude from, or restrict, reflection.
-- `bypass_hosts` / `bypass_paths` (`[]string`) — globs skipped without reflecting; default to Keycloak/SPIRE/otel/etc.
-
 ## `static-inject`
 
 Swaps a placeholder credential for a real static credential on
 outbound requests, so the workload never holds the real secret.
 
-- `source` (string) — `secret_dir` (read one file per key from `secret_dir`) or `mappings` (inline map; tests/dev only).
-- `secret_dir` (string) — directory of per-key credential files.
-- `mappings` (`map[string]string`) — inline key-to-credential map; not for real secrets.
-- `key_by` (string) — `host` (default, use the outbound destination host) or `static` (always use `key`).
-- `key` (string) — lookup key used when `key_by=static`.
-- `placeholder` (string) — if set, the inbound bearer must exactly equal this value before injection proceeds.
-- `inject_header` (string) — header to inject the credential into. Default `Authorization` (writes `Bearer <value>`); any other value writes the raw credential and drops the inbound `Authorization` header.
+Full reference: [`static-inject-plugin.md`](static-inject-plugin.md).
 
 ## `session-budget`
 
 Enforces per-session token, call-count, and duration budgets via Redis. Opt-in at build time (`-tags include_plugin_sessionbudget`). Full details in [session-budget-plugin.md](./session-budget-plugin.md).
-
-- `redis_url` (string) — Redis/Valkey connection URL; required.
-- `max_tokens` (int64) — cumulative token ceiling per session. `0` = no limit.
-- `max_input_tokens` (int64) — per-kind ceiling for uncached prompt tokens. `0` = no limit.
-- `max_cache_read_tokens` (int64) — per-kind ceiling for prompt tokens served from cache. `0` = no limit.
-- `max_cache_write_tokens` (int64) — per-kind ceiling for prompt tokens written to cache. `0` = no limit.
-- `max_output_tokens` (int64) — per-kind ceiling for generated completion tokens. `0` = no limit.
-- `max_reasoning_tokens` (int64) — per-kind ceiling for reasoning-only output tokens (a subset of output). `0` = no limit.
-- `max_calls` (int64) — max inference calls per session. `0` = no limit.
-- `max_duration_seconds` (int64) — wall-clock session lifetime. `0` = no limit.
-- `on_exceed` (string) — `deny` (default, block), `observe` (log only), or `pause` (HITL webhook approval).
-- `pause_webhook` (string) — URL to POST for approval when `on_exceed=pause`. Required in pause mode.
-- `pause_timeout` (string) — how long to wait for webhook response. Default `30s`.
-- `pause_timeout_action` (string) — fallback on timeout/error: `deny` (default) or `allow`.
-- `pause_grace_period` (string) — suppress repeated webhooks after approval. Default `5m`.
-- `session_ttl_seconds` (int) — Redis key TTL; must be ≥ `max_duration_seconds` when the latter is set (enforced at Configure time). Default 7200.
-- `refresh_interval` (string) — how often the local cache syncs from Redis. Default `5s`.
-- `redis_unavailable` (string) — only `fail_open` (default) is implemented; `fail_closed` is rejected at Configure time.
-- `default_session_fallback` (bool) — pool sessionless traffic into a shared `default` bucket. Single-workload only: one caller exhausting the budget denies the rest. Default `false`.
 
 At least one of `max_tokens`, the five per-kind ceilings, `max_calls`, or
 `max_duration_seconds` must be > 0, or Configure fails.
@@ -480,7 +196,6 @@ At least one of `max_tokens`, the five per-kind ceilings, `max_calls`, or
 Cold-cache behavior is mode-dependent; see
 [session-budget-plugin.md](session-budget-plugin.md#cold-cache-behavior)
 for details.
-
 
 ## `token-broker`
 
@@ -490,15 +205,6 @@ token broker service, per host-based routing rules. An alternative to
 outbound `Authorization` header, so use one or the other on a given
 chain. Full details in [token-broker-plugin.md](./token-broker-plugin.md).
 
-- `broker_url` (string) — base URL of the token broker service; required.
-- `default_policy` (string) — behavior when no route matches: `passthrough` (default) or `broker`.
-- `routes.file` (string) — path to a `routes.yaml` file; merged with inline rules.
-- `routes.rules` (list) — inline route entries; each has:
-  - `host` — glob pattern to match the target host.
-  - `action` — `broker` (default) or `passthrough`.
-  - `authorization_endpoint` / `token_endpoint` — per-route OAuth endpoint overrides sent to the broker.
-
-
 ## `token-exchange`
 
 RFC 8693 outbound token exchange per route. Supports Keycloak, Entra
@@ -506,21 +212,7 @@ ID, Okta, and any RFC 8693-compliant IdP. For the `IdPProvider`
 interface each IdP implements, see
 [idp-plugin-contract.md](./idp-plugin-contract.md).
 
-- `token_url` (string) — OAuth token endpoint; required unless derived from `provider` + `provider_url`(+`provider_realm`), or the deprecated `keycloak_url`/`keycloak_realm`.
-- `provider` (string) — IdP selector for endpoint derivation and client auth: `keycloak`, `generic`.
-- `provider_url` / `provider_realm` (string) — IdP base URL and realm/tenant, meaning varies by provider.
-- `keycloak_url` / `keycloak_realm` (string) — deprecated aliases for `provider_url`/`provider_realm` with `provider=keycloak`.
-- `default_policy` (string) — behavior when no route matches: `passthrough` (default) or `exchange` (empty-audience client-credentials) for hosts explicitly configured in `authproxy-routes`.
-- `no_token_policy` (string) — behavior for outbound requests with no bearer token: `client-credentials`, `allow`, or `deny` (default).
-- `identity.type` (string) — `spiffe` (JWT-SVID assertion) or `client-secret`; required.
-- `identity.client_id` / `identity.client_id_file` — OAuth client ID, inline or from file (default `/shared/client-id.txt`).
-- `identity.client_secret` / `identity.client_secret_file` — client secret, inline or from file (default `/shared/client-secret.txt`).
-- `identity.jwt_audience` (string) — audience claim minted on the JWT-SVID assertion; required when `type=spiffe`.
-- `identity.assertion_type` (string) — client-assertion URN: `jwt-spiffe` (default) or `jwt-bearer` (Okta).
-- `routes.file` (string) — path to `routes.yaml`. Default `/etc/authproxy/routes.yaml`.
-- `routes.rules` (list) — inline route entries (`host`, `target_audience`, `token_scopes`, `token_url`, `action`), combined with file-loaded routes.
-- `audience_from_host` (bool) — derive audience from host for unrouted requests. Default `false`.
-- `resolve_placeholders` (bool) — resolve an inbound placeholder-prefixed bearer to its real token before exchange; unresolvable placeholders are denied. Default `false`.
+Full reference: [`token-exchange-plugin.md`](token-exchange-plugin.md).
 
 ## `tool-prune`
 
@@ -531,13 +223,11 @@ trim it without changing every client.
 
 Requires `inference-parser` earlier in the chain, and must sit after any
 body-reading plugin (it rewrites the request body). Declares
-`WritesRequestBody` only, so response streaming is unaffected.
+`WritesRequestBody` only, so response streaming is unaffected. **An empty
+`remove` list is the off switch** — the plugin is inert until a name is added,
+which is how it ships in the local install.
 
-- `remove` (`[]string`) — tool names to delete from the manifest. The complete verdict: no learning, no state, no storage. Names absent from a given request are ignored. **An empty list is the off switch** — the plugin is inert until a name is added, which is how it ships in the local install.
-- `paths` (`[]string`) — request paths to act on, matched exactly or by suffix. Defaults to `/v1/chat/completions`, `/v1/completions`, `/v1/messages`.
-- **No rates and no pricing.** This plugin reduces tokens; pricing the reduction belongs to whoever owns cost. It publishes what it removed — tool names, byte delta, and whether the prune was applied or only measured — and reads the priced figure back off the cost record to fill its `$ saved` metric. A figure derived from the bundled table is still labelled `bundled`, and a model with no rate anywhere is still counted in a `requests unpriced` row rather than charged at another model's rate. There is still no output rate: pruning only shrinks the prompt.
-
-  The saving has to be priced on the response side, not here: the dollar amount depends on which prompt-cache tier the removed tokens came out of — 1x, 1.25x or 0.1x of the same rate — and only the response reveals that. It is inherently a request-fact times a response-fact.
+The saving has to be priced on the response side, not here: the dollar amount depends on which prompt-cache tier the removed tokens came out of — 1x, 1.25x or 0.1x of the same rate — and only the response reveals that. It is inherently a request-fact times a response-fact.
 
 Generate the list from local transcripts with `agentop tools scan`, which
 proposes only tools it recognises as Claude Code built-ins and never proposes
@@ -548,7 +238,6 @@ refuses when it observed no tool calls at all, because "tools you have not
 called" would then mean every tool it knows. See
 [`tool-prune-plugin.md`](./tool-prune-plugin.md) for the measure-then-enforce
 rollout, the metrics readout, and what the saving does and does not change.
-
 
 ## Cost records
 

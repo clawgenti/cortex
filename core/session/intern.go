@@ -21,8 +21,9 @@ import (
 // immutable, so two events sharing one backing array cannot tell, and a consumer sees
 // the same bytes it always did.
 //
-// SCOPE: string fields only — inference messages and completions, tool results, A2A part
-// content, and the tool manifest's descriptions AND schemas. Tool results repeat exactly as
+// SCOPE: string fields only — inference messages and completions, tool results (content
+// by the threshold, ToolUseID below it via internID), A2A part content, and the tool
+// manifest's descriptions AND schemas. Tool results repeat exactly as
 // the conversation does: a client re-sends every earlier one on every request. The manifest
 // earns its place: a client re-sends it on every request, so it duplicates harder than the
 // conversation does.
@@ -98,6 +99,27 @@ type Interner struct {
 // fixing because it is free, and worth measuring before claiming more than that.
 func (in *Interner) intern(s string, next map[string]string) string {
 	if len(s) < InternMinLen {
+		return s
+	}
+	canon, ok := in.prev[s]
+	if !ok {
+		canon = s
+	}
+	next[canon] = canon
+	return canon
+}
+
+// internID is intern without the length floor, for identifiers that repeat exactly as
+// message content does while being far shorter than InternMinLen. ToolUseID is the one
+// today: a "toolu_…" id is ~20 bytes, but a client re-sends every earlier tool result on
+// every request, so the ids duplicate as hard as the conversation does — 0.67 MB of pure
+// id duplication on BenchmarkRetainedHeapWithToolResults's 300-turn fixture. Only the
+// empty string is beneath sharing, because it is the one value every absent id shares
+// for no reason.
+//
+// Same canonical-keying contract as intern; see that function for why.
+func (in *Interner) internID(s string, next map[string]string) string {
+	if s == "" {
 		return s
 	}
 	canon, ok := in.prev[s]
@@ -184,9 +206,13 @@ func (in *Interner) InternEvent(e *pipeline.SessionEvent) {
 		}
 		// Tool results repeat like the conversation — every request re-sends all of them — and
 		// alias across both phases of a request the same way, so they are cloned first too.
+		// The id is interned WITHOUT the length floor (internID): it repeats as hard as the
+		// content but is far shorter than InternMinLen — the duplication it leaves behind is
+		// what BenchmarkRetainedHeapWithToolResults prices.
 		cp.ToolResults = slices.Clone(e.Inference.ToolResults)
 		for i := range cp.ToolResults {
 			cp.ToolResults[i].Content = in.intern(cp.ToolResults[i].Content, next)
+			cp.ToolResults[i].ToolUseID = in.internID(cp.ToolResults[i].ToolUseID, next)
 		}
 		e.Inference = &cp
 	}

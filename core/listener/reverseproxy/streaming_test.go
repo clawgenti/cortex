@@ -236,8 +236,8 @@ func framesAsStrings(frames [][]byte) []string {
 
 // TestReverseProxy_Streaming_PreservesEventLine is the regression
 // guard for the SSE "event:" line bug: a client reading through the
-// proxy must see the upstream's "event: <type>" line reproduced
-// before each re-framed "data:" line, not just the bare data payload.
+// proxy must see the upstream's "event: <type>" line before each
+// "data:" line, not just the bare data payload.
 // The Anthropic SDK types each event from the "event:" field, so
 // dropping it made downstream clients decode zero typed events even
 // though the data bytes were intact.
@@ -301,8 +301,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { re
 // must strip the client's Accept-Encoding so Go's transport negotiates
 // (and transparently decompresses) gzip itself. Leaving an explicit
 // "Accept-Encoding: gzip" through produced a gzipped body the SSE
-// re-framer read as garbage plus a Content-Encoding: gzip header over
-// re-emitted plaintext. The pipeline here carries a body-inspecting
+// parser read as garbage, so plugins saw no events. The pipeline here carries a body-inspecting
 // StreamingResponder (streamingProbe, ReadsBody=true) so the strip is
 // in scope.
 //
@@ -401,5 +400,115 @@ func TestReverseProxy_PreservesAcceptEncoding_PassThrough(t *testing.T) {
 
 	if gotAcceptEncoding != "gzip" {
 		t.Errorf("outbound request Accept-Encoding = %q, want %q preserved (pure pass-through must not strip)", gotAcceptEncoding, "gzip")
+	}
+}
+
+// The reverse proxy relays the upstream's SSE bytes unchanged — id:, retry:,
+// comments, CRLF and an unterminated final event included — while the
+// streaming plugin still sees every payload.
+func TestReverseProxy_Streaming_RelaysBytesUnchanged(t *testing.T) {
+	const stream = ": connected\n\n" +
+		"event: status-update\nid: 1\ndata: {\"kind\":\"status-update\"}\n\n" +
+		"retry: 3000\n\n" +
+		"event: artifact-update\r\nid: 2\r\ndata: {\"kind\":\"artifact-update\"}\r\n\r\n" +
+		"id: 3\ndata: {\"final\":true}"
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, stream)
+	}))
+	defer backend.Close()
+
+	probe := newStreamingProbe(false)
+	p, err := pipeline.New([]pipeline.Plugin{probe})
+	if err != nil {
+		t.Fatalf("New pipeline: %v", err)
+	}
+	srv, err := NewServer(pipeline.NewHolder(p), nil, backend.URL, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	proxy := httptest.NewServer(srv.Handler())
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/stream")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != stream {
+		t.Fatalf("relayed body differs from upstream\n got %q\nwant %q", body, stream)
+	}
+
+	frames, lasts := probe.snapshot()
+	want := []string{`{"kind":"status-update"}`, `{"kind":"artifact-update"}`, `{"final":true}`, ""}
+	if len(frames) != len(want) {
+		t.Fatalf("plugin saw %d calls (lasts %v), want %d", len(frames), lasts, len(want))
+	}
+	for i := range want {
+		if string(frames[i]) != want[i] {
+			t.Errorf("frame %d = %q, want %q", i, frames[i], want[i])
+		}
+	}
+}
+
+type rejectSecondFrameRP struct{ seen int }
+
+func (p *rejectSecondFrameRP) Name() string { return "reject-second-frame" }
+func (p *rejectSecondFrameRP) Capabilities() pipeline.PluginCapabilities {
+	return pipeline.PluginCapabilities{ReadsBody: true}
+}
+func (p *rejectSecondFrameRP) OnRequest(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (p *rejectSecondFrameRP) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (p *rejectSecondFrameRP) OnResponseFrame(_ context.Context, _ *pipeline.Context, _ []byte, last bool) pipeline.Action {
+	if last {
+		return pipeline.Action{Type: pipeline.Continue}
+	}
+	p.seen++
+	if p.seen == 2 {
+		return pipeline.Action{Type: pipeline.Reject, Violation: &pipeline.Violation{Code: "test.reject", Reason: "second frame"}}
+	}
+	return pipeline.Action{Type: pipeline.Continue}
+}
+
+// A rejected block never reaches the client: Read dispatches before it
+// returns the block's bytes.
+func TestReverseProxy_Streaming_RejectedBlockNotForwarded(t *testing.T) {
+	const first = "event: status-update\nid: 1\ndata: {\"n\":1}\n\n"
+	const second = "event: status-update\nid: 2\ndata: {\"n\":2}\n\n"
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, first+second)
+	}))
+	defer backend.Close()
+
+	p, err := pipeline.New([]pipeline.Plugin{&rejectSecondFrameRP{}})
+	if err != nil {
+		t.Fatalf("New pipeline: %v", err)
+	}
+	srv, err := NewServer(pipeline.NewHolder(p), nil, backend.URL, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	proxy := httptest.NewServer(srv.Handler())
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/stream")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body) // the abort surfaces as a read error; the bytes are what matter
+	if !bytes.Equal(body, []byte(first)) {
+		t.Fatalf("body = %q, want only the first block %q", body, first)
 	}
 }

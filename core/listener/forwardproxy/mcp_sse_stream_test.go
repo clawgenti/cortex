@@ -47,9 +47,7 @@ func TestForwardProxy_SSE_StreamsWithoutResponder(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		// event: + id: exercise byte-faithful framing — the re-framing path
-		// (handleStreamingResponse) would drop a non-allowlisted event name
-		// and the id: line entirely.
+		// event: + id: exercise byte-faithful framing, which every SSE path keeps.
 		io.WriteString(w, "event: message\nid: 42\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"ok\":true}}\n\n")
 		f.Flush()
 		<-release // hold the stream open, like a live MCP server between events

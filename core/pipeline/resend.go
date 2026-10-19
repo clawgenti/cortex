@@ -7,14 +7,16 @@ import "context"
 // its server refused the model the client asked for, and the router has one of the
 // server's own models to send instead, before the client sees the refusal.
 //
-// Resend is called at most once per request, when the upstream answered with a
-// status outside 2xx and before any byte of that answer reached the client. status is
-// the answer's status, and body is its first ResendPeekLimit bytes. A plugin that
-// wants the request sent again changes it through the usual APIs — SetRequestModel,
-// SetBody, Headers — and returns true. The listener then records the refused answer,
-// sends the request as it now stands to the same destination, and relays that second
-// answer, whatever it is: nothing is asked twice. Returning false lets the refused
-// answer through unchanged.
+// Resend is called after an attempt the upstream answered with a status outside 2xx,
+// before any byte of that answer reached the client, and at most MaxResends times per
+// request. status is the answer's status, and body is its first ResendPeekLimit bytes.
+// A plugin that wants the request sent again changes it through the usual APIs —
+// SetRequestModel, SetBody, Headers — names why with MarkResend, and returns true. The
+// listener then records the refused answer, sends the request as it now stands to the
+// same destination, and asks again only if that attempt is refused too and fewer than
+// MaxResends resends were made. A plugin must not answer the same kind of refusal
+// twice for one request; ResendReasons says what it already answered. Returning false
+// lets the refused answer through unchanged.
 //
 // It is dispatched like OnRequest, in the request phase and under the plugin's
 // WritesRequestBody declaration, so SetRequestModel is accepted. Redirect and
@@ -28,6 +30,10 @@ type Resender interface {
 // ResendPeekLimit is how much of a refused answer's body a Resender is shown. An
 // error body is small; a larger one is cut, not refused.
 const ResendPeekLimit = 64 << 10
+
+// MaxResends is how many times a listener asks the Resenders about one request: once
+// after each refused attempt, so at most MaxResends+1 attempts reach the upstream.
+const MaxResends = 2
 
 // HasResenders reports whether any plugin in the pipeline may ask for a resend, so a
 // listener reads a refused answer's body only when one might.
@@ -78,3 +84,13 @@ func resenderOf(plugin Plugin) (Resender, bool) {
 // sends a request again calls it before recording the second attempt, which is a
 // request of its own on the timeline and must not pair with the first one's answer.
 func (c *Context) RenewRequestID() { c.requestID = newRequestID() }
+
+// MarkResend names why a Resender that returns true wants the request sent again. A
+// plugin that answers more than one kind of refusal reads ResendReasons to answer each
+// kind at most once per request.
+func (c *Context) MarkResend(reason string) { c.resendReasons = append(c.resendReasons, reason) }
+
+// ResendReasons returns the reasons named so far for this request, oldest first.
+func (c *Context) ResendReasons() []string {
+	return append([]string(nil), c.resendReasons...)
+}

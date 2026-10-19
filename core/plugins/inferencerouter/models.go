@@ -3,8 +3,11 @@ package inferencerouter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +46,27 @@ const (
 	// that may use every model gets in place of refusedType.
 	invalidModel = "Invalid model name passed in model="
 )
+
+// modelNotFound are the phrases a model server's error message carries for a model it
+// does not have, %s standing for the name the refused attempt was sent with, and the
+// statuses each was recorded at. Each was recorded from the server named, on
+// /v1/chat/completions, /v1/messages and /v1/responses alike for Ollama 0.40.4 and
+// llama.cpp, and on /v1/chat/completions alone for Ollama 0.7.0, the only one of the
+// three it serves; a phrase is added only once a server has been seen to answer with
+// it. A phrase carries no quoting around
+// the name — each server quotes it in its own style, Ollama 0.40.4 and llama.cpp
+// 'name', Ollama 0.7.0 "name" with ", try pulling it first" appended, vLLM `name` —
+// and refusesModel tries each style a server has been seen to use.
+var modelNotFound = []struct {
+	phrase   string
+	statuses []int
+}{
+	// Ollama 0.40.4 (404), Ollama 0.7.0 (404) and llama.cpp b11429 serving several
+	// models (400).
+	{"model %s not found", []int{http.StatusBadRequest, http.StatusNotFound}},
+	// vLLM 0.31.0.
+	{"The model %s does not exist.", []int{http.StatusNotFound}},
+}
 
 // capturedPaths are the paths a captured request is sent to, by how the path the
 // agent named ends: the API format, whoever the agent and whatever its provider.
@@ -156,16 +180,68 @@ func (p *Router) chooseModel(pctx *pipeline.Context, server string) {
 	}
 }
 
-// Resend implements pipeline.Resender. When the server a request was routed to
+// Resend implements pipeline.Resender. A refusal of the model the agent asked for is
+// answered with the server's substitute, as resendForModel says; a refusal for a
+// limit teaches the router that limit for the model, and the request is fitted and
+// sent again. Each kind is answered at most once per request.
+func (p *Router) Resend(_ context.Context, pctx *pipeline.Context, status int, body []byte) bool {
+	if model, _ := pctx.RequestModel(); refusesModel(status, body, model) {
+		return p.resendForModel(pctx)
+	}
+	if kind, n, ok := limitRefusal(status, body); ok {
+		return p.resendForLimit(pctx, kind, n)
+	}
+	return false
+}
+
+// resendForLimit learns a refusal's limit for the model a routed request was sent
+// with and fits the request to it. A refusal that states no number teaches a window
+// 90% of the request's estimate, which is below what the server refused.
+func (p *Router) resendForLimit(pctx *pipeline.Context, kind limitKind, n int) bool {
+	if !switched(pctx) || slices.Contains(pctx.ResendReasons(), "limit") {
+		return false
+	}
+	server, ok := p.byHost[routerconfig.Key(pctx.Host)]
+	if !ok {
+		return false
+	}
+	model, ok := pctx.RequestModel()
+	if !ok {
+		return false
+	}
+	stated := n > 0
+	if !stated {
+		n = estimate(pctx.Body) * 9 / 10
+	}
+	if !plausible(kind, n, pctx.Body) {
+		return false
+	}
+	p.saveLimits(pctx, server, model, p.loadLimits(pctx, server, model).learn(kind, n))
+	which := "window"
+	if kind == limitOutput {
+		which = "output"
+	}
+	details := map[string]string{"server": server, "model": model, "limit": which,
+		"value": strconv.Itoa(n), "stated": strconv.FormatBool(stated)}
+	if !p.applyLimits(pctx, server, false) {
+		pctx.Record(pipeline.Invocation{Action: pipeline.ActionSkip, Reason: "limit_not_fitted", Details: details})
+		return false
+	}
+	pctx.Record(pipeline.Invocation{Action: pipeline.ActionModify, Reason: "resent", Details: details})
+	pctx.MarkResend("limit")
+	return true
+}
+
+// resendForModel answers a model refusal. When the server a request was routed to
 // refused the model the agent asked for, the refusal is recorded for refusedFor, and
 // the request is sent again with the server's substitute, before the agent sees
 // anything. A request already sent with a substitute is never sent again, so a
 // refused substitute reaches the agent as the server answered it.
-func (p *Router) Resend(_ context.Context, pctx *pipeline.Context, status int, body []byte) bool {
-	if !refusesModel(status, body) || !pctx.Redirected() {
+func (p *Router) resendForModel(pctx *pipeline.Context) bool {
+	if !pctx.Redirected() {
 		return false
 	}
-	server, ok := p.byHost[routerconfig.Hostname(pctx.Host)]
+	server, ok := p.byHost[routerconfig.Key(pctx.Host)]
 	ext := pctx.Extensions.Inference
 	if !ok || ext == nil || ext.RequestedModel != "" {
 		return false
@@ -188,22 +264,43 @@ func (p *Router) Resend(_ context.Context, pctx *pipeline.Context, status int, b
 	p.keepSubstitute(pctx, server, requested, sub)
 	details["substitute"] = sub
 	pctx.Record(pipeline.Invocation{Action: pipeline.ActionModify, Reason: "resent", Details: details})
+	pctx.MarkResend("model")
 	return true
 }
 
-// refusesModel reports whether a server's answer refuses the model a request named:
-// a 403 with refusedType, or a 400 whose error, a string or an object's message,
-// contains invalidModel.
-func refusesModel(status int, body []byte) bool {
+// refusesModel reports whether a server's answer refuses model, the name the refused
+// attempt was sent with: a 403 with refusedType, a 400 whose error, a string or an
+// object's message, contains invalidModel, or an answer whose error message carries
+// one of modelNotFound's phrases for model at a status that phrase was recorded at.
+// A phrase for another name, or for none, is not a refusal of this one.
+func refusesModel(status int, body []byte, model string) bool {
 	switch status {
 	case http.StatusForbidden:
-		return gjson.GetBytes(body, "error.type").String() == refusedType
+		if gjson.GetBytes(body, "error.type").String() == refusedType {
+			return true
+		}
 	case http.StatusBadRequest:
 		e := gjson.GetBytes(body, "error")
 		if e.IsObject() {
 			e = e.Get("message")
 		}
-		return e.Type == gjson.String && strings.Contains(e.String(), invalidModel)
+		if e.Type == gjson.String && strings.Contains(e.String(), invalidModel) {
+			return true
+		}
+	}
+	if model == "" {
+		return false
+	}
+	msg := errorMessage(body)
+	for _, nf := range modelNotFound {
+		if !slices.Contains(nf.statuses, status) {
+			continue
+		}
+		for _, quotes := range []string{"'", `"`, "`"} {
+			if strings.Contains(msg, fmt.Sprintf(nf.phrase, quotes+model+quotes)) {
+				return true
+			}
+		}
 	}
 	return false
 }

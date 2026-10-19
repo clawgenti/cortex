@@ -258,3 +258,50 @@ func TestFilterForDetail_KeepsRequestedModel(t *testing.T) {
 		}
 	}
 }
+
+// The upgrade line is absent on every request that asked for no upgrade — nearly
+// all of them — and names the symptom when one did, since "why a 405?" is the
+// question it exists to answer.
+func TestUpgradeHeader(t *testing.T) {
+	for name, e := range map[string]*pipeline.SessionEvent{
+		"no upgrade":       {Host: "api.anthropic.com"},
+		"empty value only": {Host: "api.anthropic.com", UpgradeStripped: ""},
+	} {
+		if got := upgradeHeader(e); got != "" {
+			t.Errorf("%s: upgradeHeader = %q, want empty", name, got)
+		}
+	}
+
+	got := upgradeHeader(&pipeline.SessionEvent{
+		Host:            "chatgpt.com",
+		UpgradeStripped: "websocket",
+	})
+	if !strings.Contains(got, "websocket") {
+		t.Errorf("upgradeHeader = %q, want it to name the protocol", got)
+	}
+	if !strings.Contains(got, "405") {
+		t.Errorf("upgradeHeader = %q, want it to name the symptom it explains", got)
+	}
+}
+
+// The value reaches a terminal from an unauthenticated API, so it passes
+// sanitizeLabel like every other caller-supplied label agentop prints — belt and
+// braces over the sanitise at record time.
+func TestUpgradeHeader_SanitisesTheProtocol(t *testing.T) {
+	got := upgradeHeader(&pipeline.SessionEvent{UpgradeStripped: "web\x1b[2Jsocket"})
+	if strings.ContainsAny(got, "\x1b") {
+		t.Errorf("upgradeHeader = %q, still carries an escape sequence", got)
+	}
+}
+
+// And it reaches the composed block, not just its own helper — the wiring a new
+// header is silently missing otherwise.
+func TestRewriteHeader_IncludesTheUpgradeLine(t *testing.T) {
+	got := rewriteHeader(&pipeline.SessionEvent{
+		Host:            "chatgpt.com",
+		UpgradeStripped: "websocket",
+	})
+	if !strings.Contains(got, "websocket") {
+		t.Errorf("rewriteHeader = %q, want the upgrade line composed in", got)
+	}
+}

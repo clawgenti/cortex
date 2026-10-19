@@ -195,3 +195,51 @@ func TestSummaryFold_PromptContextResumesFromJSON(t *testing.T) {
 		}
 	}
 }
+
+// A session.json written before an agent-name rename holds the spelling of its day, and
+// UnmarshalJSON is where that persisted label re-enters memory — every reader of a restored
+// fold (Summary, withPriorLocked's agentOfLocked, Add's dedup, a re-Marshal) reads f.agents,
+// so folding HERE is what keeps a resumed session on today's row instead of serving the
+// retired spelling beside it. The labels are what applyAgent computed when they were written
+// (usage.AgentLabel is AgentName-folded at append), so folding again is idempotent for every
+// current spelling and changes only the retired ones.
+func TestSummaryFold_UnmarshalFoldsRetiredAgentSpellings(t *testing.T) {
+	// The JSON a pre-rename Cortex persisted: both of Bob's faces under the names they
+	// carried then, plus a current spelling and an unrecognised client that must not move.
+	const written = `{"eventCount":3,"agents":[` +
+		`{"name":"bob-shell","label":"bob-shell"},` +
+		`{"name":"ibm-bob","label":"ibm-bob"},` +
+		`{"name":"claude-code","label":"claude-code"},` +
+		`{"name":"curl","label":"curl","unknown":true}],"totalTokens":10}`
+	var f SummaryFold
+	if err := json.Unmarshal([]byte(written), &f); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Summary("s1").Agent; got != "bob" {
+		t.Errorf("Agent = %q, want %q — a session.json written before the rename serves the retired spelling",
+			got, "bob")
+	}
+
+	// The dedup must see the folded name: a resumed session's next event names today's
+	// "bob", and a restored entry still keyed "bob-shell" would take a second agent slot
+	// and keep winning firstAgentLabel by order.
+	e := evFrom(&pipeline.EventClient{Name: "bob", Version: "2.0.5"})
+	e.SessionID = "s1"
+	f.Add("s1", &e)
+	if n := len(f.agents); n != 4 {
+		t.Errorf("a resumed session's event added a %dth agent; the restored entry must dedup under the folded name:\n%v", n, f.agents)
+	}
+	if got := f.Summary("s1").Agent; got != "bob" {
+		t.Errorf("Agent after resume = %q, want %q", got, "bob")
+	}
+
+	// Current and unrecognised spellings are untouched: folding is idempotent for them.
+	for _, a := range f.agents {
+		switch a.name {
+		case "claude-code", "curl":
+			if a.label != a.name {
+				t.Errorf("agent %q: label = %q, want it unchanged", a.name, a.label)
+			}
+		}
+	}
+}

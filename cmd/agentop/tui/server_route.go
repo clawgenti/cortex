@@ -55,6 +55,11 @@ func (m *model) routerStatus() (c routerconfig.Config, why string) {
 			return routerconfig.Config{}, "agentop cannot read the inference-router's running config, so it can neither show nor change its routing; " +
 				"an agentop as new as the proxy can"
 		}
+		// The same canonical fold the router keys its table with, so the SERVER
+		// columns and the S picker name the agent the proxy routes for it — a config
+		// written before an agent-name rename otherwise shows no server for an agent
+		// that has one. See readRouter, the file-reading twin of this fold.
+		c.Agents = pipeline.FoldAgentNames(c.Agents)
 		return c, ""
 	}
 	// NOT CONFIGURED, OR OFF, AND THIS SIDE CANNOT TELL WHICH: the proxy does not build an
@@ -152,7 +157,7 @@ const sessionsNotAHost = "(not a host)"
 // parenthesis that would draw one host as two) shows sessionsNotAHost instead, and nothing of
 // its text. Splitting off the port is not enough: routerconfig.Hostname splits at the last ':',
 // so "sk-…:x@evil.example" comes back as "sk-…", the key (servers.Host refuses a URL whole for
-// the same reason). The port is dropped, as the router matches without it. That alphabet is
+// the same reason). That alphabet is
 // stricter than sanitizeLabel, so what passes it needs no sanitising; a server name does.
 func sessionServerCell(router routerconfig.Config, host string, w int) string {
 	if host == "" {

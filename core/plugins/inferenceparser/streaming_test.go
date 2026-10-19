@@ -103,3 +103,49 @@ func TestInferenceParser_OnResponseFrame_EmptyStreamRecordsSkip(t *testing.T) {
 		t.Fatal("no invocation recorded for empty stream")
 	}
 }
+
+// TestInferenceParser_OnResponseFrame_StreamAssemblesToolCalls pins the OpenAI
+// streaming tool-call shape: each call arrives as fragments across chunks, keyed by
+// the index the provider stamps on each delta.tool_calls entry — id and function name
+// on the first fragment, arguments as a series of JSON-string fragments that are only
+// valid concatenated. Two calls pin the index keying and emission order.
+func TestInferenceParser_OnResponseFrame_StreamAssemblesToolCalls(t *testing.T) {
+	p := NewInferenceParser()
+	pctx := &pipeline.Context{
+		Extensions: pipeline.Extensions{
+			Inference: &pipeline.InferenceExtension{Model: "gpt-4", Stream: true},
+		},
+	}
+
+	frames := [][]byte{
+		[]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}`),
+		[]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"}}]}}]}`),
+		[]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Paris\"}"}}]}}]}`),
+		[]byte(`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","type":"function","function":{"name":"get_time","arguments":""}}]}}]}`),
+		[]byte(`{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{}"}}]}}]}`),
+		[]byte(`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`),
+	}
+	for _, f := range frames {
+		if action := p.OnResponseFrame(context.Background(), pctx, f, false); action.Type != pipeline.Continue {
+			t.Fatalf("frame action = %v, want Continue", action.Type)
+		}
+	}
+	p.OnResponseFrame(context.Background(), pctx, nil, true)
+
+	ext := pctx.Extensions.Inference
+	want := []pipeline.InferenceToolCall{
+		{ID: "call_1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+		{ID: "call_2", Name: "get_time", Arguments: `{}`},
+	}
+	if len(ext.ToolCalls) != len(want) {
+		t.Fatalf("ToolCalls = %+v, want %+v", ext.ToolCalls, want)
+	}
+	for i := range want {
+		if ext.ToolCalls[i] != want[i] {
+			t.Errorf("ToolCalls[%d] = %+v, want %+v", i, ext.ToolCalls[i], want[i])
+		}
+	}
+	if ext.FinishReason != "tool_calls" {
+		t.Errorf("FinishReason = %q, want tool_calls", ext.FinishReason)
+	}
+}

@@ -188,8 +188,10 @@ func TestClientAffinity_SeparatesBobFromClaudeCode(t *testing.T) {
 			t.Errorf("session %s request paths = %v, want %v", id, got, w)
 		}
 	}
-	if v := store.View(session.PendingSessionID("bob-shell")); v != nil {
-		t.Errorf("pending:bob-shell still holds %d events after Bob's first header", len(v.Events))
+	// Pending buckets key by the affinity name, which the converged canonical name
+	// spells "bob" however the User-Agent read.
+	if v := store.View(session.PendingSessionID("bob")); v != nil {
+		t.Errorf("pending:bob still holds %d events after Bob's first header", len(v.Events))
 	}
 	// The axios call is recorded under default but its PLUGINS hear no identity, the same
 	// answer resolvePluginSessionID gives when nothing is known. Handing them "default"
@@ -282,7 +284,7 @@ func TestClientAffinity_TunnelRowsKeepTodaysSessionWhenTheOwnerIsAmbiguous(t *te
 	}()
 	store := session.New(0, 100, 0) // Bob then Claude Code just spoke: ActiveSession() is claude-1
 	defer store.Close()
-	for _, c := range [][2]string{{"task-1", "bob-shell"}, {"claude-1", "claude-code"}} {
+	for _, c := range [][2]string{{"task-1", "bob"}, {"claude-1", "claude-code"}} {
 		store.Claim(c[0], c[1])
 		store.Append(c[0], pipeline.SessionEvent{At: time.Now(), Direction: pipeline.Outbound, Phase: pipeline.SessionRequest})
 	}

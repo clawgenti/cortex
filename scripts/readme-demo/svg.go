@@ -175,6 +175,18 @@ func (e *emitter) stateCSS(i int, st State, final bool) {
 			e.css = append(e.css, fmt.Sprintf(
 				".cur%d_%d{animation:cx%d_%d %s steps(%d,end) infinite,cv%d_%d %s linear infinite,blink 1s steps(1,end) infinite}\n",
 				i, ri, i, ri, secs(e.total), maxi(chars, 1), i, ri, secs(e.total)))
+		case "bar":
+			// The clip shows the row up to From, widens a cell at a time to To,
+			// then jumps to the whole row: a bar filling, then its figures. No
+			// cursor, as install.sh hides it while the bar draws.
+			startAt := e.pct(st.At + row.Reveal.At)
+			endAt := e.pct(st.At + row.Reveal.At + row.Reveal.Dur)
+			e.css = append(e.css, fmt.Sprintf(
+				"@keyframes tp%d_%d{0%%,%.4f%%{width:%.1fpx}%.4f%%{width:%.1fpx}%.4f%%,100%%{width:%.1fpx}}\n",
+				i, ri, startAt, float64(row.Reveal.From)*cellW, endAt, float64(row.Reveal.To)*cellW,
+				minf(endAt+0.001, 100), float64(runeLen(row))*cellW))
+			e.css = append(e.css, fmt.Sprintf("#cl%d_%d rect{animation:tp%d_%d %s steps(%d,end) infinite}\n",
+				i, ri, i, ri, secs(e.total), maxi(row.Reveal.To-row.Reveal.From, 1)))
 		}
 	}
 }
@@ -200,7 +212,7 @@ func (e *emitter) stateBody(i int, st State) string {
 		switch row.Reveal.Kind {
 		case "fill":
 			rowClass = fmt.Sprintf(` class="rv rv%d_%d"`, i, ri)
-		case "type":
+		case "type", "bar":
 			rowClass = fmt.Sprintf(` clip-path="url(#cl%d_%d)"`, i, ri)
 			fmt.Fprintf(&b, `<clipPath id="cl%d_%d"><rect x="%.1f" y="%.1f" width="0" height="%.1f"/></clipPath>`+"\n",
 				i, ri, padX, y-lineH+5, lineH)
@@ -217,11 +229,17 @@ func (e *emitter) stateBody(i int, st State) string {
 			}
 			col += n
 		}
+		if row.SolidBlocks {
+			e.blockRects(&b, row, y, rowClassForRect(rowClass))
+		}
 
 		fmt.Fprintf(&b, `<text%s y="%.1f">`, rowClass, y)
 		col = 0
 		for _, run := range row.Runs {
 			n := len([]rune(run.Text))
+			if row.SolidBlocks {
+				run.Text = strings.ReplaceAll(run.Text, "█", " ") // drawn by blockRects
+			}
 			if strings.TrimSpace(run.Text) != "" {
 				fill := run.FG
 				if fill == "" {
@@ -249,6 +267,33 @@ func (e *emitter) stateBody(i int, st State) string {
 	}
 	b.WriteString("</g>\n")
 	return b.String()
+}
+
+// blockRects draws each run of █ in a row as one rect the full size of its cells, in
+// the run's colour, so that block art is solid across rows as a terminal draws it.
+func (e *emitter) blockRects(b *strings.Builder, row Row, y float64, class string) {
+	col := 0
+	for _, run := range row.Runs {
+		fill := run.FG
+		if fill == "" {
+			fill = defaultFG
+		}
+		rs := []rune(run.Text)
+		for i := 0; i < len(rs); {
+			if rs[i] != '█' {
+				i++
+				continue
+			}
+			j := i
+			for j < len(rs) && rs[j] == '█' {
+				j++
+			}
+			fmt.Fprintf(b, `<rect%s x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="%s"/>`+"\n",
+				class, padX+float64(col+i)*cellW, y-lineH+5, float64(j-i)*cellW, lineH, fill)
+			i = j
+		}
+		col += len(rs)
+	}
 }
 
 // rowClassForRect keeps a background rect on the same reveal as its text, but a

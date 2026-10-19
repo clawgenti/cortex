@@ -66,14 +66,16 @@ func listenerPlan(cfg *config.Config, local bool) ([]plannedListener, error) {
 type reservedListeners map[string]net.Listener
 
 // reserveListeners binds every planned socket, or none: on a failure it closes what it
-// bound and names the socket that could not be.
+// bound and names the socket that could not be. The failure is a *listenError, which keeps
+// the same message and additionally carries the address, so the caller can classify a
+// taken port and say who holds it — see portconflict.go.
 func reserveListeners(plan []plannedListener) (reservedListeners, error) {
 	r := make(reservedListeners, len(plan))
 	for _, p := range plan {
 		ln, err := net.Listen("tcp", p.addr)
 		if err != nil {
 			r.closeAll()
-			return nil, fmt.Errorf("%s listen: %w", p.name, err)
+			return nil, &listenError{name: p.name, addr: p.addr, err: err}
 		}
 		r[p.name] = ln
 	}

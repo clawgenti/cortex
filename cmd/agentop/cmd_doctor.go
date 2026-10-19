@@ -163,11 +163,17 @@ func wouldChange(p stepPlan) string {
 }
 
 // claudeCodeRouted reports whether Cortex routed Claude Code: enable's state
-// record is there (enable writes it, disable deletes it), or settings.json's
-// HTTPS_PROXY is the proxy enable would write from the current config. Any managed
-// key being set is not enough: a corporate HTTPS_PROXY is the user's own, and
-// disable, with no record, would remove it. A settings file that cannot be read,
-// or a config that gives no proxy, leaves only the record to go by. It is the
+// record is there, or settings.json's HTTPS_PROXY is the proxy enable would write
+// from the current config. Enable writes the record and every disable deletes it,
+// including one that left a key behind because its value changed since enable set
+// it — the record's existence is read here as "Cortex routes this", so it must not
+// outlive the values it describes, or doctor reports a routing that is gone and
+// offers a fix that puts it back. Keeping it for a left key's sake would cost that
+// key its edit too — applyClaudeCodeDisable says why.
+//
+// Any managed key being set is not enough: a corporate HTTPS_PROXY is the user's
+// own, and disable, with no record, would remove it. A settings file that cannot be
+// read, or a config that gives no proxy, leaves only the record to go by. It is the
 // default file's answer: doctor asks it only when the record names no other file.
 func claudeCodeRouted(env *setupEnv) bool {
 	return fileExists(filepath.Join(env.home, stateRel)) || cortexProxyIn(env, filepath.Join(env.home, settingsRel))

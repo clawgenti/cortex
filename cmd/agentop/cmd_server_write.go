@@ -17,6 +17,7 @@ import (
 	"github.com/rossoctl/cortex/cmd/agentop/apiclient"
 	"github.com/rossoctl/cortex/cmd/agentop/edit"
 	"github.com/rossoctl/cortex/cmd/agentop/servers"
+	"github.com/rossoctl/cortex/core/pipeline"
 	"github.com/rossoctl/cortex/core/plugins/inferencerouter/routerconfig"
 	"github.com/rossoctl/cortex/core/session"
 )
@@ -94,6 +95,10 @@ func serverAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agentop server add: %v\n", err)
 		return 2
 	}
+	if name == ownProvider {
+		fmt.Fprintf(stderr, "agentop server add: %q is reserved: agentop server move <session-id> %s sends a session to its own provider\n", name, ownProvider)
+		return 2
+	}
 	// ParseURL's error, never rawURL: a refused URL may carry a key anywhere in it,
 	// and ParseURL's errors quote no part of the URL.
 	ep, err := routerconfig.ParseURL(rawURL)
@@ -130,7 +135,7 @@ func serverAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// what it protects cannot drift apart. A server replaced under its own name keeps its host.
 	if other, ok := servers.ForHost(c, ep.Host); ok && other != name {
 		fmt.Fprintf(stderr, "agentop server add: %s is already on %s. Each server needs a host of its own, "+
-			"because agentop names a session's server from the host its requests went to.\n", other, ep.Hostname)
+			"because agentop names a session's server from the host its requests went to.\n", other, ep.Key())
 		return 1
 	}
 	old, replacing := c.Servers[name]
@@ -191,7 +196,7 @@ func serverAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(agentsOn(c, name)) == 0 {
 		done += " No agent uses it yet: press S on agentop's agents pane, or run\n  agentop server use " + name + " --agent claude-code"
 	}
-	return runServerWrite(stdout, stderr, path, statsURL, ch, writeReport{
+	return runServerWrite(stdout, stderr, path, statsURL, []edit.ConfigChange{ch}, writeReport{
 		done:      done,
 		unchanged: name + " already has that URL, key and models; nothing to change.",
 		note:      routerInactive(cfg, path),
@@ -262,6 +267,17 @@ func serverRemove(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "To take the router out altogether, delete its entry from %s.\n", homeTilde(path))
 		return 1
 	}
+	if moved := sessionsOn(c, name); len(moved) > 0 {
+		// Not rewritten to "": a remove the user asked for should not edit the
+		// moves they made, and a config that names no listed server cannot reload —
+		// or, with the proxy stopped, start.
+		fmt.Fprintf(stderr, "agentop server remove: %d %s moved to %s; stop routing %s with:\n",
+			len(moved), sessionWord(len(moved)), name, moved[0])
+		for _, id := range moved {
+			fmt.Fprintf(stderr, "  agentop server move %s own\n", id)
+		}
+		return 1
+	}
 	if len(agents) > 0 {
 		var other string
 		for _, s := range slices.Sorted(maps.Keys(c.Servers)) {
@@ -286,7 +302,7 @@ func serverRemove(args []string, stdout, stderr io.Writer) int {
 			"there gets an error asking for a new session, until %s is added back.\n", runningSessions(n), name, name)
 	}
 	ch := edit.ConfigChange{Chain: "outbound", Plugin: routerName, Path: []string{"servers", name}}
-	return runServerWrite(stdout, stderr, path, statsURL, ch, writeReport{
+	return runServerWrite(stdout, stderr, path, statsURL, []edit.ConfigChange{ch}, writeReport{
 		done: "Removed " + name + ".",
 		live: fmt.Sprintf("A session the proxy routed to it now gets an error asking for a new session. "+
 			"Adding %s back routes them to it again.", name),
@@ -331,6 +347,26 @@ func runningOn(sessionsURL string, c routerconfig.Config, name string) int {
 	return n
 }
 
+// sessionsOn is the session ids whose sessions: entry names server, sorted.
+func sessionsOn(c routerconfig.Config, server string) []string {
+	var out []string
+	for id, s := range c.Sessions {
+		if s == server {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// sessionWord is "session" or "sessions", for a count.
+func sessionWord(n int) string {
+	if n == 1 {
+		return "session"
+	}
+	return "sessions"
+}
+
 // runningSessions is "1 running session" or "n running sessions".
 func runningSessions(n int) string {
 	if n == 1 {
@@ -361,6 +397,9 @@ func serverUse(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agentop server use: %v\n", err)
 		return 2
 	}
+	// The canonical spelling, so the key this command writes and the messages it
+	// prints name the agent today's requests report, however the user spelled it.
+	*agent = pipeline.CanonicalAgent(*agent)
 	cfg, path, statsURL, err := serverTarget(*cfgPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "agentop server use: %v\n", err)
@@ -376,8 +415,7 @@ func serverUse(args []string, stdout, stderr io.Writer) int {
 			name, configuredServers(c), name)
 		return 1
 	}
-	ch := servers.AgentChange(*agent, name)
-	return runServerWrite(stdout, stderr, path, statsURL, ch, writeReport{
+	return runServerWrite(stdout, stderr, path, statsURL, servers.AgentChanges(*agent, name), writeReport{
 		done:      fmt.Sprintf("New %s sessions → %s.", *agent, name),
 		live:      runningSessionsStay,
 		unchanged: fmt.Sprintf("New %s sessions already go to %s.", *agent, name),
@@ -401,6 +439,9 @@ func serverReset(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agentop server reset: %v\n", err)
 		return 2
 	}
+	// The canonical spelling, for the same reason as use: the check below and the
+	// key the reset removes must name the agent the router routes.
+	*agent = pipeline.CanonicalAgent(*agent)
 	cfg, path, statsURL, err := serverTarget(*cfgPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "agentop server reset: %v\n", err)
@@ -415,8 +456,7 @@ func serverReset(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s is not routed; nothing to change.\n", *agent)
 		return 0
 	}
-	ch := servers.AgentChange(*agent, "")
-	return runServerWrite(stdout, stderr, path, statsURL, ch, writeReport{
+	return runServerWrite(stdout, stderr, path, statsURL, servers.AgentChanges(*agent, ""), writeReport{
 		done:      fmt.Sprintf("New %s sessions are no longer routed.", *agent),
 		live:      runningSessionsStay,
 		unchanged: fmt.Sprintf("%s is not routed; nothing to change.", *agent),
@@ -442,10 +482,12 @@ type writeReport struct {
 	note string
 }
 
-// runServerWrite makes one change to the router entry and reports how it landed.
-func runServerWrite(stdout, stderr io.Writer, path, statsURL string, ch edit.ConfigChange, r writeReport) int {
+// runServerWrite applies changes to the router entry — one agent's changes can be
+// several, a removal per retired spelling plus the canonical set — and reports how
+// the write landed.
+func runServerWrite(stdout, stderr io.Writer, path, statsURL string, changes []edit.ConfigChange, r writeReport) int {
 	res, err := writePluginConfig(context.Background(), edit.ConfigWrite{
-		Path: path, StatsURL: statsURL, Changes: []edit.ConfigChange{ch}, Verify: servers.Verify,
+		Path: path, StatsURL: statsURL, Changes: changes, Verify: servers.Verify,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "agentop server: %v\n", err)
@@ -496,4 +538,122 @@ func configuredServers(c routerconfig.Config) string {
 		return ""
 	}
 	return "; configured: " + strings.Join(slices.Sorted(maps.Keys(c.Servers)), ", ")
+}
+
+// ownProvider is the word serverMove takes for a session's own provider, so no
+// server may be added under it.
+const ownProvider = "own"
+
+// serverMove moves one running session to a server, or stops routing it with
+// "own". Unlike use and reset, this moves the session the user named, not the
+// agent's next one.
+func serverMove(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("server move", flag.ContinueOnError)
+	cfgPath := flags.String("config", "", "Cortex config file (default ~/.cortex/config.yaml)")
+	pos, code, ok := serverFlags(flags, args, stdout, stderr)
+	if !ok {
+		return code
+	}
+	if len(pos) != 2 {
+		fmt.Fprintln(stderr, "agentop server move: want a session and a server: agentop server move <session-id> <name|own>")
+		return 2
+	}
+	sid, server := pos[0], pos[1]
+	if err := routerconfig.CheckSessionID(sid); err != nil {
+		fmt.Fprintf(stderr, "agentop server move: %v\n", err)
+		return 2
+	}
+	if server == ownProvider {
+		server = ""
+	} else if err := routerconfig.CheckName(server); err != nil {
+		fmt.Fprintf(stderr, "agentop server move: %v\n", err)
+		return 2
+	}
+	cfg, path, statsURL, err := serverTarget(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentop server move: %v\n", err)
+		return 1
+	}
+	c, _, err := readRouter(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentop server move: %v\n", err)
+		return 1
+	}
+	if server != "" {
+		if _, ok := c.Servers[server]; !ok {
+			fmt.Fprintf(stderr, "agentop server move: no server named %s%s. Add it first:\n  agentop server add %s <url>\n",
+				server, configuredServers(c), server)
+			return 1
+		}
+	}
+	sessionsURL := ""
+	if cfg.Listener.SessionAPIAddr != "" {
+		sessionsURL = dialURL(cfg.Listener.SessionAPIAddr)
+	}
+	changes := servers.SessionChanges(sid, server)
+	changes = append(changes, pruneFrom(sessionsURL, c, sid)...)
+	name := server
+	if name == "" {
+		name = "its own provider"
+	}
+	return runServerWrite(stdout, stderr, path, statsURL, changes, writeReport{
+		done:      fmt.Sprintf("Session %s → %s.", sid, name),
+		live:      moveNote(sessionsURL, sid, server),
+		unchanged: fmt.Sprintf("Session %s already goes to %s.", sid, name),
+	})
+}
+
+// moveNote is what a move costs the session it moves, from the session API's own
+// figure: its conversation is re-sent uncached on the first turn at the new
+// server. "" when neither the proxy nor the session can be read — the move does
+// not depend on it.
+func moveNote(sessionsURL, sid, server string) string {
+	if sessionsURL == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	list, err := apiclient.New(sessionsURL).ListSessions(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, s := range list {
+		if s.ID != sid || s.PromptContext == nil {
+			continue
+		}
+		name := server
+		if name == "" {
+			name = "its own provider"
+		}
+		return fmt.Sprintf("%d tokens of %s's context go to %s uncached on its first turn there.",
+			s.PromptContext.Tokens, sid, name)
+	}
+	return ""
+}
+
+// pruneFrom is the removals for every sessions: override whose session the
+// session API no longer lists — inert config a move left behind. Nothing when the
+// API cannot be read: a live session must never lose its override to a blind
+// prune.
+func pruneFrom(sessionsURL string, c routerconfig.Config, moved string) []edit.ConfigChange {
+	if sessionsURL == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	// THE ARCHIVED LIST, not the live one: a session the archive holds — evicted
+	// from memory, or resumed after a restart — still has its pin, kept in the
+	// plugin store, so its override must survive the prune too.
+	list, err := apiclient.New(sessionsURL).ListSessionsArchived(ctx)
+	if err != nil {
+		return nil
+	}
+	if len(list.Sessions) == 0 {
+		return nil
+	}
+	live := map[string]bool{moved: true}
+	for _, s := range list.Sessions {
+		live[s.ID] = true
+	}
+	return servers.PruneSessions(c, live)
 }

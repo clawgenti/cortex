@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -145,15 +146,47 @@ const agentsFetchTimeout = 5 * time.Second
 // agentsPollInterval is how often the open pane refetches its rows.
 const agentsPollInterval = 20 * time.Second
 
-// agentsWindow is the span the breakdown covers.
+// agentsSpan is the span the breakdown covers: one of the band's four, today until `w` moves it.
 //
-// A SYMBOLIC WINDOW, so the figures come from the durable cost ledger rather than the
-// six-hour ring. "Which agents have spent what" is a question about a day, and the ring cannot
-// answer it — a reader comparing this against `agentop cost` (which defaults to the same window)
-// must not find two different denominators. Where the ledger is off the proxy serves the
-// longest window it holds and says so in the response, which is the same degradation
-// `agentop cost` documents.
-const agentsWindow = usage.WindowToday
+// TODAY BY DEFAULT, a symbolic window, so the figures come from the durable cost ledger rather
+// than the six-hour ring. "Which agents have spent what" is first a question about a day — a
+// reader comparing this against `agentop cost` (which defaults to the same window) must not find
+// two different denominators. Where the ledger is off the proxy serves the longest window it
+// holds and says so in the response, which is the same degradation `agentop cost` documents.
+//
+// `w` CYCLES IT, and the drawer on this pane follows (spendDrawerSpan): the title used to say
+// "today" whatever `w` did, because `w` moved only the drawer. An OFFSET from today rather than
+// an index, so the zero value of a model that never touched it is today.
+func (m *model) agentsSpan() spendSpan {
+	start := slices.Index(spendDrawerSpans, spanToday)
+	return spendDrawerSpans[wrapIndex(start+m.agentsWindowStep, len(spendDrawerSpans))]
+}
+
+func (m *model) agentsSpanDef() spendSpanDef { return spendSpanDefs[m.agentsSpan()] }
+
+// agentsWindowLabel names the window of the rows ON SCREEN, which a `w` press outruns by one
+// round trip — the drawer's caption follows the same rule (drawerLabels). The requested window
+// stands in until the first reply lands.
+func (m *model) agentsWindowLabel() string {
+	window := m.agentsRowsWindow
+	if window == "" {
+		window = m.agentsSpanDef().window
+	}
+	return strings.ToLower(spanLabelFor(window))
+}
+
+// cycleAgentsWindow handles `w` on the agents pane, drawer open or closed: the rows refetch for
+// the next span, and an open drawer with them, since on this pane it breaks down the same span.
+func (m *model) cycleAgentsWindow() tea.Cmd {
+	m.agentsWindowStep = (m.agentsWindowStep + 1) % len(spendDrawerSpans)
+	cmds := []tea.Cmd{m.fetchAgentRowsCmd(agentsOpenNever, paneNone)}
+	if m.spendDrawerVisible() {
+		// cycleSpendWindow's reason: the old error describes a request for another span.
+		m.spend.drawer.err = nil
+		cmds = append(cmds, m.fetchSpendDrawer())
+	}
+	return tea.Batch(cmds...)
+}
 
 // agentsOpen says what the reply to a rows fetch is allowed to do with them.
 //
@@ -191,6 +224,8 @@ type agentRowsLoadedMsg struct {
 	// agentsOpenNever, which enters nothing, and unread on the startup path — see that arm in
 	// Update for why it does not consult this field.
 	from paneID
+	// window is the window the rows answer for, so a reply `w` has outrun is dropped.
+	window string
 }
 
 // fetchAgentRowsCmd requests the per-agent breakdown off the render loop.
@@ -203,14 +238,20 @@ func (m *model) fetchAgentRowsCmd(open agentsOpen, from paneID) tea.Cmd {
 	}
 	client := m.client
 	m.agentsFetchedAt = time.Now()
+	// An opening fetch starts the visit on today; `w` lasts for one visit.
+	if open != agentsOpenNever {
+		m.agentsWindowStep = 0
+	}
+	// Captured here, on the update goroutine, for the reason fetchSpendSpan records.
+	def := m.agentsSpanDef()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), agentsFetchTimeout)
 		defer cancel()
-		snap, err := client.GetUsageWindow(ctx, agentsWindow, 0, "", usage.GroupAgent)
+		snap, err := client.GetUsageWindow(ctx, def.window, def.resolution, "", usage.GroupAgent)
 		if err != nil {
-			return agentRowsLoadedMsg{err: err, open: open, from: from}
+			return agentRowsLoadedMsg{err: err, open: open, from: from, window: def.window}
 		}
-		return agentRowsLoadedMsg{rows: agentRowsFromSnapshot(snap), open: open, from: from}
+		return agentRowsLoadedMsg{rows: agentRowsFromSnapshot(snap), open: open, from: from, window: def.window}
 	}
 }
 

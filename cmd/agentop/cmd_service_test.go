@@ -659,3 +659,154 @@ func TestPortOfAddr(t *testing.T) {
 		}
 	}
 }
+
+// holderOnPort makes lsof name pid as the listener on 127.0.0.1:port, and exe as that
+// pid's executable — strangerOn's stub, parameterised, because which executable holds
+// the port is the whole of what foreignHolderLines decides on. An empty exe is a free
+// port: lsof names no pid for any of the four addresses portHolder asks about.
+func holderOnPort(t *testing.T, port string, pid int, exe string) {
+	t.Helper()
+	p := strconv.Itoa(pid)
+	body := "#!/bin/sh\nexit 0\n"
+	if exe != "" {
+		body = `#!/bin/sh
+case "$1" in
+  -nP) case "$2" in -iTCP@127.0.0.1:` + port + `) printf 'p` + p + `\n' ;; esac ;;
+  -p) printf 'p` + p + `\nftxt\nn` + exe + `\n' ;;
+esac
+exit 0
+`
+	}
+	installStub(t, "lsof", body)
+	// No /proc on a Mac and none faked here, so setupPIDExePath falls through to the
+	// lsof txt entry above on both platforms rather than to the host's real process.
+	fakeProc(t, pid, "")
+	// And no supervisor job owns the holder, on either platform: launchctl names no
+	// pid, and the faked /proc has no cgroup file. Without this the remedy line would
+	// depend on what is loaded on the machine running the test.
+	installStub(t, "launchctl", "#!/bin/sh\nexit 0\n")
+}
+
+// A pinned forward port is the one cause of "installed but not answering" that no
+// restart fixes, and #1122's reporter had nothing in `service status` saying so — the
+// proxy's own log said it, buried in a five-line tail of restart lines.
+func TestForeignHolderLines(t *testing.T) {
+	const port = "47600"
+	const addr = "127.0.0.1:" + port
+
+	t.Run("a stranger holding the port is named", func(t *testing.T) {
+		p := servicePathsFixture(t)
+		p.forwardAddr = addr
+		holderOnPort(t, port, 31337, "/usr/bin/python3")
+
+		lines := foreignHolderLines(p)
+		if len(lines) == 0 {
+			t.Fatal("nothing said about a port held by another process")
+		}
+		want := addr + " is held by /usr/bin/python3 (pid 31337), not this Cortex"
+		if lines[0] != want {
+			t.Errorf("lines[0] = %q, want %q", lines[0], want)
+		}
+		// The certificate sentence is for a Cortex holder only: a stranger on the port
+		// is refusing connections, not bridging them with a CA of its own.
+		for _, l := range lines {
+			if strings.Contains(l, "ITS CA") {
+				t.Errorf("a non-Cortex holder is blamed for the certificate error: %q", l)
+			}
+		}
+		if last := lines[len(lines)-1]; !strings.Contains(last, "kill 31337") {
+			t.Errorf("remedy = %q, want it to name the pid to stop", last)
+		}
+	})
+
+	t.Run("another Cortex explains the certificate error too", func(t *testing.T) {
+		p := servicePathsFixture(t)
+		p.forwardAddr = addr
+		// Under HOME, as a second install is: both to exercise the ~/… rendering every
+		// other line of setup uses, and because whose install it is is the next question.
+		other := filepath.Join(p.home, "other", "bin", "cortex")
+		holderOnPort(t, port, 31337, other)
+
+		lines := foreignHolderLines(p)
+		if len(lines) < 2 {
+			t.Fatalf("lines = %q, want the holder and the certificate sentence", lines)
+		}
+		if !strings.Contains(lines[0], "~/other/bin/cortex") {
+			t.Errorf("lines[0] = %q, want the holder under HOME shown as ~/…", lines[0])
+		}
+		if !strings.Contains(lines[1], "ITS CA") || !strings.Contains(lines[1], "self-signed-certificate") {
+			t.Errorf("lines[1] = %q; the companion symptom goes unexplained", lines[1])
+		}
+	})
+
+	// Our own proxy on the port is the ordinary case — it is starting, or the pidfile
+	// is stale — and calling it a conflict would send the user to stop the thing they
+	// are trying to run.
+	t.Run("our own proxy is not a conflict", func(t *testing.T) {
+		t.Run("by executable", func(t *testing.T) {
+			p := servicePathsFixture(t)
+			p.forwardAddr = addr
+			holderOnPort(t, port, 31337, p.binary)
+			if lines := foreignHolderLines(p); lines != nil {
+				t.Errorf("lines = %q for this install's own binary", lines)
+			}
+		})
+		t.Run("by pidfile", func(t *testing.T) {
+			p := servicePathsFixture(t)
+			p.forwardAddr = addr
+			if err := os.WriteFile(p.pidFile, []byte("31337\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			holderOnPort(t, port, 31337, "/usr/bin/python3")
+			if lines := foreignHolderLines(p); lines != nil {
+				t.Errorf("lines = %q for the pid in our own pidfile", lines)
+			}
+		})
+	})
+
+	// Silence rather than "something holds it": a line that cannot name the holder adds
+	// nothing to the status, and the log tail below it is what is left to read.
+	t.Run("says nothing when there is nothing to say", func(t *testing.T) {
+		t.Run("the port is free", func(t *testing.T) {
+			p := servicePathsFixture(t)
+			p.forwardAddr = addr
+			holderOnPort(t, port, 31337, "")
+			if lines := foreignHolderLines(p); lines != nil {
+				t.Errorf("lines = %q with nothing on the port", lines)
+			}
+		})
+		// No forward address is the broken-config path, where the file that names the
+		// port could not be read — so there is no port to ask about.
+		t.Run("no forward address is known", func(t *testing.T) {
+			p := servicePathsFixture(t)
+			holderOnPort(t, port, 31337, "/usr/bin/python3")
+			if lines := foreignHolderLines(p); lines != nil {
+				t.Errorf("lines = %q with no configured forward address", lines)
+			}
+		})
+	})
+}
+
+// Where the holder line lands matters: it is the cause, so it goes above the log tail
+// and above the consequence, not after five lines of supervisor output.
+func TestReportNotAnswering_LeadsWithTheHolder(t *testing.T) {
+	p := servicePathsFixture(t)
+	p.forwardAddr = "127.0.0.1:47600"
+	holderOnPort(t, "47600", 31337, "/usr/bin/python3")
+
+	var out bytes.Buffer
+	reportNotAnswering(p, &out)
+
+	s := out.String()
+	notAnswering := strings.Index(s, "NOT answering")
+	holder := strings.Index(s, "is held by /usr/bin/python3 (pid 31337)")
+	willFail := strings.Index(s, "will fail while this is true")
+	switch {
+	case notAnswering < 0 || willFail < 0:
+		t.Fatalf("the existing report is gone:\n%s", s)
+	case holder < 0:
+		t.Fatalf("the holder is not named at all:\n%s", s)
+	case holder < notAnswering || holder > willFail:
+		t.Errorf("the holder line is not between those two:\n%s", s)
+	}
+}

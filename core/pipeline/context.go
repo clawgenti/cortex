@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/rossoctl/cortex/core/capabilities"
@@ -122,6 +123,30 @@ type Context struct {
 	Headers http.Header
 	Body    []byte // nil unless at least one plugin declares BodyAccess: true
 
+	// UpgradeStripped names the protocol the client asked to switch to —
+	// "websocket" in every case seen so far — on a request whose Upgrade header
+	// the forward proxy then removed. Empty on every other request, which is
+	// almost all of them.
+	//
+	// Set by the listener, not a plugin, and purely diagnostic: nothing reads it
+	// to change behaviour. It exists because the stripping is CORRECT and its
+	// consequence is baffling. RFC 9110 makes Upgrade hop-by-hop, so a proxy must
+	// not forward it; but the request then reaches the origin as a bare GET, and
+	// an origin whose endpoint takes a POST or an upgrade and nothing else answers
+	// 405. Codex does exactly this against chatgpt.com, retries about five times
+	// over roughly six seconds, falls back to HTTPS and works — leaving the user
+	// looking at `405 Method Not Allowed` in their agent's output with every
+	// reason to think Cortex broke, and an event saying only `backend_error/405`
+	// with nothing connecting the two.
+	//
+	// Recorded on the REQUEST row, where the fact is true, and paired with the
+	// response row's status by RequestID — the same split Tunnel/TunnelReason use.
+	// Independent of what came back on purpose: that an upgrade was stripped is
+	// true whether the origin answered 405, 200 or nothing at all, and a marker
+	// that only appeared alongside a failure would be useless for the case where
+	// an origin quietly serves the un-upgraded request instead.
+	UpgradeStripped string
+
 	// StartedAt is the wall-clock time this context was constructed by the
 	// listener at the start of a request. Used on the response path to
 	// compute SessionEvent.Duration without walking the event history.
@@ -130,6 +155,10 @@ type Context struct {
 	// requestID backs RequestID(), which generates it on first use. See
 	// requestid.go for why it is lazy rather than a constructor argument.
 	requestID string
+
+	// resendReasons are the reasons Resenders named, in order, for each resend this
+	// request has had. See MarkResend.
+	resendReasons []string
 
 	// client and clientParsed memoize ClientInfo's answer.
 	//
@@ -634,6 +663,15 @@ func (c *Context) Observe(reason string) {
 	c.Record(Invocation{Action: ActionObserve, Reason: reason})
 }
 
+// Observing reports whether the plugin being dispatched runs under
+// ErrorPolicyObserve: nothing it does this pass takes effect, so a plugin that
+// would write state a later enforce pass applies — a pin recorded, an origin
+// kept — must not. Redirect consults the same policy; this is for the paths that
+// return before any redirect is attempted.
+func (c *Context) Observing() bool {
+	return c.currentPolicy == ErrorPolicyObserve
+}
+
 // Modify records an Invocation with Action=modify. Convenience for
 // plugins that mutated the message (token-exchange replacing the
 // Authorization header, a header-rewriter).
@@ -793,6 +831,32 @@ func (c *Context) recordShadowBodyMutation(phase string, oldBody, newBody []byte
 // shadow under on_error: observe. A writer learns whether its own write
 // applied from SetBody's result.
 func (c *Context) BodyMutated() bool { return c.bodyMutated }
+
+// RecordStrippedUpgrade notes that h carried an Upgrade header the caller is about
+// to remove, so the session event can say so — see UpgradeStripped for why that is
+// worth recording. A no-op when h has no Upgrade, which is almost every request.
+// Call it BEFORE stripping, since it reads the value it records.
+//
+// It lives here rather than in the listener so the value goes through the same
+// sanitize-then-cap a User-Agent does: Upgrade is client-controlled and lands in a
+// JSON event an operator reads in a terminal, so a "protocol name" made of escape
+// sequences must not survive the trip. The bound is maxClientLen, shared with the
+// User-Agent deliberately — a protocol token needs far less, and a second constant
+// would be one more thing to keep in step for no gain. The ORDER of the two steps
+// is load-bearing in the same direction as ParseUserAgent's: a substitution can
+// grow the string, so capping first would let a short header become a long field.
+//
+// Records the WHOLE header value, not the first token. RFC 9110 allows a list —
+// "Upgrade: HTTP/2.0, websocket" — and which element the origin would have picked
+// is not ours to guess, so this stays a statement about what the client asked for
+// rather than a prediction about what it would have got.
+func (c *Context) RecordStrippedUpgrade(h http.Header) {
+	v := strings.TrimSpace(h.Get("Upgrade"))
+	if v == "" {
+		return
+	}
+	c.UpgradeStripped = capUA(sanitizeUA(strings.ReplaceAll(v, "\t", " ")))
+}
 
 // ResponseBodyMutated is the response-side analogue of BodyMutated, and
 // answers for the response the same way.

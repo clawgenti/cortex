@@ -52,8 +52,15 @@ func TestRunPricing_HostViewShowsTheDiscountApplied(t *testing.T) {
 	// resolves at prompt size 0 — so its row MUST carry the marker and the footnote
 	// must give the breakpoint. Quoting a below-threshold rate as if it were the only
 	// rate is the exact failure this package exists to remove.
-	if !strings.Contains(got, "long-context rates apply above 200,000 prompt tokens") {
-		t.Errorf("no long-context note with a breakpoint: %s", got)
+	//
+	// BOTH breakpoints, because the table carries two: Anthropic prices above 200k and
+	// OpenAI above 272k. This asserted the 200,000-only wording until the second one
+	// was bundled, and the footnote is rendered by breakpointList, which sorts and
+	// dedupes — so the one-breakpoint string was never the contract, just the only
+	// output it could produce. Naming both keeps the assertion as strong as it was:
+	// dropping either tier from the table still fails here.
+	if !strings.Contains(got, "long-context rates apply above 200,000/272,000 prompt tokens") {
+		t.Errorf("no long-context note naming both breakpoints: %s", got)
 	}
 	// The above-threshold rates must be present AND scaled: sonnet-4-5's 200k input
 	// premium is 6.00 at list, so at 0.76 it is 4.56. Quoting 6.00 here would be the

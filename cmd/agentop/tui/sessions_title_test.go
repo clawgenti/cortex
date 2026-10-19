@@ -322,6 +322,11 @@ func TestSessionLabelAndHeader(t *testing.T) {
 	if got, want := m.sessionHeader("id-1", "event"), "agentop · fix the parser (id-1) · event"; got != want {
 		t.Errorf("detail header = %q, want %q", got, want)
 	}
+	// The build, when one was given, follows the name on this header as on every other.
+	m.version = "v0.8.0"
+	if got, want := m.sessionHeader("id-1", ""), "agentop v0.8.0 · fix the parser (id-1)"; got != want {
+		t.Errorf("events header with a version = %q, want %q", got, want)
+	}
 }
 
 // A full UUID is not clipped on a terminal with room for it.

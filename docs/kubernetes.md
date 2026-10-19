@@ -48,7 +48,7 @@ Then, in rough order of how often people need them:
 | Full request flow, what gets verified | [architecture reference](architecture.md) |
 | Token exchange per destination | [token-exchange routes](../demos/token-exchange-routes/README.md) |
 | Writing or configuring a plugin | [plugin reference](./plugin-reference.md) |
-| mTLS between workloads | [AuthBridge CLAUDE.md](../CLAUDE.md) |
+| mTLS between workloads | [framework architecture, §8a](framework-architecture.md#8a-mtls-layer) |
 
 ## A note on trust boundaries
 

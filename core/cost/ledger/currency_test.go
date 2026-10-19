@@ -486,8 +486,11 @@ func TestSeriesCurrenciesIn_NamesEachAgentsUnits(t *testing.T) {
 		{Endpoint: "litellm", Agent: "claude-code/2.1.284", Currency: "usd", Counts: usage.Counts{Requests: 1, PricedRequests: 1}},
 	}
 	got := SeriesCurrenciesIn(rows, usage.GroupAgent, foldSeries(rows, usage.GroupAgent))
-	if want := []string{"credits"}; !slices.Equal(got["bob-shell"], want) {
-		t.Errorf("bob-shell = %v, want %v", got["bob-shell"], want)
+	// Keyed by the folded name: labelFor reads these rows through pipeline.AgentName,
+	// so the pre-convergence "bob-shell/2.0.5" labels above fold to "bob" rather than
+	// forming a row of their own beside it.
+	if want := []string{"credits"}; !slices.Equal(got["bob"], want) {
+		t.Errorf("bob = %v, want %v", got["bob"], want)
 	}
 	if want := []string{pricing.CurrencyUSD}; !slices.Equal(got["claude-code"], want) {
 		t.Errorf("claude-code = %v, want %v; a legacy row and an explicit usd one are one unit",

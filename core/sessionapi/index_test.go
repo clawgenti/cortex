@@ -54,6 +54,7 @@ func TestHandleIndex_ListsEveryRegisteredRoute(t *testing.T) {
 	for _, route := range []string{
 		"/v1/sessions",
 		"/v1/sessions/{id}",
+		"DELETE /v1/sessions/{id}",
 		"/v1/events",
 		"/v1/pipeline",
 		"/v1/plugins",
@@ -83,13 +84,13 @@ func TestHandleIndex_DoesNotSwallow404s(t *testing.T) {
 }
 
 // The index is one line per endpoint, per the issue: short enough to read in a
-// terminal without scrolling.
+// 24-row terminal without scrolling.
 func TestHandleIndex_StaysShort(t *testing.T) {
 	ts, _ := newTestServer(t)
 	_, body := getPath(t, ts.URL, "/")
 
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	if len(lines) > 16 {
+	if len(lines) > 18 {
 		t.Errorf("index is %d lines; keep it terminal-sized", len(lines))
 	}
 	for _, l := range lines {

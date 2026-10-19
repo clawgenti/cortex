@@ -34,6 +34,10 @@ const NoAgent = "unknown"
 type Config struct {
 	Servers map[string]Server `json:"servers" required:"true" description:"Inference servers, by name."`
 	Agents  map[string]string `json:"agents" description:"Agents to route, by agent name, to a server name. Unlisted agents are not routed."`
+	// Sessions moves one running session to a server, by the session's id, beating
+	// the pin that session already holds. "" stops routing that session. agentop
+	// writes these; see CheckSessionID for what an id may look like.
+	Sessions map[string]string `json:"sessions" description:"Sessions to move to a server, by session id, beating their pin. An empty value stops routing the session."`
 }
 
 // Server is one inference server.
@@ -110,6 +114,9 @@ func (c *Config) applyDefaults() {
 	if c.Agents == nil {
 		c.Agents = map[string]string{}
 	}
+	if c.Sessions == nil {
+		c.Sessions = map[string]string{}
+	}
 }
 
 // Validate checks every rule the plugin routes by. Servers and agents are checked
@@ -128,13 +135,13 @@ func (c Config) Validate() error {
 		if err != nil {
 			return fmt.Errorf("servers.%s.url: %w", name, err)
 		}
-		// Port-blind on purpose. agentop names a session's server from the host its
-		// requests went to, and two servers on one host would make that ambiguous.
-		if other, ok := byHost[ep.Hostname]; ok {
+		// agentop names a session's server from the host its requests went to, and two
+		// servers on one host would make that ambiguous.
+		if other, ok := byHost[ep.Key()]; ok {
 			return fmt.Errorf("servers %q and %q are both on %s: each server needs a host of its own, "+
-				"because a session's server is named from the host its requests went to", other, name, ep.Hostname)
+				"because a session's server is named from the host its requests went to", other, name, ep.Key())
 		}
-		byHost[ep.Hostname] = name
+		byHost[ep.Key()] = name
 		if err := CheckKey(s.Key); err != nil {
 			return fmt.Errorf("servers.%s.key: %w", name, err)
 		}
@@ -154,7 +161,43 @@ func (c Config) Validate() error {
 			return fmt.Errorf("agents.%s: %q is not a server listed under servers", agent, server)
 		}
 	}
+	for _, id := range slices.Sorted(maps.Keys(c.Sessions)) {
+		if err := CheckSessionID(id); err != nil {
+			return fmt.Errorf("sessions.%s: %w", id, err)
+		}
+		if server := c.Sessions[id]; server != "" {
+			if _, ok := c.Servers[server]; !ok {
+				return fmt.Errorf("sessions.%s: %q is not a server listed under servers", id, server)
+			}
+		}
+	}
 	return nil
+}
+
+// CheckSessionID reports whether id can name a session in the sessions map. The
+// ids the session API serves are UUIDs, but an id need only be printable, non-empty
+// and free of whitespace to be one worth routing: refusing anything stricter would
+// block a future agent's id shape. Synthetic ids are refused here, not later.
+func CheckSessionID(id string) error {
+	switch {
+	case id == "":
+		return errors.New("the session id is empty")
+	case SyntheticSessionID(id):
+		return fmt.Errorf("%q is a synthetic session, which holds many conversations, not one to move", id)
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] <= ' ' || id[i] > '~' {
+			return errors.New("the session id has whitespace or a control character")
+		}
+	}
+	return nil
+}
+
+// SyntheticSessionID reports whether id is one of the session store's synthetic
+// buckets — "default" and "pending:<agent>" — which hold many conversations, not
+// one a move could target.
+func SyntheticSessionID(id string) bool {
+	return id == "default" || strings.HasPrefix(id, "pending:")
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9._-]+$`)
@@ -200,13 +243,15 @@ type Endpoint struct {
 	// Host is the lowercased host, with the port only when it is not the scheme's
 	// default. It is the redirect target's host.
 	Host string
-	// Hostname is the lowercased host without any port: what a request is matched
-	// to a server by, and what makes two servers the same host.
+	// Hostname is the lowercased host without any port.
 	Hostname string
 }
 
 // URL is the endpoint as scheme://host, the form agentop writes.
 func (e Endpoint) URL() string { return e.Scheme + "://" + e.Host }
+
+// Key is what a request is matched to this endpoint by: Key of its Host.
+func (e Endpoint) Key() string { return Key(e.Host) }
 
 // PlaintextRemote reports an http endpoint on another machine. A request routed
 // there leaves the proxy decrypted, with its key and its prompt, across the network.
@@ -260,11 +305,33 @@ func ParseURL(raw string) (Endpoint, error) {
 	return Endpoint{Scheme: u.Scheme, Host: joinHost(hostname, withoutDefault(u.Scheme, port)), Hostname: hostname}, nil
 }
 
-// Hostname is a request's host[:port], lowercased and without the port: what the
-// request is matched to a server by.
+// Hostname is a request's host[:port], lowercased and without the port.
 func Hostname(hostport string) string {
 	h, _ := splitHost(hostport)
 	return h
+}
+
+// Key is what a request's host[:port] is matched to a server by: the host, lowercased,
+// and on a loopback host its port too, since one machine serves many things there — a
+// model server on one port, an MCP or dev server on another. A port a scheme defaults,
+// 80 or 443, counts as none, as a server URL drops it.
+func Key(hostport string) string {
+	h, port := splitHost(hostport)
+	if !isLoopback(h) {
+		return h
+	}
+	if port == "80" || port == "443" {
+		port = ""
+	}
+	return joinHost(h, port)
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func splitHost(hostport string) (host, port string) {

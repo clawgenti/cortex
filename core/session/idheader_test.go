@@ -280,3 +280,55 @@ func TestSessionIDHeader_IsCanonicalAndResolves(t *testing.T) {
 		}
 	})
 }
+
+// Codex sends a BARE Session-Id, not the X-prefixed name OpenCode uses, so the
+// two are separate entries rather than one. Captured on codex_exec/0.160.1:
+// a UUID, constant across one multi-turn session's inference requests and
+// different in the next.
+func TestIDFromHeaders_Codex(t *testing.T) {
+	// The real laptop list, in its real order. CodexSessionHeader is last
+	// because it is the least namespaced; these cases are what that buys.
+	names := []string{ClaudeCodeSessionHeader, BobSessionHeader, SessionIDHeader, CodexSessionHeader}
+	const codexID = "01a136c3-9708-7242-9934-9e5ab2568b41"
+
+	t.Run("a Codex id alone is used", func(t *testing.T) {
+		h := http.Header{CodexSessionHeader: []string{codexID}}
+		if got := IDFromHeaders(h, names); got != codexID {
+			t.Errorf("IDFromHeaders() = %q, want %q", got, codexID)
+		}
+	})
+
+	t.Run("X-Session-Id is not Session-Id", func(t *testing.T) {
+		// The one-prefix miss this header exists to close: before Codex's name
+		// was read, its traffic grouped by process instead of by conversation.
+		if CodexSessionHeader == SessionIDHeader {
+			t.Fatal("the two names must stay distinct")
+		}
+		h := http.Header{CodexSessionHeader: []string{codexID}}
+		if got := IDFromHeaders(h, []string{SessionIDHeader}); got != "" {
+			t.Errorf("a list holding only %s matched a bare %s: %q",
+				SessionIDHeader, CodexSessionHeader, got)
+		}
+	})
+
+	t.Run("every dedicated header outranks it", func(t *testing.T) {
+		for _, dedicated := range []string{ClaudeCodeSessionHeader, BobSessionHeader, SessionIDHeader} {
+			h := http.Header{
+				dedicated:          []string{"theirs"},
+				CodexSessionHeader: []string{codexID},
+			}
+			if got := IDFromHeaders(h, names); got != "theirs" {
+				t.Errorf("with %s present, IDFromHeaders() = %q, want the dedicated header's value",
+					dedicated, got)
+			}
+		}
+	})
+
+	t.Run("canonical casing", func(t *testing.T) {
+		// Same reason the others assert it: tests build http.Header literals
+		// from these constants, and a raw map literal is not canonicalized.
+		if got := http.CanonicalHeaderKey(CodexSessionHeader); got != CodexSessionHeader {
+			t.Errorf("CodexSessionHeader = %q, want canonical form %q", CodexSessionHeader, got)
+		}
+	})
+}

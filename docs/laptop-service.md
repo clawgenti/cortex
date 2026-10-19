@@ -42,7 +42,7 @@ one process; systemd handles it.
 The one-liner is how you upgrade, so it is meant to be run repeatedly. When nothing has
 changed it changes nothing. It still downloads the release, but `agentop setup` finds
 the staged binaries identical to the installed ones, asks nothing, and ends on one line,
-`cortex v0.9.3 is installed and healthy.`, leaving the running proxy alone rather than
+`cortex v0.9.0 is installed and healthy.`, leaving the running proxy alone rather than
 restarting it. When something has changed it lists what, and asks first. An upgrade keeps
 the previous binaries until the new Cortex answers its health check, and puts them back
 if it never does.
@@ -367,7 +367,18 @@ curl -X DELETE http://localhost:47601/v1/sessions
 # {"sessions":12,"archivedSessions":340,"bytes":81234567}
 ```
 
-The clear is refused — a 403 saying why — unless the request names a loopback host
+**One session, or one agent's.** `x` on the sessions pane erases the highlighted session, and
+`x` on the agents pane every session of the highlighted agent — on *All agents*, everything, as
+`X` does. Each asks first and keeps the cost ledger. An agent still using a session brings it
+back with its next request, and the conversation with it, since every request re-sends it.
+From a script:
+
+```sh
+curl -X DELETE http://localhost:47601/v1/sessions/<id>
+# {"sessions":1,"archivedSessions":1,"bytes":18234567}, or a 404 when this Cortex holds no such session
+```
+
+Either is refused — a 403 saying why — unless the request names a loopback host
 (`localhost`, `127.0.0.1` or `[::1]`), carries no `Origin` header, and reaches a proxy bound to
 loopback only, as a local install is. Those are the checks that keep a web page you visit from
 erasing your history through the unauthenticated API. If the disk half fails, memory is still
@@ -390,10 +401,33 @@ That stops new writes and leaves what is on disk; clear first with `X` if you wa
 ## Plugin state is kept in `~/.cortex/plugin-state.json`
 
 Plugins that need state to outlive a restart keep it here. Today that is the inference router:
-which server each session is on, as its session id, its agent's name and the server's name. It
-holds no prompts and no keys. A session's entry expires 29 to 30 days after its last request; `X`
+which server each session is on, as its session id, its agent's name and the server's name — plus,
+for each session moved to another server, which server wrote each reasoning block in its history,
+by a fingerprint of the block — never the reasoning itself. It holds no prompts and no keys. A session's entry expires 29 to 30 days after its last request; `X`
 does not clear it. The proxy saves changes within two seconds and on stop, and sets aside a file it
 cannot read as `plugin-state.json.corrupt` and starts empty.
+
+## The `tls_bridge:` configuration
+
+The TLS bridge terminates agent egress so the outbound plugin pipeline sees
+decrypted HTTPS. It is configured under the top-level `tls_bridge:` block in
+`~/.cortex/config.yaml` (`authbridge-runtime-config` in a cluster):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `mode` | *(off)* | `disabled` or `enabled`. Empty or an absent block means off. |
+| `ca_dir` | — | Directory of the signing CA: the bridge reads `tls.crt` + `tls.key` to sign leaves; `ca.crt` is the trust cert handed to the agent (cert-manager Secret key conventions, so only the directory is configured). On a laptop this is `~/.cortex/ca`. |
+| `generate_ca` | `false` | Mint and persist a self-signed CA into `ca_dir` when those files are absent, instead of failing at startup. For standalone/demo use only — in-cluster the CA is a mounted Secret and this stays false so a missing Secret fails loudly. `ca_dir` should persist across restarts: on ephemeral storage a fresh CA is minted each boot, and clients must re-trust the new `ca.crt`. |
+| `upstream_ca_bundle` | *(system roots)* | Extra-roots PEM file for re-origination, for private-CA origins the agent trusts. Empty means system roots only. |
+| `upstream_insecure` | `false` | Disable origin cert verification on re-origination, for internal/self-signed upstreams whose CA is unavailable. Prefer `upstream_ca_bundle` when possible. |
+| `passthrough_hosts` | *(see below)* | Hosts to tunnel, never intercept. Distinct from `listener.skip_hosts`, which bypasses the whole pipeline: these still run the egress gate, they just aren't TLS-terminated. See [Developer tooling is not intercepted at all](#developer-tooling-is-not-intercepted-at-all). |
+| `ports` | `{443, 8443}` | TCP ports to intercept as TLS. Only HTTP(S)-bearing ports belong here — the bridge serves the decrypted stream as HTTP/1.1 or h2, so terminating a non-HTTP TLS protocol (LDAPS, SMTPS, DB-over-TLS, …) would break it. |
+
+The bridge is built once at startup, so changing any `tls_bridge:` field takes
+effect only after `agentop service restart`. Note the reload does not *refuse*
+the edit — `/reload/status` reports a successful reload and `/config` serves
+the new values while the running bridge keeps its startup settings. Restart to
+apply.
 
 ## `agentop: command not found`
 
@@ -521,6 +555,13 @@ This removes only the keys Cortex added to `~/.claude/settings.json`
 `CURL_CA_BUNDLE`) and leaves anything else in that file alone. Claude Code goes
 straight to the API again. Restart `claude` to pick it up.
 
+It also leaves alone any one of those keys whose value you have **changed since
+enable set it**, and says which: that edit is yours, and restoring what preceded
+Cortex over it would throw it away silently. Those keys are the one case where
+disable does not leave Claude Code fully unwired — a `HTTPS_PROXY` you pointed
+somewhere else still points there. Edit `~/.claude/settings.json` by hand if you
+want them gone.
+
 Cortex keeps running; nothing sends traffic to it. `agentop configure claude-code
 enable` puts it back.
 
@@ -531,6 +572,67 @@ the same file: `NODE_EXTRA_CA_CERTS` **extends** Node's trust store, so it gets
 followed by this machine's public roots. Pointing a replacing variable at `ca.crt`
 would leave that tool trusting one private CA and nothing else, which breaks every
 direct TLS call it makes.
+
+### `502 Cortex proxy is not serving`
+
+An agent routed through Cortex shows this when the proxy is installed and routed but
+not currently serving — a config it cannot load, a crash it is restarting from, or one
+of its other ports held by another process (a local install pins them: 47601 for the
+session API, 47602 for stats, 47604 for health). The supervisor answers
+on the proxy's address while no proxy is running, so that you get this message instead
+of a bare connection error that names nothing:
+
+```
+API Error: 502 Cortex is routed in this environment (HTTPS_PROXY) but is not serving — run: agentop service start
+```
+
+(One line; wrapped here only if your terminal is narrow.)
+
+**The one case this cannot cover is a conflict on the forward address itself** — 47600,
+or whatever `listener.forward_proxy_addr` names. The supervisor holds that address only
+while it is free, so if another process has it, neither the proxy nor this message can
+get there and you are back to a bare connection error. `~/.cortex/proxy.log` is where to
+look: the proxy says `cannot start: another process already holds this address` on every
+start attempt, and names the holder's pid and executable where the kernel will say. Where
+it could not, the same line hands you the `lsof` to find it yourself:
+
+```sh
+lsof -nP -iTCP:47600 -sTCP:LISTEN
+```
+
+The fix is the one in the message. If `agentop service start` does not take, run
+`agentop doctor`, which names the reason, and read `~/.cortex/proxy.log` for what the
+proxy said as it failed.
+
+No single response field reaches every client, so the response sets two: the reason
+phrase (`Cortex proxy is not serving`) and the body above. What you actually see
+depends on which client you are reading this from:
+
+| Client | What it shows |
+|---|---|
+| `curl` 8.7.1 | `curl: (56) CONNECT tunnel failed, response 502` — neither the reason phrase nor the body |
+| Go `net/http` | the reason phrase, as the error text |
+| Claude Code | the body, inside its own `API Error: 502 ...` framing |
+
+Two things to expect, neither of them fast. Requests **fail** rather than going out
+unobserved, which is deliberate: Cortex does not let traffic past unseen just because
+it is down — failing closed buys legibility, not speed. And the message is not
+prompt: against Claude Code it took three retries and over two minutes before this
+surfaced, so allow a couple of minutes before concluding the fix did not work.
+
+This does **not** appear after `agentop service stop`, which stops the supervisor
+too — nothing is left to answer on the address, so a stopped Cortex still looks like
+a bare connection error, and `stop` already tells you how many connections it cut.
+
+The supervisor reads the address once, at its own start. If you edit
+`listener.forward_proxy_addr`, restart the service rather than only the proxy — the same
+rule every other `listener.*` field follows.
+
+**macOS only, in practice.** The supervisor exists only where `agentop` installs it
+with `--supervise`, which is the launchd path. The systemd unit deliberately does not
+pass `--supervise` — it relies on `Restart=on-failure` instead — so on Linux there is
+no supervisor to hold the address, and a Linux local install still gets a bare
+connection-refused in this situation.
 
 ### Everything shows as `tunnel` and no plugin ever runs
 
@@ -810,6 +912,16 @@ machine you believe you have just cleaned. `agentop uninstall` removes all seven
 as `agentop configure claude-code disable` does, and `--purge` deletes `~/.cortex` last,
 and not at all if a removal before it failed; this list is only for when that binary is
 already gone.
+
+Both of them skip a key whose value you have **changed since enable set it** — that
+edit is yours to keep or drop — and say which under *Left behind*. `--purge` then keeps
+`~/.cortex` rather than walking into the hazard above: if any key is still going to name
+a file inside the directory once it has finished, the whole directory stays, and the
+`purged` row says which key. That covers a key it left behind *and* one it put back,
+because a value of your own under `~/.cortex` — a CA file you keep there yourself — is
+one enable adopts as Cortex's and uninstall hands back to you. Delete the directory
+yourself once nothing points into it. Doing the removal by hand, as this section does,
+there is nothing to do that for you — check the keys you changed before you `rm -rf`.
 
 If you configured OpenCode, its background service's environment holds the same kind of
 variables. Remove the ones that point at Cortex with the `opencode` CLI, as

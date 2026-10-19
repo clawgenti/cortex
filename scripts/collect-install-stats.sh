@@ -17,32 +17,34 @@
 # by behaviour. Treating linux_amd64 as "CI" would therefore erase every real
 # Linux user -- confidently wrong rather than merely noisy.
 #
-# What the smoke test IS, is countable: ONE install per successful run, as far as
+# What the smoke test IS, is countable: ONE install per successful JOB, as far as
 # these figures are concerned.
 #
-# The run itself installs three times -- a fresh install of the newest stable tag,
+# Per job, not per run, because the workflow runs an architecture matrix and each
+# leg installs independently. A run is worth however many legs succeeded, which is
+# why this script records that number per run instead of letting the page multiply
+# by a constant -- see the query below.
+#
+# Each job itself installs three times -- a fresh install of the newest stable tag,
 # an upgrade to the tag under test, and a no-op re-run of it -- so it fetches more
 # than one checksums.txt. But on a push to main the tag under test is main-latest,
 # which is excluded from .totals below (--clobber resets its download_count on
 # every push, so its counts mean "since the last push" and its contribution is
 # noise that can go negative when a real --ref=main install is erased). One fetch
-# therefore lands where this page counts.
+# per job therefore lands where this page counts.
 #
-#   CI installs per run = 1
+#   CI installs per run = its successful-job count
 #
-# The live figures settle it rather than the reading of the workflow: v0.8.1 has 71
-# checksums fetches against 51 successful runs since it published. At 2 per run, CI
-# alone would be 102 -- more than the release has ever been fetched. At 1 per run,
-# 51 CI + 20 people = 71, and the Linux tarballs agree independently (112 / 2 = 56
-# = 51 + 5).
+# The live figures settled the per-job figure rather than the reading of the
+# workflow, back when a run WAS one job: v0.8.1 had 71 checksums fetches against 51
+# successful runs since it published. At 2 per run, CI alone would have been 102 --
+# more than the release had ever been fetched. At 1, 51 CI + 20 people = 71, and the
+# Linux tarballs agreed independently (112 / 2 = 56 = 51 + 5). That is the
+# measurement the matrix multiplies, not replaces.
 #
 # A TAG-push run is the exception: its upgrade leg lands on a real release, so the
-# people figure can run 1-2 low on a day that cut a tag. Stated in the page
+# people figure can run 1-2 low per job on a day that cut a tag. Stated in the page
 # footnote rather than modelled.
-#
-# Only `success` counts. Of 64 runs in the first sampled window, 18 were
-# `skipped` and downloaded nothing, so counting runs naively overstates CI by
-# ~28%.
 #
 # Nothing here separates maintainers from strangers -- at a base of ~16, a few
 # contributors on a few machines each could account for all of it. Label any
@@ -104,14 +106,22 @@ snap=$(mktemp)
 runs=$(mktemp)
 latest=$(mktemp)
 merged=$(mktemp)
-trap 'rm -f "${tmp}" "${snap}" "${runs}" "${latest}" "${merged}"' EXIT INT TERM
+# The smoke-run query's working files: the raw API response, the id/created_at
+# pairs taken from it, the id->installs counts already in the series, and the
+# finished rows.
+runs_api=$(mktemp)
+pairs=$(mktemp)
+known=$(mktemp)
+rows=$(mktemp)
+trap 'rm -f "${tmp}" "${snap}" "${runs}" "${latest}" "${merged}" \
+	"${runs_api}" "${pairs}" "${known}" "${rows}"' EXIT INT TERM
 
 # --paginate to cover every release, not just the first page: lifetime totals on
 # older tags still move (mirrors, stragglers) and dropping them would silently
 # understate the all-time figure.
 gh api "repos/${REPO}/releases" --paginate >"${tmp}"
 
-# Successful smoke runs, as {id, created_at} rather than per-day counts.
+# Smoke runs, as {id, created_at, installs} rather than per-day counts.
 #
 # Timestamps, not calendar dates, because a snapshot interval is not a day. The
 # cron fires at 03:17 UTC, so a row covers (previous 03:17, this 03:17] -- and
@@ -126,16 +136,33 @@ gh api "repos/${REPO}/releases" --paginate >"${tmp}"
 # snapshot would see 0 for older intervals and subtract nothing, silently. Merging
 # on id keeps each run exactly once, for as long as the series is kept.
 #
+# installs, because ONE RUN IS NO LONGER ONE INSTALL. The workflow runs an arch
+# matrix, and every leg fresh-installs the current stable release, so a run now
+# fetches checksums.txt once per leg. Counting runs and multiplying by a constant
+# was right while there was one job and is a phantom install per run now -- and a
+# constant of 2 would be just as wrong, retroactively, for every run already in
+# the series. So the count is RECORDED PER RUN, from the run's own successful-job
+# count, and the page multiplies by nothing. Adding or removing a matrix leg then
+# needs no change on either side.
+#
+# Counting jobs also fixes a case fail-fast: false creates. If one arch fails the
+# whole run concludes `failure`, and a conclusion filter would drop it -- losing
+# the OTHER leg's real install from the subtraction. Every COMPLETED run is
+# therefore queried whatever its conclusion, and a run whose every job failed or
+# skipped contributes 0 and is left out below. That also subsumes the old
+# `conclusion == "success"` filter's purpose: of 64 runs in the first sampled
+# window 18 were skipped and downloaded nothing, and a skipped job is not a
+# successful one.
+#
 # Queried by workflow FILE rather than by filtering every run in the repo: the
 # repo-wide /actions/runs endpoint needs --paginate over thousands of runs and
 # takes minutes, while this one returns the workflow's own runs in a single page.
+# total_count stays the count of ALL runs, unfiltered, because the page uses it to
+# decide whether the first snapshot's page of 100 held the whole history.
 SMOKE_WORKFLOW="release-smoke-linux.yaml"
 if ! gh api \
 	"repos/${REPO}/actions/workflows/${SMOKE_WORKFLOW}/runs?per_page=100" \
-	--jq '{total_count: .total_count,
-	       runs: [.workflow_runs[]
-	              | select(.conclusion == "success")
-	              | {id: .id, created_at: .created_at}]}' >"${runs}" 2>/dev/null; then
+	>"${runs_api}" 2>/dev/null; then
 	# A missing or renamed workflow must not take the whole snapshot down: the
 	# download series is the primary signal and stands on its own.
 	#
@@ -144,6 +171,75 @@ if ! gh api \
 	# stay distinguishable instead of both reading as zero.
 	warn "could not read ${SMOKE_WORKFLOW} runs; recording CI as unknown for today"
 	echo 'null' >"${runs}"
+else
+	# A completed run's job outcomes never change, so a count already in the series
+	# is reused rather than re-fetched. Without this the jobs query below would run
+	# ~100 times a day forever to re-derive numbers that cannot have moved; with it,
+	# steady state is the handful of runs since yesterday, and the one-off backfill
+	# of the existing window happens on the first run after this merges.
+	#
+	# Keyed on the id alone, so a snapshot written before this change -- whose runs
+	# carry no `installs` -- contributes nothing here and gets queried properly.
+	if [ -f "${OUT}" ]; then
+		jq -r '[.snapshots[]?.smoke_runs[]?
+		        | select(type == "object" and (.installs | type) == "number")
+		        | "\(.id) \(.installs)"]
+		       | unique | .[]' "${OUT}" >"${known}" 2>/dev/null || : >"${known}"
+	else
+		: >"${known}"
+	fi
+
+	jq -r '.workflow_runs[]
+	       | select(.status == "completed")
+	       | "\(.id)\t\(.created_at)"' "${runs_api}" >"${pairs}"
+	total_count=$(jq -r '.total_count' "${runs_api}")
+
+	: >"${rows}"
+	queried=0
+	jobs_failed=0
+	tab=$(printf '\t')
+	while IFS="${tab}" read -r id created; do
+		[ -n "${id}" ] || continue
+		n=$(awk -v id="${id}" '$1 == id { print $2; exit }' "${known}")
+		if [ -z "${n}" ]; then
+			queried=$((queried + 1))
+			if ! n=$(gh api "repos/${REPO}/actions/runs/${id}/jobs" \
+				--jq '[.jobs[] | select(.conclusion == "success")] | length' 2>/dev/null); then
+				# One unreadable run is not worth discarding the rest. It is simply
+				# absent from today's snapshot and gets queried again tomorrow, which
+				# is the same self-repair the merge-on-id already provides.
+				jobs_failed=$((jobs_failed + 1))
+				continue
+			fi
+		fi
+		# A run that installed nothing is recorded as 0 rather than omitted. It
+		# subtracts nothing either way, so this is not about the arithmetic — it is
+		# about the reuse above being able to see it. Omitted, a skipped run is
+		# absent from the series, so it looks newly-seen every single day and gets
+		# re-queried forever: 33 of the 100 in today's window are skipped, which was
+		# 33 pointless requests a day until this line stopped dropping them. The page
+		# filters zeros out when it counts runs.
+		printf '%s\t%s\t%s\n' "${id}" "${created}" "${n}" >>"${rows}"
+	done <"${pairs}"
+
+	[ "${jobs_failed}" -eq 0 ] ||
+		warn "could not read jobs for ${jobs_failed} of ${queried} newly-seen run(s); they are omitted from today and retried tomorrow"
+
+	if [ ! -s "${rows}" ] && [ "${jobs_failed}" -gt 0 ]; then
+		# Nothing measured and a known reason why. Recording [] here would read as
+		# "no CI ran", which is the silent zero the null above exists to avoid.
+		warn "no run could be read; recording CI as unknown for today"
+		echo 'null' >"${runs}"
+	else
+		jq -Rn --argjson total "${total_count}" '
+		  {total_count: $total,
+		   runs: [inputs
+		          | split("\t")
+		          | {id: (.[0] | tonumber),
+		             created_at: .[1],
+		             installs: (.[2] | tonumber)}]}
+		' <"${rows}" >"${runs}"
+	fi
 fi
 
 # GitHub's own answer to "which release does the plain installer take", recorded
@@ -189,7 +285,13 @@ jq --arg date "${today}" \
     elif $name | test("darwin_amd64") then "darwin_amd64"
     elif $name | test("linux_arm64")  then "linux_arm64"
     elif $name | test("linux_amd64")  then "linux_amd64"
-    elif $name | test("^checksums")   then "checksums"
+    # Unanchored: v0.1 through v0.4 named this file
+    # kagenti-extensions_<ver>_checksums.txt, which an anchored ^checksums missed.
+    # Those 24 releases were filed under "other" and read 0 installs apiece -- 79
+    # downloads invisible, and the all-time total understated by 24% (257 against
+    # 338). The platform tests above come first and no published asset has ever had
+    # "checksums" in a tarball name, so widening this reclassifies nothing else.
+    elif $name | test("checksums")    then "checksums"
     else "other"
     end;
 
@@ -202,9 +304,18 @@ jq --arg date "${today}" \
     # and almost every run lands after that.
     taken_at: $taken_at,
 
-    # Successful smoke runs as {id, created_at}, or null when the query failed.
-    # The page merges these across snapshots on id, so a run stays counted after it
-    # falls out of the last-100 window the API returns.
+    # Every completed smoke run, as {id, created_at, installs}, or null when the
+    # query failed. The page merges these across snapshots on id, so a run stays
+    # counted after it falls out of the last-100 window the API returns, and it
+    # ignores the installs:0 rows when counting runs.
+    #
+    # The installs field is a successful-job count for that run. Runs recorded
+    # before the arch matrix landed have no such field, and the page reads a missing
+    # one as 1 -- exactly right for them, since the workflow then had one job.
+    #
+    # (No apostrophes in this jq program, as the note further down says: it is
+    # single-quoted in the shell, so one ends the quote and shellcheck reports it as
+    # a mysterious function-definition error. Bitten a 4th time writing this.)
     smoke_runs: ($smoke[0].runs // null),
 
     # How many runs the workflow has EVER had, successful or not, per the API.
@@ -259,9 +370,26 @@ mkdir -p "$(dirname "${OUT}")"
 # Re-running on the same day replaces that day's snapshot instead of appending a
 # second one. Makes the job idempotent, so a manual workflow_dispatch after a
 # failed cron run is safe and leaves exactly one row per date.
+#
+# Snapshots written before the checksums pattern was unanchored are repaired on the
+# way past. Those misclassified downloads were counted -- just filed under "other"
+# instead of "checksums" -- so moving them is exact arithmetic, not a guess, and it
+# is what keeps the series continuous rather than showing a one-day jump of ~79 in a
+# column whose daily deltas are 1-5.
+#
+# Keyed on the presence of "other": a snapshot taken after the fix has none, so this
+# is a no-op from then on and needs no version flag or cutoff date. The per-release
+# figures inside each snapshot are left alone -- they are what a future reader would
+# recompute from, and they are already right under the new pattern.
 jq --slurpfile snap "${snap}" '
+  def repair:
+    if (.totals.other // 0) > 0 then
+      .totals.checksums = ((.totals.checksums // 0) + .totals.other)
+      | del(.totals.other)
+    else . end;
+
   .snapshots
-  |= ( map(select(.date != $snap[0].date)) + $snap
+  |= ( map(select(.date != $snap[0].date) | repair) + $snap
        | sort_by(.date) )
 ' "${OUT}" >"${merged}"
 
@@ -272,6 +400,12 @@ cat "${merged}" >"${OUT}"
 
 days=$(jq '.snapshots | length' "${OUT}")
 echo "recorded ${today} in ${OUT} (${days} day(s) of history)"
+# How many runs needed a jobs query. Reported because it is the only visible sign
+# that reusing counts from the series still works: steady state is the handful of
+# runs since yesterday, and a hundred every day means the reuse broke and the job
+# is re-deriving numbers that cannot have changed. Nothing fails when that happens
+# -- it just takes 90s instead of 30s, which no one would look into.
+echo "  newly-queried runs: ${queried:-0}"
 jq -r '.snapshots[-1]
        | "  cumulative: darwin_arm64=\(.totals.darwin_arm64 // 0)"
        + " linux_amd64=\(.totals.linux_amd64 // 0)"
@@ -279,4 +413,6 @@ jq -r '.snapshots[-1]
          "  latest release: \(.latest_release // "unknown")",
          "  smoke runs in window: \(
             if .smoke_runs == null then "unknown (query failed)"
-            else (.smoke_runs | length | tostring) end)"' "${OUT}"
+            else ([.smoke_runs[] | .installs // 1] | map(select(. > 0))) as $i
+                 | "\($i | length) installing run(s) of \(.smoke_runs | length) completed, "
+                 + "\($i | add // 0) CI install(s)" end)"' "${OUT}"

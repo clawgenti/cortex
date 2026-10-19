@@ -138,8 +138,10 @@ func TestSnapshot_SeriesCurrenciesNamesEachAgentsUnits(t *testing.T) {
 	now := time.Now().Truncate(BucketWidth)
 	snap := twoUnitRing(t, now).Snapshot(10*BucketWidth, BucketWidth, "", GroupAgent)
 
-	if got := snap.SeriesCurrencies["bob-shell"]; !slices.Equal(got, []string{"Bobcoins"}) {
-		t.Errorf("bob-shell units = %v, want [Bobcoins]", got)
+	// Keyed by the folded name: the ring records "bob-shell/2.0.5" (twoUnitRing), the
+	// axis folds it to "bob", and the two must not split into a row each.
+	if got := snap.SeriesCurrencies["bob"]; !slices.Equal(got, []string{"Bobcoins"}) {
+		t.Errorf("bob units = %v, want [Bobcoins]", got)
 	}
 	if got := snap.SeriesCurrencies["claude-code"]; !slices.Equal(got, []string{pricing.CurrencyUSD}) {
 		t.Errorf("claude-code units = %v, want [USD]", got)

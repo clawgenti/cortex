@@ -149,7 +149,7 @@ func applySGR(cur style, params string) style {
 					return cur
 				}
 				idx, _ := strconv.Atoi(fields[i+2])
-				if hex, ok := basicColors[idx]; ok {
+				if hex, ok := indexedColor(idx); ok {
 					if n == 38 {
 						cur.fg = hex
 					} else {
@@ -175,6 +175,27 @@ func applySGR(cur style, params string) style {
 		}
 	}
 	return cur
+}
+
+// indexedColor is the colour of a 38;5;n index: the 16 legacy colours from the same
+// palette as their SGR codes, then xterm's 6x6x6 cube and its grey ramp. install.sh
+// draws its progress bar in one of these (167), because a shell cannot ask the
+// terminal whether truecolor works.
+func indexedColor(idx int) (string, bool) {
+	switch {
+	case idx >= 0 && idx < 8:
+		return basicColors[30+idx], true
+	case idx >= 8 && idx < 16:
+		return basicColors[90+idx-8], true
+	case idx >= 16 && idx < 232:
+		level := []int{0, 95, 135, 175, 215, 255}
+		c := idx - 16
+		return fmt.Sprintf("#%02x%02x%02x", level[c/36], level[c/6%6], level[c%6]), true
+	case idx >= 232 && idx < 256:
+		v := 8 + 10*(idx-232)
+		return fmt.Sprintf("#%02x%02x%02x", v, v, v), true
+	}
+	return "", false
 }
 
 // PlainText is the visible text of a decoded line, for assertions and tests.

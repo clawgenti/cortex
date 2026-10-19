@@ -97,6 +97,33 @@ const MaxPlausibleRequestCostMicros int64 = maxPlausibleTokens * maxPlausibleMic
 // retention floor drift from the window it protects.
 const MaxPlausibleTokens = maxPlausibleTokens
 
+// BundleableRate reports whether a vendor list rate is one the BUNDLED TABLE may carry:
+// resolved through the largest multiplier validate accepts, it still has to sit under the
+// per-token ceiling above.
+//
+// WHY A BUNDLED RATE IS HELD TO A STRICTER BOUND THAN A CONFIGURED ONE. An operator's
+// `pricing:` entry is their own assertion about their own gateway, and if it prices a
+// request past the cap that is their arithmetic to answer for. A bundled rate is ours: it
+// ships to everyone, so a rate this table cannot honour is a rate that would refuse a
+// legitimate bill on a machine whose owner never chose it. The generator drops such a row
+// instead, which leaves the model reported priceable-but-unpriced — visible, and the
+// designed signal for exactly this — rather than priced from a figure the pipeline will
+// later reject.
+//
+// NOT A VENDOR CARVE-OUT. It reads the rate, never the provider, so the first Anthropic
+// model past the bound is dropped on the same terms as the OpenAI o-series and gpt-*-pro
+// tiers that prompted it. Written when bundling OpenAI brought in o1-pro at $600/Mtok,
+// whose 10x-resolved rate is 6x this ceiling; 10 of 257 rows fell to it, none of them a
+// model any supported agent selects.
+//
+// The alternative was raising maxPlausibleMicrosPerToken to fit, and the arithmetic argued
+// against it: the dearest REAL call is a 1M-token context at that rate, $600, or $6,000
+// through a 10x markup — already inside a $10,000 cap. Lifting the ceiling 6x would have
+// loosened the bound for a request no context window can produce.
+func BundleableRate(perToken float64) bool {
+	return perToken*maxMultiplier <= float64(maxPlausibleMicrosPerToken)/1e6
+}
+
 // PlausibleRequestCostUSD reports whether usd could be what ONE inference request cost.
 //
 // The predicate lives beside the bound so no caller re-derives the comparison, and so the

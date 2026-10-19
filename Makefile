@@ -56,10 +56,15 @@ endif
 # scripts/profile-tags — the same helper CI uses — so the tag
 # list stays in sync without hand-maintenance. agentop links no plugins.
 
+# The commit agentop's title bar names, from git run in this tree. Go's own VCS stamp is wrong
+# in a .worktrees/ checkout: it takes the enclosing checkout's HEAD and dirty state.
+AGENTOP_REV = $(shell git rev-parse --short=8 HEAD 2>/dev/null)
+AGENTOP_REVISION = $(if $(AGENTOP_REV),$(AGENTOP_REV)$(shell git status --porcelain 2>/dev/null | grep -q . && echo +dirty))
+
 agentop: ## Build agentop to ./bin/agentop
 	@mkdir -p $(BIN_DIR)
 	@echo "→ building agentop"
-	@cd cmd/agentop && GOWORK=off go build -o $(BIN_DIR)/agentop .
+	@cd cmd/agentop && GOWORK=off go build -ldflags "-X main.revision=$(AGENTOP_REVISION)" -o $(BIN_DIR)/agentop .
 
 cortex: ## Build cortex to ./bin/cortex (PROFILE=full|lite|local, default full)
 	@mkdir -p $(BIN_DIR)

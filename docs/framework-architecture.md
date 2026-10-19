@@ -405,7 +405,7 @@ pipeline.RateLimited(30*time.Second, "", "slow down")     // 429 + Retry-After
 
 The `Code` → HTTP-status mapping for well-known codes lives at `codeToStatus` in `action.go`; unknown codes default to 500. Plugins that need a non-default status set `Violation.Status` explicitly or use `DenyStatus`.
 
-There is no "soft error" channel today — a plugin that wants to fail open logs and returns `Continue`. A future iteration may add a per-plugin `on_error` policy.
+Fail-open vs fail-closed is a per-plugin `on_error` policy (`enforce` / `observe` / `off`) — see [`plugin-reference.md`](./plugin-reference.md#on_error-policy) for the contract.
 
 ---
 
@@ -422,7 +422,7 @@ func (p *Pipeline) Plugins() []Plugin                                           
 func (p *Pipeline) NeedsBody() bool                                                // OR over ReadsBody + both write flags
 ```
 
-`New` validates capability wiring at startup: every `Read` must be satisfied by some earlier plugin's `Write`. `plugins.Build` additionally validates the cross-plugin relationship declarations — `Requires`, `RequiresAny`, `After`, `Claims` — before returning the pipeline to the listener. See [`plugin-reference.md` "Declaring plugin relationships"](./plugin-reference.md#declaring-plugin-relationships).
+`New` validates capability wiring at startup: every `Read` must be satisfied by some earlier plugin's `Write`. `plugins.Build` additionally validates the cross-plugin relationship declarations — `Requires`, `RequiresAny`, `RequiresLater` — before returning the pipeline to the listener. See [`plugin-reference.md` "Declaring plugin relationships"](./plugin-reference.md#declaring-plugin-relationships).
 
 ### Plugin lifecycle (`Start` / `Stop`)
 
@@ -444,7 +444,7 @@ type Shutdowner interface {
 
 Both are **optional** via Go's type-assertion idiom — a plugin that doesn't need them simply doesn't implement them, and the pipeline skips it. Existing plugins (jwt-validation, a2a-parser, mcp-parser, inference-parser, token-exchange) don't implement these; they keep working unchanged.
 
-The host (e.g. `cmd/authbridge/main.go`) drives the lifecycle:
+The host (e.g. `cmd/cortex/main.go`) drives the lifecycle:
 
 ```go
 // After pipeline.New, before listeners accept traffic:
@@ -669,6 +669,23 @@ type SessionEvent struct {
 
 Wire format (`SessionEvent.MarshalJSON`) translates enums to strings and `Duration` to `DurationMs`. Round-trip stable — `json.Marshal(e) → json.Unmarshal → json.Marshal` is byte-identical. Tested at `pipeline/session_test.go:TestSessionEvent_JSONRoundTrip`.
 
+### Operator configuration (`session:`)
+
+The store's limits live under the top-level `session:` block. **None of it is
+hot-reloadable** — every consumer reads the block exactly once at startup, so
+an edit is refused by the reloader and takes effect on restart:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | The store (and implicitly the session API). `false` turns both off. |
+| `ttl` | *(never)* | How long a session survives after its last event. |
+| `max_events` | *(unset)* | FIFO per-session event cap. Unset by default: a trimmed store is lossy on exactly the sessions worth reading, and `?before=` paging (see [`session-api.md`](session-api.md)) keeps depth readable without it. With a session archive, a cap drops nothing a reader can no longer reach. |
+| `max_sessions` | `100` | How many sessions are kept, oldest-used evicted first. The only default bound on memory — `max_events` and `ttl` unset means one long-lived chatty session grows without limit. |
+| `id_headers` | *(known agent headers)* | Headers consulted, in order, for a client-supplied session id — defaults to the known coding-agent session headers when unset. |
+| `client_affinity` | *(auto)* | Pin a session to the client process that started it, so two agents sharing an id keep separate sessions. |
+| `process_attribution` | *(auto)* | Attribute traffic to the peer process holding the connection (`auto` / `on` / `off`). Needs `id_headers` non-empty, like `client_affinity`. |
+| `archive.*` | *(laptop only)* | The on-disk session history — see [`laptop-service.md`](laptop-service.md#session-history-is-kept-in-cortexsessions). Turning the store off with the archive explicitly on is refused at load. |
+
 ---
 
 ## 8. Boundary: pipeline vs listener
@@ -677,7 +694,7 @@ The pipeline **does not own**:
 
 | Concern | Owner | Why |
 |---|---|---|
-| HTTP wire protocol (ext_proc gRPC, reverse/forward proxy) | `cmd/authbridge/listener/` | Each mode speaks a different wire; pipeline stays protocol-free |
+| HTTP wire protocol (ext_proc gRPC, reverse/forward proxy) | `core/listener/` | Each mode speaks a different wire; pipeline stays protocol-free |
 | Body buffering negotiation (`ProcessingMode: BUFFERED`) | Listener reads `Pipeline.NeedsBody()` | Only listener can respond to the ext_proc handshake |
 | JWT issuance, client registration, Keycloak admin calls | Outside the pipeline (agent sidecars / operator) | Async concerns happening before/after any request flow |
 | Session store writes (`Store.Append`) | Listener, called after each phase | Plugins see only the read-only `SessionView` |
@@ -714,6 +731,80 @@ independently.
 
 mTLS config changes require a pod restart (matches the listener-
 config reload boundary in §9 below).
+
+#### Operator configuration
+
+```yaml
+# authbridge-runtime-config ConfigMap (top-level)
+mtls:
+  mode: strict          # permissive | strict (omit block entirely for off)
+```
+
+`mode` is the only field the block carries; cert paths default to
+`/opt/svid.pem`, `/opt/svid_key.pem`, `/opt/svid_bundle.pem` (the SPIFFE
+Provider's file mirror). Legacy `cert_file` / `key_file` / `bundle_file` keys
+are dropped at load.
+
+| Mode | Inbound (reverse proxy `:8080`) | Outbound (forward proxy) |
+|---|---|---|
+| (no `mtls` block) | Plaintext only. | Plaintext only. |
+| `permissive` (default when block present) | Byte-peek listener: TLS handshakes verified against the SPIRE trust bundle; plaintext callers served on the same port. ⚠️ Plaintext requests carry their full headers and bodies in the clear — including any `Authorization: Bearer ...` token already injected by `token-exchange`. Use only during rollout with cluster-network trust. | Plaintext — no TLS-wrap attempt. Matches envoy-sidecar's permissive and Istio's PeerAuthentication semantics (permissive is inbound-only). |
+| `strict` | TLS only — non-TLS callers get the connection closed. | TLS or fail: handshake failure is a hard error, no fallback. |
+
+In both modes, a successful TLS handshake that fails certificate verification
+is always a hard error.
+
+**Trust model:** any peer with a valid cert from the SPIRE trust bundle can
+talk to this sidecar. Per-caller policy / SPIFFE allowlists are out of scope;
+the trust bundle IS the policy. Plugins that want per-caller decisions read
+`pctx.PeerCert` and check the URI SAN.
+
+**Reload boundary:** a reload that adds the `mtls` block, removes it, or
+changes `mtls.mode` is refused rather than half-applied — the active pipeline
+keeps serving, `reloads_failed` increments, and `/reload/status` names
+`mtls.*` among the fields that need a restart. The inbound TLS listener and,
+under `strict`, the forward proxy's mTLS dialer are built once at boot, so no
+reload can reach them. The outbound chain's redirect check
+(`forwardproxy.Support`) refuses a `WritesDestination` plugin whenever an
+`mtls:` block is configured — under `strict` the dialer would nest TLS inside
+TLS; under `permissive` there is no dialer, so the refusal is broader than
+strictly needed and fails closed.
+
+**Mixed-mode note:** a *permissive* caller cannot reach a *strict* peer
+regardless of mode (its outbound is plaintext; the peer's strict inbound
+rejects it). Mixed-mode deployments need both ends compatible — both strict,
+both permissive, or one strict + the other permissive on inbound only.
+
+#### envoy-sidecar mTLS
+
+In envoy-sidecar mode the listeners live in Envoy, not the sidecar binary, so
+the top-level `mtls:` block is a no-op there. Equivalent semantics are
+configured at the Envoy data-plane level by extending the `envoy-config`
+ConfigMap with TLS blocks:
+
+| Mode | Inbound (`:15124`) | Outbound (`:15123`) |
+|---|---|---|
+| `disabled` | plaintext | plaintext |
+| `permissive` | `tls_inspector` listener filter + two filter chains: `transport_protocol: tls` chain terminates mTLS, `transport_protocol: raw_buffer` chain accepts plaintext | **plaintext** — no TLS-wrap attempt |
+| `strict` | `tls_inspector` + single TLS filter chain; plaintext drops at filter chain match | `UpstreamTlsContext` on the `original_destination` cluster: TLS-or-fail, blanket |
+
+X.509 SVIDs are read by Envoy directly from `/opt/svid.pem`,
+`/opt/svid_key.pem`, `/opt/svid_bundle.pem` — the same paths proxy-sidecar's
+mTLS uses; the spiffe Provider's file-mirror in the `cortex-envoy` binary
+keeps them fresh on rotation. Inbound parity with proxy-sidecar is
+byte-identical observable semantics — the same outcome as proxy-sidecar's
+`tlssniff.Listener`, expressed as Envoy filter chains, matching Istio's
+PERMISSIVE/STRICT. Outbound is Istio-shaped: Envoy has no native primitive
+for "try TLS, fall back to plaintext on handshake failure" within an
+`ORIGINAL_DST` cluster, so permissive keeps outbound plaintext and strict
+does blanket TLS-or-fail. The operator's AgentRuntime CR `Spec.MTLSMode`
+flows through to a per-agent rendered envoy-config with the matching TLS
+blocks.
+
+> **This envoy-sidecar design has no end-to-end verification in-tree.** The
+> `demos/mtls/` demo that used to exercise it was retired as superseded.
+> Nothing in-tree exercises the Envoy filter chains — re-verify by hand after
+> changing them.
 
 The pipeline **does own**:
 - The `Plugin` interface contract.
@@ -772,7 +863,7 @@ curl http://localhost:9093/config               # now-active config
 | Plugin list (add / remove / reorder plugins) | ✅ | Pipeline is rebuilt from scratch |
 | A plugin's `config:` subtree (issuer, bypass paths, routes, JWKS URL, etc.) | ✅ | Plugin's `Configure` runs again with new bytes |
 | `mode` (`envoy-sidecar` / `proxy-sidecar`) | ❌ | Different wire protocol + listener set; refuse reload |
-| `listener.*` (ports) | ❌ | Bound sockets; refuse reload |
+| `listener.*` (ports, `skip_hosts`, interception addresses) | ❌ | Bound sockets and skip-host patterns are read at listener construction; refuse reload |
 | `session.*` (TTL, MaxEvents, MaxSessions, ID headers) | ❌ | Every consumer reads the block once at startup — `session.New(...)` in each `cmd` main, `forwardproxy.Server.SessionIDHeaders` assigned before `ListenAndServe`. There is no live object to reach; refuse reload |
 | `cost_ledger.*` (`enabled`, `dir`, `retention_days`) | ❌ | The ledger is a `*ledger.Writer` opened once at startup and handed to the session store as a `Recorder`. Refuse reload |
 | `mtls.*` (the block's presence and `mode`, the only field it carries) | ❌ | The inbound TLS listener and, under `strict`, the forward proxy's mTLS dialer are built once at startup, and the outbound chain is built for `forwardproxy.Support` of that state; refuse reload. Legacy `cert_file` / `key_file` / `bundle_file` keys are dropped at load, so an edit to them is neither applied nor refused |
@@ -793,6 +884,27 @@ For the unreloadable cases, `Status.LastError` names the field(s) that changed a
 
 **Non-reloadable choices elsewhere.** The in-memory session store, the cost ledger, the stat server, the session API server, and the reloader itself are all process-scoped — they live from startup to shutdown. A change to `session.enabled`, `cost_ledger.enabled`, `stats.address`, `listener.session_api_addr`, or the reloader's own knobs (drain window, debounce) requires a pod restart. `session.*`, `cost_ledger.*`, `listener.*` and `mtls.*` are refused outright, per the table above; `stats.address` and the reloader's own knobs are read once at construction, so an edit there is simply not seen.
 
+#### Skipping infrastructure hosts (`listener.skip_hosts`)
+
+`skip_hosts` lists infrastructure destinations — OTel collectors, metrics
+endpoints, log shippers — whose traffic should bypass the plugin pipeline
+**and** session recording entirely. A matched request is forwarded as a
+transparent proxy: no plugin runs, no event is appended.
+
+```yaml
+listener:
+  skip_hosts:
+    - "otel-collector.*.svc.cluster.local"
+    - "*.metrics.local"
+```
+
+Patterns use the same `.`-delimited glob semantics as `authproxy-routes`
+hosts; ports are stripped before matching. Any change requires a pod restart,
+like every other `listener.*` field. Do **not** add hosts here that need IBAC
+or token-exchange policy applied — bypass means bypass. It exists for traffic
+whose recording floods the session store and crowds out the user intent a
+guardrail needs (see the intent-pin note in [`laptop-service.md`](laptop-service.md)).
+
 ---
 
 ## 10. Writing a plugin
@@ -807,8 +919,6 @@ This document stays focused on the pipeline framework internals — how plugins 
 
 ## 11. Open questions
 
-- **Priority / on-error policies.** Plugins don't declare these today. If fail-open / fail-closed behavior becomes important to express per plugin, it would be added to `PluginCapabilities` (or a sibling metadata struct) and interpreted by `Pipeline`.
-- **Body mutation semantics.** Today plugins generally don't rewrite `pctx.Body` or `pctx.ResponseBody`. If a plugin needs to modify the payload, we'd need a clear contract about whether downstream plugins see the modified or original bytes.
 - **Execution modes.** The pipeline is sequential-only. Concurrent or fire-and-forget modes would require an executor layer; no concrete use case yet.
 
 ---
@@ -832,7 +942,7 @@ The plugin interface is **not** semver-stable yet (AuthBridge is pre-1.0). Chang
 - **Body mutation**: `PluginCapabilities.BodyAccess` split into `ReadsBody` / `WritesRequestBody`. New `pctx.SetBody` / `pctx.SetResponseBody` helpers flip a mutation flag; all three listeners (extproc / forwardproxy / reverseproxy) propagate the rewrite to the upstream with correct `Content-Length` and cleared `Content-Encoding`. `BodyAccess` was kept as a deprecated alias at the time; it has since been removed. See §6, "Body mutation."
 - **Detyped framework**: `pipeline/` no longer imports plugin-specific packages. **Breaking**: `Context.Claims *validation.Claims` → `Context.Identity Identity` (interface with `Subject()`/`ClientID()`/`Scopes()`); plugins publish adapters. `Context.Route` removed (was dead code). `Invocation`'s nine jwt-validation + token-exchange specific fields (`ExpectedIssuer`, `TokenSubject`, `RouteHost`, `CacheHit`, etc.) collapsed into `Details map[string]string`; built-in plugins migrated to `Details["expected_issuer"]` etc. `SessionEvent.TargetAudience` removed (was only populated from dead `pctx.Route`). Third-party plugins get a clean diagnostic slot they can populate without framework edits.
 - **Single-owner packages relocated**: `core/validation` → `core/plugins/jwtvalidation/validation`. `core/exchange` / `core/cache` / `core/spiffe` → `core/plugins/tokenexchange/{exchange,cache,spiffe}`. Each plugin now lives in its own directory (`plugins/jwtvalidation/plugin.go`, `plugins/tokenexchange/plugin.go`) and self-registers via its own init(). `core/bypass`, `core/routing`, `core/auth` stay shared.
-- **Plugin relationship declarations**: `PluginCapabilities` extended with four chain-scoped fields — `Requires` (all-must-be-earlier), `RequiresAny` (at-least-one-earlier), `After` (soft ordering), `Claims` (mutex on a semantic resource). Validated at `plugins.Build` time (startup + hot-reload); all errors per chain are collected into one report. `core/capabilities/claims.go` ships `ClaimAuthorizationHeader` as the initial canonical claim constant. `token-exchange` and `token-broker` migrated to declare it, so configuring both on the same outbound chain now fails startup instead of silently clobbering each other's Authorization header. See [`plugin-reference.md` "Declaring plugin relationships"](./plugin-reference.md#declaring-plugin-relationships).
+- **Plugin relationship declarations**: `PluginCapabilities` extended with chain-scoped fields — `Requires` (all-must-be-earlier), `RequiresAny` (at-least-one-earlier), and later `RequiresLater` (the mirror of `Requires` for response-phase output: the named plugin must sit at a *higher* index, because the response pass walks the chain in reverse). Validated at `plugins.Build` time (startup + hot-reload); all errors per chain are collected into one report. See [`plugin-reference.md` "Declaring plugin relationships"](./plugin-reference.md#declaring-plugin-relationships).
 - **Per-request finish hook (`Finisher`)**: new optional interface `Finisher { OnFinish(ctx, pctx) }` gives stateful plugins a guaranteed release point that fires after every request end — regardless of whether the pipeline allowed, denied, or errored. Dispatch is LIFO across Finisher-implementing plugins whose OnRequest was invoked (including the denier). `pctx.Outcome()` returns a non-nil `*Outcome{FinalAction, StatusCode, DenyingPlugin, Duration}` during OnFinish and nil in all other phases. OnFinish runs under a fresh ctx derived from `context.Background()` with a framework-set deadline (default 2s, `WithFinishTimeout` overrides) so client disconnect during the request doesn't cancel cleanup I/O. Best-effort: panics are recovered; OnFinish is silent (no auto-emitted Invocations); `pctx.Record` / `SetBody` / `SetResponseBody` called during OnFinish are dropped with WARN logs since the SessionEvent is published and the response is on the wire. Closes the rate-limiter / audit / lease class of "cleanup leaks on denial" bugs. See §6 "Per-request finish hook".
 
 Breaking changes will be announced in `CHANGELOG.md` (TBD) before a 1.0 tag.
@@ -850,7 +960,7 @@ Breaking changes will be announced in `CHANGELOG.md` (TBD) before a 1.0 tag.
 
 - `pipeline.go` — `Pipeline` type, `New`, `Run`, `RunResponse`, `Start`, `Stop`, `Plugins`, `NeedsBody`, `WritesRequestBody`, `WritesResponseBody`.
 - `holder.go` — `Holder`, the atomic slot listeners hold in place of a raw `*Pipeline`.
-- `plugin.go` — `Plugin` interface, `PluginCapabilities` (with `ReadsBody` / `WritesRequestBody` / `WritesResponseBody` + `Normalize()`; chain-scoped relationship fields `Requires` / `RequiresAny` / `After` / `Claims`), `Configurable`, `Initializer`, `Shutdowner`, `Readier`, `Finisher`.
+- `plugin.go` — `Plugin` interface, `PluginCapabilities` (with `ReadsBody` / `WritesRequestBody` / `WritesResponseBody` + `Normalize()`; chain-scoped relationship fields `Requires` / `RequiresAny` / `RequiresLater`), `Configurable`, `Initializer`, `Shutdowner`, `Readier`, `Finisher`.
 - `outcome.go` — `Outcome` struct + `OutcomeAction` (allow / deny / error) for `Finisher` consumers; `Context.Outcome()` getter.
 - `action.go` — `Action`, `ActionType`, `Violation`, helper constructors (`Deny`, `DenyStatus`, `DenyWithDetails`, `Challenge`, `RateLimited`), `StatusFromCode`.
 - `context.go` — `Context`, `Direction`, `AgentIdentity`, the `pctx.Record` / `Allow` / `Skip` / `Observe` / `Modify` / `DenyAndRecord` helpers, and `pctx.SetBody` / `SetResponseBody` / `BodyMutated` / `ResponseBodyMutated` for body mutation.
@@ -863,5 +973,5 @@ Breaking changes will be announced in `CHANGELOG.md` (TBD) before a 1.0 tag.
 - `core/session/` — `Store`, `SessionSummary`, ring buffer, TTL / max-events caps.
 - `core/sessionapi/` — HTTP API (`/v1/sessions`, `/v1/events`, `/v1/pipeline`) surfacing all of the above.
 - `core/plugins/` — built-in plugin implementations and registry.
-- `cmd/authbridge/listener/extproc/` — reference usage for all three phases.
+- `core/listener/extproc/` — reference usage for all three phases.
 - `cmd/agentop/` — TUI consumer of the session API, useful as a reference integrator.

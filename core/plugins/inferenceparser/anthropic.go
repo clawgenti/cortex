@@ -316,10 +316,14 @@ type anthropicStreamEvent struct {
 	} `json:"content_block"`
 }
 
-// anthropicToolCallState accumulates one streamed tool call. The id and name
-// arrive on content_block_start; the arguments follow as a series of
-// input_json_delta fragments that are only valid JSON once concatenated.
-type anthropicToolCallState struct {
+// toolCallState accumulates one streamed tool call, for either dialect that
+// fragments one across frames. Anthropic: the id and name arrive on
+// content_block_start, the arguments as input_json_delta fragments. OpenAI
+// Chat Completions: the id and name arrive on the first delta.tool_calls
+// fragment for an index, the arguments as function.arguments fragments. In
+// both, the arguments are only valid JSON once every fragment is
+// concatenated.
+type toolCallState struct {
 	id   string
 	name string
 	args strings.Builder
@@ -329,11 +333,11 @@ type anthropicToolCallState struct {
 // The entry is pointer-held: a strings.Builder must not be copied once used,
 // which a value slice would do the moment append reallocates.
 func (s *inferenceStreamState) openAnthropicTool(index *int, id, name string) {
-	tc := &anthropicToolCallState{id: id, name: name}
+	tc := &toolCallState{id: id, name: name}
 	s.toolCalls = append(s.toolCalls, tc)
 	if index != nil {
 		if s.toolsByIndex == nil {
-			s.toolsByIndex = map[int]*anthropicToolCallState{}
+			s.toolsByIndex = map[int]*toolCallState{}
 		}
 		s.toolsByIndex[*index] = tc
 	}
@@ -343,7 +347,7 @@ func (s *inferenceStreamState) openAnthropicTool(index *int, id, name string) {
 // anthropicTool resolves the tool call a delta belongs to. Nil index falls
 // back to the most recently opened call — blocks are emitted sequentially,
 // so that is the same call the index would have named.
-func (s *inferenceStreamState) anthropicTool(index *int) *anthropicToolCallState {
+func (s *inferenceStreamState) anthropicTool(index *int) *toolCallState {
 	if index != nil {
 		if tc, ok := s.toolsByIndex[*index]; ok {
 			return tc

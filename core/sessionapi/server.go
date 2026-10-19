@@ -199,6 +199,7 @@ func New(addr string, store *session.Store, opts ...Option) *Server {
 	mux.HandleFunc("GET /v1/sessions", s.handleList)
 	mux.HandleFunc("DELETE /v1/sessions", s.handleClear)
 	mux.HandleFunc("GET /v1/sessions/{id}", s.handleGet)
+	mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleDelete)
 	mux.HandleFunc("GET /v1/sessions/{id}/events/{seq}", s.handleGetEvent)
 	mux.HandleFunc("GET /v1/events", s.handleStream)
 	mux.HandleFunc("GET /v1/pipeline", s.handlePipeline)
@@ -245,6 +246,8 @@ const indexBody = `Cortex / AuthBridge Session API
                           ?view=summary drops message bodies, ~163x smaller)
   GET /v1/sessions/{id}/events/{seq}
                           one event in full, payloads included
+  DELETE /v1/sessions/{id}
+                          erase one session, memory and disk (laptop only)
   GET /v1/events          SSE stream of new events (?session=<id> to filter)
   GET /v1/pipeline        active plugin pipeline
   GET /v1/plugins         catalog of registered plugins

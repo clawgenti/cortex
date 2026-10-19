@@ -164,8 +164,7 @@ func TestReader_LongDataLineExceedsBufioBuffer(t *testing.T) {
 	}
 }
 
-// TestReader_LastEvent_Captured locks in the fix that lets a
-// re-framing proxy reproduce the upstream's "event:" line: after
+// TestReader_LastEvent_Captured: after
 // ReadFrame returns the data payload, LastEvent must return the
 // event type named on the preceding "event:" line.
 func TestReader_LastEvent_Captured(t *testing.T) {

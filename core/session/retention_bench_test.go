@@ -118,6 +118,70 @@ func BenchmarkRetainedHeapWithTools(b *testing.B) {
 	}
 }
 
+// benchToolResults builds the tool results one turn re-sends: every earlier result plus
+// one new one, as a parser rebuilds them. The content is sized like a real result (a
+// whole file); the id is the ~20 bytes a "toolu_…"/"call_…" identifier actually is, which
+// is the point — it sits under InternMinLen and is interned by internID, not intern.
+func benchToolResults(turn int) []pipeline.InferenceToolResult {
+	out := make([]pipeline.InferenceToolResult, 0, turn)
+	for i := 0; i < turn; i++ {
+		out = append(out, pipeline.InferenceToolResult{
+			ToolUseID: fmt.Sprintf("toolu_%03d", i),
+			Content:   fmt.Sprintf("result %03d: %s", i, strings.Repeat("output text ", 20)),
+		})
+	}
+	return out
+}
+
+// BenchmarkRetainedHeapWithToolResults reports what the tool-result headers cost a
+// session — the term neither benchmark above exercises, because it is not the content
+// (already interned by threshold) but the PER-EVENT headers: the slice of
+// {ToolUseID, IsError} structs plus the id strings, which repeat across events while
+// being too short for intern's floor. internID removed the string half; the struct
+// headers remain, and this is the number that prices them.
+//
+// Measured when this was written, 300 turns of a session whose tool results also carry
+// interned ~240-byte contents: 4.99 MB/session with the ids duplicated (internID
+// disabled), 4.32 MB after — 0.67 MB of pure id duplication, against ~2 MB of struct
+// headers that no string sharing can remove. The id term grows with the square of the
+// turn count for the same reason the conversation's duplication did; on a session of
+// chatty tool use it is the difference between the transcript and the transcript plus
+// a copy of every id per turn.
+//
+// Reported rather than asserted, for the reasons on BenchmarkRetainedHeap:
+//
+//	go test ./session/ -bench RetainedHeapWithToolResults -run '^$' -benchtime 1x
+func BenchmarkRetainedHeapWithToolResults(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		runtime.GC()
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+
+		s := New(0, 0, 100)
+		for turn := 1; turn <= benchTurns; turn++ {
+			// A tunnel-open between the turns, for the reason every fixture here
+			// carries one — see BenchmarkRetainedHeapWithTools.
+			s.Append("s1", pipeline.SessionEvent{Tunnel: true, Host: "gateway:443"})
+			s.Append("s1", pipeline.SessionEvent{
+				Inference: &pipeline.InferenceExtension{
+					Messages:    benchConversation(turn),
+					ToolResults: benchToolResults(turn),
+				},
+			})
+		}
+
+		runtime.GC()
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		delta := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+		b.ReportMetric(float64(delta)/1048576, "MB/session")
+		b.ReportMetric(float64(benchTurns), "turns")
+
+		s.Close()
+		runtime.KeepAlive(s)
+	}
+}
+
 // BenchmarkRetainedHeap reports the heap a finished session holds, which is the number
 // this package's interning exists to move.
 //

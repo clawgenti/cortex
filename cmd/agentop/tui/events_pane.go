@@ -172,13 +172,13 @@ func (m *model) rebuildEventsTable() {
 	// TOKENS and COST keys need to reach their paired response — and that context
 	// only exists here. nil when no sort is active, so the default path allocates
 	// nothing.
-	var keys []sortValue
+	var keys []rowKey
 	var sortCol *eventColumn
 	if m.sortCol != "" {
 		for i := range eventColumns {
 			if eventColumns[i].id == m.sortCol && eventColumns[i].sortKey != nil {
 				sortCol = &eventColumns[i]
-				keys = make([]sortValue, 0, len(eventRows))
+				keys = make([]rowKey, 0, len(eventRows))
 				break
 			}
 		}
@@ -236,8 +236,15 @@ func (m *model) rebuildEventsTable() {
 		// Keyed from the SAME cellContext that just rendered the row, so the value
 		// sorted on and the value displayed cannot come apart. cc.width stays zero
 		// here — render takes its own copy — and no sortKey reads it.
+		//
+		// exchange is the row's own ARRIVAL index, carried beside the key so the sort
+		// can group a pair without consulting a second slice. j indexes ctxs, which is
+		// every row before hideInactive drops any, so it is the one index that means
+		// the same thing in `partner` as it does here. The sort never reads it as a
+		// position in `keys` — only compares two of them — so the filter's gaps are
+		// harmless.
 		if sortCol != nil {
-			keys = append(keys, sortCol.sortKey(cc))
+			keys = append(keys, rowKey{val: sortCol.sortKey(cc), exchange: j})
 		}
 	}
 	// Sort the OUTPUT, never the input. buildEventRows' tunnel fold, the backward
@@ -246,6 +253,11 @@ func (m *model) rebuildEventsTable() {
 	// time we get here — so reordering the finished rows leaves the exchange
 	// numbering and the paired figures exactly as they were.
 	if sortCol != nil {
+		// Pairs fold only where the column asks for it. See eventColumn.pairFold for
+		// why DURATION and STATUS do and TOKENS and COST must not.
+		if sortCol.pairFold {
+			foldPairKeys(keys, partner)
+		}
 		sortEventRows(rows, m.visibleRows, full, keys, m.sortDesc)
 	}
 	// Columns are re-set only when they actually differ, and in an order that keeps
@@ -374,6 +386,83 @@ func (m *model) rebuildEventsTable() {
 	setCursorVisible(&m.eventsTbl, target)
 }
 
+// foldPairKeys gives both rows of one exchange the SAME sort key, so a sort can
+// never separate a request from its response (#1251).
+//
+// THE PROBLEM IS NOT THE SORT, IT IS THAT THE TWO ROWS CARRY DIFFERENT DATA. A
+// response row holds the figures the proxy only knows once the call returned —
+// DURATION, STATUS, the response token count — and the request row holds none of
+// them. So sorting by DURATION put every response in the ordered region and sank
+// every request into the zero group, and an operator reading the slowest call saw
+// its response eleven rows above the request that caused it. The reporter asked
+// whether the sorting was wrong; it was faithfully sorting rows that should not
+// have been ranked independently.
+//
+// THE EXCHANGE IS THE UNIT A READER SORTS BY. "The slowest call" names an
+// exchange, not one of its two rows, so the fix is to rank exchanges and keep each
+// one's rows together — which is what the # column has always claimed by giving a
+// request and its response one number.
+//
+// ONLY FOR THE COLUMNS THAT ASK — eventColumn.pairFold, today DURATION and STATUS.
+// TOKENS and COST deliberately do not: each of their rows already carries a real
+// figure of its own (prompt on the request, completion on the response), so folding
+// them would make the sort disagree with the number on screen.
+//
+// MAX, not the response's key. On a pairFold column the request's key is the zero
+// one, so the max IS the response's — but writing it as max keeps this function
+// honest for any future column where the request holds the larger figure, and means
+// it cannot invent a number neither row had.
+//
+// UNPAIRED ROWS ARE LEFT ALONE: a fire-and-forget request with no response, a
+// response whose request was evicted, and an opaque tunnel's two rows when
+// computeEventPairs could not match them. Each keeps its own key and ranks on its
+// own, which is right — there is no exchange to speak for.
+//
+// A FOLDED PAIR ALSO SHARES ONE exchange, the REQUEST's arrival index, and that is
+// what keeps the two rows adjacent. Equal keys alone do not: two exchanges that tie
+// — overlapping 200s on STATUS, the common case, since almost everything is 200 —
+// would keep arrival order and interleave as req/req/resp/resp. sortEventRows
+// tie-breaks on exchange, so rows of one exchange sort as a block whatever else
+// ties with them, and request-before-response inside the block is a third tier that
+// a descending sort does not reverse.
+//
+// KEYED BY `partner`'s INDEX SPACE, NOT BY POSITION IN keys. partner counts over
+// every row the session has; keys holds only the rows that survived hideInactive. A
+// single hidden row makes those two disagree, and folding by position then merged
+// the wrong rows' keys — a complete hidden pair happens to shift by two and give the
+// right answer, which is why a fixture of whole pairs cannot catch it. byExchange
+// maps an arrival index to its row, so a filtered-out row is simply absent.
+func foldPairKeys(keys []rowKey, partner map[int]int) {
+	byExchange := make(map[int]int, len(keys))
+	for pos := range keys {
+		byExchange[keys[pos].exchange] = pos
+	}
+	for i, j := range partner {
+		// partner is bidirectional, so every pair appears twice. Fold on the lower
+		// index only: doing it from both ends is harmless with max, but doing it once
+		// makes the single write obvious and halves the work.
+		if i >= j {
+			continue
+		}
+		// Either row may have been filtered out, and a half-visible pair has no
+		// exchange to speak for: the visible row keeps its own key and its own
+		// arrival index, exactly as an unpaired row does.
+		pi, iOK := byExchange[i]
+		pj, jOK := byExchange[j]
+		if !iOK || !jOK {
+			continue
+		}
+		folded := keys[pi].val
+		if folded.less(keys[pj].val) {
+			folded = keys[pj].val
+		}
+		// i is the lower arrival index of the two, which for a request/response pair
+		// is the request — the exchange's identity, and min(i, partner[i]).
+		keys[pi] = rowKey{val: folded, exchange: i}
+		keys[pj] = rowKey{val: folded, exchange: i}
+	}
+}
+
 // sortEventRows reorders the rendered rows by their sort keys (#865).
 //
 // Permutes rows and visible AS A UNIT, because the table cursor indexes both:
@@ -389,7 +478,7 @@ func (m *model) rebuildEventsTable() {
 // Sorts an index permutation rather than swapping three slices in the comparator,
 // so each row's key travels with it without the comparator having to reorder keys
 // as it reads them.
-func sortEventRows(rows []table.Row, visible []eventRow, full []table.SearchRow, keys []sortValue, desc bool) {
+func sortEventRows(rows []table.Row, visible []eventRow, full []table.SearchRow, keys []rowKey, desc bool) {
 	if len(rows) != len(keys) || len(rows) != len(visible) {
 		// Defensive: a length mismatch means the loop above stopped appending to one
 		// of the three in step. Sorting on a short key slice would panic; leaving the
@@ -400,12 +489,37 @@ func sortEventRows(rows []table.Row, visible []eventRow, full []table.SearchRow,
 	for i := range idx {
 		idx[i] = i
 	}
+	// THREE TIERS, and only the first one reverses.
+	//
+	//  1. the column's key, flipped for descending — what the operator asked for.
+	//  2. the exchange, ascending always. Rows of one exchange share it (foldPairKeys
+	//     gives both the request's arrival index), so they sort as a block and nothing
+	//     that merely ties on the key can land between them. Equal keys are the norm
+	//     rather than the exception — on STATUS almost everything is 200 — so without
+	//     this two overlapping exchanges interleave as req/req/resp/resp.
+	//  3. arrival order within the block, ascending always: request, then response.
+	//
+	// Tiers 2 and 3 do NOT flip, and that is the point rather than an oversight. An
+	// exchange reads request-then-response at both ends of the sort, because the
+	// pair's internal order is a fact about the exchange and not a ranking the
+	// operator reversed. Descending flips which exchange comes first, never what an
+	// exchange looks like.
+	//
+	// Both tiers compare arrival indexes without indexing anything by them, so the
+	// gaps hideInactive leaves in that numbering cost nothing.
 	sort.SliceStable(idx, func(a, b int) bool {
-		ka, kb := keys[idx[a]], keys[idx[b]]
-		if desc {
-			return kb.less(ka)
+		ia, ib := idx[a], idx[b]
+		ka, kb := keys[ia], keys[ib]
+		switch {
+		case ka.val.less(kb.val):
+			return !desc
+		case kb.val.less(ka.val):
+			return desc
+		case ka.exchange != kb.exchange:
+			return ka.exchange < kb.exchange
+		default:
+			return ia < ib
 		}
-		return ka.less(kb)
 	})
 
 	outRows := make([]table.Row, len(rows))

@@ -125,9 +125,11 @@ list. Claude Code is the only agent it can build a list for. See
 
 ## Switching inference servers
 
-With more than one LiteLLM server, `agentop server` — or `S` on agentop's agents
-pane — chooses which one Claude Code's **new** sessions use, with one Claude Code
-configuration and without restarting anything. A running conversation stays on
+With more than one inference server — a LiteLLM gateway, or a local model
+server such as Ollama ([setting one up](../laptop-local-model.md)) —
+`agentop server` — or `S` on agentop's agents pane — chooses which one Claude
+Code's **new** sessions use, with one Claude Code configuration and without
+restarting anything. A running conversation stays on
 the server it started on, with the exceptions below.
 See [Choosing an inference server](../../cmd/agentop/README.md#choosing-an-inference-server-agentop-server).
 
@@ -174,6 +176,17 @@ chose, since a new session's title request can arrive before its opening turn, a
 a subagent's request addressed to one of the servers stays on it. Pins are kept in `~/.cortex/plugin-state.json`,
 so a proxy restart moves no conversation.
 
+A running session can also be **moved** on purpose: `agentop server move
+<session-id> <server>` (or `own`, to stop routing it), or `S` on its row in
+agentop's sessions pane. The move is the one thing that moves a running
+conversation, it says what it costs first — the session's whole context is re-sent
+uncached on its first turn at the new server — and the reasoning blocks only the
+old server can read are dropped from what the new server is sent. A move back
+to that server gets them back. What a server loses: nothing, for Anthropic-origin
+thinking, whose text is empty (encrypted); the readable reasoning text, when the
+old server was GLM or Ollama. Claude Code notices nothing: its own transcript is unchanged, and it keeps naming the model it
+asked for.
+
 A conversation carried to a new session id is one Cortex did not see begin, so it
 goes where Claude Code sends it, and one routed to another server moves back; see
 [Known issues](#known-issues). That happens in three ways: Claude Code's
@@ -186,6 +199,14 @@ pins the session.
 Nothing fails over. When a session's server is down its requests fail, with a 502
 from the proxy when the server cannot be reached; route the agent to another
 server, and start a new session there.
+
+If the server's model has a smaller output limit or context window than the model
+the agent asked for, the router lowers the request's output limit (unless that would
+not leave it above an extended-thinking budget) and, near the window, drops the oldest
+turns, keeping the task and the recent turns. Turns are dropped from Anthropic messages
+and OpenAI chat-completions requests only; a responses-format request has only its
+output limit lowered. The agent's own view of the conversation is not changed. See the inference-router's Limits rule in
+`docs/plugin-catalog.md`.
 
 **`/model` may list a server's own names.** If Claude Code asks the gateway for its
 model list, that request is routed like the rest, so the picker can show, say,

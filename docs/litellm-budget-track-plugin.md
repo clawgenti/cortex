@@ -7,15 +7,18 @@ Design document for the `litellm-budget-track` AuthBridge pipeline plugin.
 ## Overview
 
 The `litellm-budget-track` plugin provides daily budget enforcement for AI agents
-proxied through LiteLLM. It reads the `x-litellm-response-cost` header from
-upstream LiteLLM responses, accumulates per-day spending, and rejects requests
-with HTTP 429 when the configured daily budget is exceeded.
+proxied through LiteLLM. It accumulates the per-request cost that
+`inference-parser` settles — authoritative from LiteLLM's
+`x-litellm-response-cost` header where present, modelled from token usage and
+the [`pricing:`](pricing.md) table otherwise — into a per-day ledger, and
+rejects requests with HTTP 429 when the configured daily budget is exceeded.
 
 ## Use Case
 
 When running AI agents through Cortex (local budget proxy), each agent needs
 a spending cap. LiteLLM returns the cost of each completion in the
-`x-litellm-response-cost` response header. This plugin reads that header in the
+`x-litellm-response-cost` response header, which `inference-parser` settles
+into a per-request cost record. This plugin accumulates that record in the
 AuthBridge pipeline that carries the LLM traffic (see [Pipeline placement](#pipeline-placement)),
 tracks cumulative daily spend in a JSON ledger file, and blocks further requests
 once the budget is exhausted.
@@ -23,12 +26,13 @@ once the budget is exhausted.
 ## Architecture
 
 ```
-Agent → cortex.py → AuthBridge (litellm-budget-track) → LiteLLM upstream
-                                    │
-                                    ├── OnRequest: check if budget exceeded → 429
-                                    └── OnResponse: read x-litellm-response-cost, accumulate
-                                           │
-                                           └── spend-authbridge.json (daily ledger)
+Agent → agentop exec / sidecar (litellm-budget-track) → LiteLLM upstream
+                              │
+                              ├── OnRequest: check if budget exceeded → 429
+                              └── OnResponseFrame: load the cost record inference-parser
+                                     settled, accumulate, amend
+                                     │
+                                     └── spend-authbridge.json (daily ledger)
 ```
 
 The plugin hooks:
@@ -55,22 +59,24 @@ The cost is settled **once**, on the terminal frame, from one of two sources:
   `-original` variant. Used whenever the header carries a usable positive cost. A
   header of `0` on a non-streamed response is a genuine free call (cache hit / error)
   and is charged `0` — it is **not** re-priced from usage.
-- **Parsed token usage × configured rates** — used only when the cost header is
+- **Parsed token usage × the `pricing:` table** — used only when the cost header is
   **absent**, or the response is `text/event-stream` (LiteLLM always reports `0` in the
-  header for streams, e.g. Claude Code's `/v1/messages`). The plugin sums the token
+  header for streams, e.g. Claude Code's `/v1/messages`). The parser sums the token
   usage from the terminal SSE events and prices each **prompt-cache tier separately**:
-  uncached input × `input_cost_per_token`, cache writes × `cache_write_cost_per_token`,
-  cache reads × `cache_read_cost_per_token`, output × `output_cost_per_token`. Without
-  any input rate a streamed response contributes `0`.
+  uncached input × `input_cost_per_million`, cache writes ×
+  `cache_write_cost_per_million`, cache reads × `cache_read_cost_per_million`,
+  output × `output_cost_per_million` — the top-level [`pricing:`](pricing.md) keys,
+  not fields of this plugin. A tier with no rate leaves the model unpriced for it,
+  named in `/v1/usage`'s `unpricedBy`.
 
   **Cache tiers matter.** Providers charge a premium to *write* a cache entry and a
   steep discount to *read* one, so two requests with identical prompt-token counts can
-  differ ~10× in price. If `cache_write_cost_per_token` / `cache_read_cost_per_token`
-  are unset they default to `input_cost_per_token` (flat pricing), which **overstates
-  cache-heavy traffic like Claude Code by up to ~10×** and would trip the 429 that much
-  earlier. Set the two cache rates to your provider's real prices for accurate budgets.
-  (This only affects the usage-fallback path; when LiteLLM's `x-litellm-response-cost`
-  header is present it already accounts for cache tiers and wins.)
+  differ ~10× in price. There is no cache-to-input fallback: a model whose
+  `cache_write_cost_per_million` / `cache_read_cost_per_million` are unset is unpriced
+  on those tiers, not flat-priced — set the two cache rates to your provider's real
+  prices for accurate budgets. (This only affects the usage-fallback path; when
+  LiteLLM's `x-litellm-response-cost` header is present it already accounts for cache
+  tiers and wins.)
 
 > **envoy-sidecar note.** Because the plugin declares `ReadsBody`, the extproc listener
 > requests `ResponseBodyMode: BUFFERED` — so on the envoy-sidecar path the SSE body is
@@ -109,8 +115,8 @@ pipeline:
 The plugin is direction-agnostic — place it in whichever pipeline carries the LLM
 traffic: **`inbound`** when fronting the LLM endpoint (a reverse proxy the LLM requests
 arrive at, as shown above), **`outbound`** when hosting the agent via
-`rossoctl authbridge exec -- <agent>`, whose forward proxy runs the outbound pipeline on
-the agent's own egress to LiteLLM. In an `authbridge exec` setup nothing reaches the
+`agentop exec -- <agent>`, whose forward proxy runs the outbound pipeline on
+the agent's own egress to LiteLLM. In an `agentop exec` setup nothing reaches the
 inbound pipeline, so a plugin left under `inbound:` there records `$0` — use `outbound:`.
 
 | Field | Type | Required | Description |
@@ -154,17 +160,18 @@ The spend file (`spend-authbridge.json`) is a simple JSON object:
    ```
 4. Otherwise → continue pipeline
 
-### OnResponse (cost accumulation)
+### OnResponseFrame (cost accumulation)
 
-1. Read the cost from the **response** headers (`pctx.ResponseHeaders`):
-   `X-Litellm-Response-Cost`, falling back to `X-Litellm-Response-Cost-Original`
-   when the bare header is absent. The bare (effective, post-discount) header is
-   present on OpenAI `/v1/chat/completions` responses; the Anthropic `/v1/messages`
-   endpoint used by Claude Code — and newer LiteLLM releases — emit only the
-   pre-discount `-original` variant.
-2. If missing or non-positive → continue (no cost to track)
+1. Load the **cost record** `inference-parser` settled for the request
+   (`settle.Load`). The parser is what reads LiteLLM's
+   `X-Litellm-Response-Cost` (falling back to the pre-discount `-original`
+   variant) and prices the response; this plugin holds no rates and resolves
+   no headers.
+2. No record, or one carrying no figure → continue: nothing to accumulate
 3. Lock mutex, reset if new day
-4. Add cost to `total_spend`, increment `total_calls`
+4. Add the settled cost to `total_spend`, increment `total_calls`, and
+   annotate the record through `settle.Amend`; the drift check against the
+   gateway's own figure runs before accumulation and WARN-logs only
 5. Write ledger to disk
 6. Continue pipeline
 
@@ -232,12 +239,13 @@ compile error rather than a silently blank column:
   total plus coverage in the usage footer. Its `tui.costEvent` is a type *alias*
   for `event.Event`, not a copy.
 
-Two consequences for reading `/v1/usage`. Cost is reported only for traffic this
-plugin priced, so requests it did not price appear as the gap between
-`totals.pricedRequests` and `totals.requests` — a client rendering a dollar total
-from a window where those differ must present it as partial, not complete. And
-`priced:false` means nothing at all was priced: render "cost unavailable", never
-`$0.00`, which would read as "this traffic was free".
+Two consequences for reading `/v1/usage`. Cost is settled by
+`inference-parser` and reaches `/v1/usage` whether or not this plugin is
+configured, so requests no rate covers appear as the gap between
+`totals.pricedRequests` and `totals.priceableRequests` — a client rendering a
+dollar total from a window where those differ must present it as partial, not
+complete. And `priced:false` means nothing at all was priced: render "cost
+unavailable", never `$0.00`, which would read as "this traffic was free".
 
 Modelled rates for traffic with no cost event arrive with the pricing resolver —
 see [`superpowers/specs/2026-09-09-pricing-consolidation-design.md`](./superpowers/specs/2026-09-09-pricing-consolidation-design.md).
@@ -261,23 +269,26 @@ package main
 import _ "github.com/rossoctl/cortex/core/plugins/litellm_budgettrack"
 ```
 
-## Integration with Cortex
+## Configuring it
 
-Cortex generates the AuthBridge config on startup, embedding the plugin
-in the inbound pipeline with the correct `spend_file` path and `max_budget`
-from the CLI flags:
+The plugin is configured through the runtime config — the
+`authbridge-runtime-config` ConfigMap in a cluster, `~/.cortex/config.yaml` on a
+local install — with the `spend_file` path and `max_budget` in its `config:`
+block:
 
-```bash
-# rossoctlx.py start --budget 5.00
-# → generates config.yaml with litellm-budget-track plugin
-#   spend_file = ~/.config/cortex/spend-authbridge.json
-#   max_budget = 5.00
+```yaml
+pipeline:
+  inbound:
+    plugins:
+      - name: litellm-budget-track
+        config:
+          spend_file: /var/lib/authbridge/spend-authbridge.json
+          max_budget: 5.00
 ```
 
-The plugin complements cortex.py's own budget tracking (which reads
-the same `x-litellm-response-cost` header on direct HTTP requests). For
-CONNECT-tunneled traffic that flows through AuthBridge's TLS bridge,
-the plugin is the only cost-tracking mechanism.
+For CONNECT-tunneled traffic that flows through the TLS bridge, this plugin is
+the only cost-tracking mechanism — see [`docs/pricing.md`](pricing.md) for how
+the cost pipeline prices the same traffic from model rates.
 
 ## Testing
 
@@ -360,7 +371,7 @@ That matters because **streamed responses have no authoritative cost** — the g
 reports 0 in the header by design, since the total is unknown when headers are sent. So a
 misconfigured rate table is invisible on exactly the traffic an agent generates. The
 occasional non-streamed call is the only place the error is observable, and this is what
-looks.
+it looks like.
 
 Once per endpoint and model, not per request: an agent makes thousands of calls, and a
 per-request warning would bury every other line in the log.

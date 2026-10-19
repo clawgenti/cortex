@@ -4,59 +4,6 @@ Cortex provides **secure, transparent token management** for Kubernetes workload
 
 > **📘 Looking to run the demo?** See the [Weather Agent](../demos/weather-agent/demo-ui.md) or [GitHub Issue Agent](../demos/github-issue/demo.md) demos for step-by-step instructions, and [Token-Exchange Routes](../demos/token-exchange-routes/README.md) for route configuration.
 
-## Download prebuilt binaries
-
-Prefer not to compile from source? Every `v*` release attaches prebuilt `agentop` (the
-session-inspector TUI) and `cortex` binaries for linux and macOS (amd64 +
-arm64) on the [Releases page](https://github.com/rossoctl/cortex/releases).
-
-```sh
-VER=v0.1.0                 # a released tag
-OS=darwin ARCH=arm64       # one of: linux/darwin × amd64/arm64
-base="https://github.com/rossoctl/cortex/releases/download/${VER}"
-
-curl -fsSLO "${base}/agentop_${VER}_${OS}_${ARCH}.tar.gz"
-curl -fsSLO "${base}/checksums.txt"
-sha256sum -c checksums.txt --ignore-missing    # macOS: shasum -a 256 -c ... --ignore-missing
-tar xzf "agentop_${VER}_${OS}_${ARCH}.tar.gz"
-sudo mv agentop /usr/local/bin/                # onto PATH
-agentop --version
-```
-
-`cortex` ships the same way (`cortex_${VER}_${OS}_${ARCH}.tar.gz`).
-
-- **Linux** binaries are fully static (`CGO_ENABLED=0`) — no libc dependency, run anywhere.
-- **macOS** binaries are portable but unsigned; after extracting, clear the Gatekeeper
-  quarantine once: `xattr -dr com.apple.quarantine ./agentop` (or `codesign --sign - ./agentop`).
-
-Building from source: `make agentop` or `make cortex` from the repo
-root. `cortex` defaults to the `full` plugin profile; pass
-`PROFILE=lite` or `local` for smaller sets. See
-[Build-tag plugin selection](#build-tag-plugin-selection) for the underlying
-`go build` invocations.
-
-To run what you just built, `make dev-install` from the repo root builds both
-binaries into `./bin` and hands them to the agentop just built:
-`./bin/agentop setup --from ./bin --yes --no-modify-path --restart`, the same setup
-a release install runs. Setup installs them to `~/.local/bin` (where a release
-install puts them too) and restarts the local service so the new bytes are serving.
-It works on a machine that has never run Cortex — it writes the built-in config
-first — and it accepts the same `PROFILE=`. It never edits your shell profile;
-setup says so when `~/.local/bin` is not on PATH. `--restart` makes it restart
-every time, which cuts whatever is currently talking to the proxy and clears the
-in-memory session store; agents themselves keep working without restarting,
-because the CA in `~/.cortex/ca` is reused rather than re-minted.
-
-`PROFILE` has to satisfy the config you are running. `~/.cortex/config.yaml` names the
-plugins it wants, and a profile that omits one is a fatal error at startup rather than a
-reduced feature set — `PROFILE=lite` against a config using `inference-parser` will not
-start at all. What you find afterwards differs by platform: macOS restarts it
-indefinitely (the plist supervises the proxy, which backs off between attempts), while
-Linux gives up after five failures inside five minutes and leaves the unit `failed`, so
-there you get a stopped service rather than a looping one. Either way the proxy logs the
-missing plugin and the set it does have, and `agentop service status` shows the last log
-lines; the default `full` avoids the question.
-
 ## Deployment Modes
 
 Sidecar container images:
@@ -87,6 +34,35 @@ See [`docs/plugin-catalog.md`](./plugin-catalog.md) for the full list of impleme
 ## Architecture (Operator-Injected)
 
 The following describes the operator-injected sidecar deployment. After cortex#411 each mode is served by its own image (one container per pod). SPIRE credentials are fetched **in-process** by `core/spiffe`'s Provider over the Workload API. The legacy `authbridge-unified`, `authbridge-light`, `envoy-with-processor`, and standalone `client-registration` / `spiffe-helper` sidecars are gone — there is no bundled `spiffe-helper` binary and `SPIRE_ENABLED` no longer gates anything.
+
+### `spiffe:` configuration
+
+One top-level `spiffe:` block in the runtime config drives the in-process
+Provider that supplies X.509-SVIDs to the mTLS listeners and a JWT-SVID to the
+`token-exchange` plugin (when its `identity.type` is `spiffe`). An absent block
+constructs no Provider at all.
+
+```yaml
+spiffe:
+  socket: "unix:///spiffe-workload-api/spire-agent.sock"   # SPIRE agent socket
+  mirror_files: true    # write the /opt mirror on every rotation (default)
+  mirror_dir: "/opt"    # where the mirror files land
+```
+
+- `socket` (string) — the SPIRE agent's Workload API socket. Must be a
+  `unix://` URL; anything else fails at startup rather than at first dial.
+  Default `unix:///spiffe-workload-api/spire-agent.sock`.
+- `mirror_files` (bool) — when true (the default), an in-process goroutine
+  writes `/opt/svid.pem`, `/opt/svid_key.pem`, `/opt/svid_bundle.pem` and
+  `/opt/jwt_svid.token` on every rotation, for external readers (e2e probes,
+  debugging, future Envoy filesystem SDS). The listeners themselves read SVIDs
+  in memory and never re-read the files.
+- `mirror_dir` (string) — directory for the mirror files, default `/opt`. Only
+  used when `mirror_files` is true.
+
+The JWT-SVID audience that `token-exchange` uses as a client assertion is
+per-plugin (`token-exchange`'s `identity.jwt_audience`), not part of this block.
+
 
 ### What Cortex Does
 
@@ -159,8 +135,8 @@ Cortex solves the challenge of **secure service-to-service authentication** in K
 ```mermaid
 flowchart TB
     subgraph WorkloadPod["WORKLOAD POD (with AuthBridge sidecar)"]
-        subgraph Init["Init Container (envoy-sidecar mode only)"]
-            ProxyInit["proxy-init<br/>(iptables setup)"]
+        subgraph Init["Init Container (always injected)"]
+            ProxyInit["proxy-init<br/>(iptables: traffic interception in<br/>envoy-sidecar mode, egress guard<br/>in proxy-sidecar/lite)"]
         end
         subgraph Containers["Containers"]
             App["Your Application"]
@@ -210,16 +186,17 @@ flowchart TB
 ### Workload Pod
 
 After cortex#411 a workload pod has the application
-container plus a single combined AuthBridge sidecar. In
-envoy-sidecar mode it also has a one-shot `proxy-init` init
-container; in proxy-sidecar mode (the cluster default) it does
-not. SVIDs are fetched in-process by the sidecar over the SPIRE
+container plus a single combined AuthBridge sidecar. It also has a one-shot
+`proxy-init` init container in every mode: in envoy-sidecar mode it intercepts
+inbound and outbound traffic, and in proxy-sidecar mode (the cluster default)
+and `lite` it runs the always-on `enforce-redirect` egress guard. SVIDs are
+fetched in-process by the sidecar over the SPIRE
 Workload API — there is no `spiffe-helper` container — and client
 registration runs in the operator, not the pod.
 
 | Component | Type | Mode | Purpose |
 |-----------|------|------|---------|
-| `proxy-init` | init | envoy-sidecar only | Sets up iptables to intercept inbound and outbound traffic (excludes Keycloak port to avoid token-exchange loops) |
+| `proxy-init` | init | all modes | Envoy-sidecar: iptables intercept inbound and outbound traffic (excludes Keycloak port to avoid token-exchange loops). Proxy-sidecar/lite: the `enforce-redirect` egress guard, always-on. See [`deploy/proxy-init/README.md`](../deploy/proxy-init/README.md). |
 | `Your App` | container | both | Your application |
 | `authbridge-proxy` | container | proxy-sidecar (default) | Sidecar from the `authbridge` image: HTTP forward + reverse proxies, full plugin set (jwt-validation + token-exchange + a2a/mcp/inference parsers). Fetches SVIDs in-process. |
 | `envoy-proxy` | container | envoy-sidecar | Combined sidecar from the `authbridge-envoy` image: Envoy + ext_proc. Validates inbound JWTs (signature + issuer via JWKS) and exchanges outbound tokens; HTTPS is TLS-passthrough. |
@@ -230,22 +207,24 @@ Any downstream service that validates incoming tokens have the expected audience
 
 ## End-to-End Flow
 
-**Initialization (Workload Pod Startup):**
+**Initialization (out of band, before/at pod startup):**
 ```
-  SPIRE Agent             Workload Pod                        Keycloak
+  SPIRE Agent             AuthBridge Sidecar                Keycloak
        │                        │                                │
-       │  0. SVID               │                                │
-       │───────────────────────►│  SPIFFE Helper                 │
-       │  (SPIFFE ID)           │                                │
+       │  0. SVIDs              │                                │
+       │───────────────────────►│  (fetched in-process by        │
+       │  (SPIFFE ID,           │   core/spiffe's Provider over  │
+       │   rotated)             │   the Workload API — no        │
+       │                        │   spiffe-helper container)     │
        │                        │                                │
-       │                        │  1. Register client            │
-       │                        │  (client_id = SPIFFE ID)       │
-       │                        │───────────────────────────────►│
-       │                        │  Client Registration           │
-       │                        │                                │
-       │                        │◄───────────────────────────────│
-       │                        │  client_secret                 │
-       │                        │  (saved to /shared/)           │
+       │                        │  1. Read client credentials    │
+       │                        │◄─── /shared/client-{id,secret}.txt
+       │                        │    (operator's ClientRegistration-
+       │                        │     Reconciler registered the
+       │                        │     workload out of band,       │
+       │                        │     client_id = SPIFFE ID,      │
+       │                        │     and the webhook mounts the  │
+       │                        │     Secret it created)          │
 ```
 
 **Runtime Flow:**
@@ -303,8 +282,8 @@ Any downstream service that validates incoming tokens have the expected audience
 
 | Step | Component | Verification |
 |------|-----------|--------------|
-| 0 | SPIFFE Helper | SVID obtained from SPIRE Agent |
-| 1 | Client Registration | Workload registered with Keycloak (client_id = SPIFFE ID) |
+| 0 | AuthBridge sidecar (`core/spiffe` Provider) | SVID obtained in-process from the SPIRE Agent over the Workload API |
+| 1 | Operator (`ClientRegistrationReconciler`) | Workload registered with Keycloak out of band (client_id = SPIFFE ID); credentials mounted at `/shared/` |
 | 2 | Caller | Token obtained with `aud: Workload's SPIFFE ID` |
 | 3 | Envoy + Ext Proc (inbound) | Inbound JWT validated: signature verified via JWKS, issuer checked, optional audience check. Returns 401 if invalid. |
 | 4 | Workload | Validated request forwarded to application |
@@ -320,19 +299,19 @@ Any downstream service that validates incoming tokens have the expected audience
 sequenceDiagram
     autonumber
     participant SPIRE as SPIRE Agent
-    participant Helper as SPIFFE Helper
-    participant Reg as Client Registration
+    participant Sidecar as AuthBridge sidecar
+    participant Operator as operator (ClientRegistrationReconciler)
     participant Caller as Caller
     participant App as Workload
-    participant Envoy as AuthProxy (Envoy + Ext Proc)
+    participant Envoy as Sidecar listeners (Envoy + Ext Proc, or proxies)
     participant KC as Keycloak
     participant Target as Target Service
 
-    Note over Helper,SPIRE: Workload Pod Initialization
-    SPIRE->>Helper: SVID (SPIFFE credentials)
-    Helper->>Reg: JWT with SPIFFE ID
-    Reg->>KC: Register client (client_id = SPIFFE ID)
-    KC-->>Reg: Client credentials (saved to /shared/)
+    Note over Operator,SPIRE: Out-of-band initialization
+    Operator->>KC: Register client (client_id = SPIFFE ID)
+    KC-->>Operator: Client credentials
+    Operator-->>Sidecar: Secret mounted at /shared/
+    SPIRE->>Sidecar: SVID (fetched in-process over the Workload API)
 
     Note over Caller,Target: Runtime Flow
     Caller->>KC: Get token (aud: Workload's SPIFFE ID)
@@ -364,25 +343,24 @@ sequenceDiagram
 
 | Step | From → To | Action |
 |------|-----------|--------|
-| **Initialization Phase** |||
-| 1 | SPIRE → SPIFFE Helper | Issue SVID (SPIFFE credentials) |
-| 2 | SPIFFE Helper → Client Registration | Pass JWT with SPIFFE ID |
-| 3 | Client Registration → Keycloak | Register client (`client_id` = SPIFFE ID) |
-| 4 | Keycloak → Client Registration | Return client credentials (saved to `/shared/`) |
+| **Initialization (out of band)** |||
+| 1 | Operator → Keycloak | Register client (`client_id` = SPIFFE ID) |
+| 2 | Keycloak → Operator | Return client credentials (Secret mounted at `/shared/` by the webhook) |
+| 3 | SPIRE → AuthBridge sidecar | Issue SVID, fetched in-process over the Workload API (no `spiffe-helper` container) |
 | **Runtime Phase — Inbound (JWT Validation)** |||
-| 5 | Caller → Keycloak | Request token (`aud`: Workload's SPIFFE ID) |
-| 6 | Keycloak → Caller | Return token with workload-aud scope |
-| 7 | Caller → Envoy (inbound) | Request intercepted by iptables, routed to Envoy inbound listener |
-| 8 | Envoy → Ext Proc | Validate JWT: signature (JWKS), issuer, optional audience. Returns 401 if invalid. |
-| 9 | Envoy → Workload | Forward validated request to application |
+| 4 | Caller → Keycloak | Request token (`aud`: Workload's SPIFFE ID) |
+| 5 | Keycloak → Caller | Return token with workload-aud scope |
+| 6 | Caller → Envoy (inbound) | Request intercepted by iptables, routed to Envoy inbound listener |
+| 7 | Envoy → Ext Proc | Validate JWT: signature (JWKS), issuer, optional audience. Returns 401 if invalid. |
+| 8 | Envoy → Workload | Forward validated request to application |
 | **Runtime Phase — Outbound (Token Exchange)** |||
-| 10 | Workload → Envoy (outbound) | Outbound request intercepted by iptables, routed to Envoy outbound listener |
-| 11 | Envoy → Ext Proc → Keycloak | Token Exchange (using Workload's credentials) |
-| 12 | Keycloak → Envoy | Return new token (`aud`: target-service) |
-| 13 | Envoy → Target Service | Forward request with exchanged token |
-| 14 | Target Service | Validate token (`aud`: target-service) |
-| 15 | Target Service → Workload | Return "authorized" |
-| 16 | Workload → Caller | Return response |
+| 9 | Workload → Envoy (outbound) | Outbound request intercepted by iptables, routed to Envoy outbound listener |
+| 10 | Envoy → Ext Proc → Keycloak | Token Exchange (using Workload's credentials) |
+| 11 | Keycloak → Envoy | Return new token (`aud`: target-service) |
+| 12 | Envoy → Target Service | Forward request with exchanged token |
+| 13 | Target Service | Validate token (`aud`: target-service) |
+| 14 | Target Service → Workload | Return "authorized" |
+| 15 | Workload → Caller | Return response |
 
 </details>
 
@@ -392,7 +370,7 @@ sequenceDiagram
 - **Short-Lived Tokens** - JWT tokens expire and must be refreshed
 - **Inbound JWT Validation** - Incoming requests are validated at the sidecar (signature via JWKS, issuer, optional audience) before reaching the application
 - **Self-Audience Scoping** - Tokens include the Workload's own identity as audience, enabling token exchange
-- **Same Identity for Exchange** - AuthProxy uses the Workload's credentials (same SPIFFE ID), matching the token's audience
+- **Same Identity for Exchange** - The sidecar uses the Workload's credentials (same SPIFFE ID), matching the token's audience
 - **Transparent to Application** - Both inbound validation and outbound token exchange are handled by the sidecar; applications don't need to implement either
 - **Configurable Targets** - Route-based configuration maps destination hosts to target audiences
 
@@ -409,16 +387,10 @@ The easiest way to get all prerequisites is to use the [Rossoctl Quickstart](htt
 
 ## Getting Started
 
-### Demos
-
-- **[Weather Agent Demo](../demos/weather-agent/demo-ui.md)** - Recommended starting demo: shows how the [operator](https://github.com/rossoctl/operator) webhook automatically injects the combined AuthBridge sidecar, with inbound JWT validation and outbound passthrough
-- **[GitHub Issue Agent Demo](../demos/github-issue/demo.md)** - End-to-end demo with the real GitHub Issue Agent and GitHub MCP Tool, showing transparent token exchange via AuthBridge
-  - [Manual deployment](../demos/github-issue/demo-manual.md) — deploy everything via `kubectl` and YAML manifests
-  - [UI deployment](../demos/github-issue/demo-ui.md) — import agent and tool via the Rossoctl dashboard
-- **[Token-Exchange Routes](../demos/token-exchange-routes/README.md)** - Configuration reference for the `authproxy-routes` ConfigMap; covers single-target (one route) and multi-target (one agent → many tools) patterns
-- **[Lineage Demo](../demos/lineage/README.md)** - Per-request data lineage from the sidecar on the Weather Agent pair, attached to the running Deployments with the [lineage attach kit](../deploy/lineage-attach/README.md); shows the same turn fragmented and then as one trace (no Keycloak involved)
-
-All demos except the Lineage Demo cover configuring Keycloak, deploying, and testing.
+See [`demos/README.md`](../demos/README.md) for the full demo index and a
+recommended learning path — from the Weather Agent (inbound validation, webhook
+injection) through the GitHub Issue Agent (transparent token exchange +
+scope-based access) to the token-exchange routes reference.
 
 ### Route-Based Configuration
 
@@ -527,7 +499,7 @@ when `-tags include_plugin_<name>` is passed.
 - [cmd/cortex](../cmd/cortex/) — proxy-sidecar binary (default mode, full plugin set)
 - [cmd/cortex-envoy](../cmd/cortex-envoy/) — envoy-sidecar binary (Envoy + ext_proc, full plugin set)
 - `authbridge-lite` image — `cmd/cortex` built with the `lite` profile (see `scripts/profile-tags`); a build variant, not a separate binary
-- [proxy-init](../deploy/proxy-init/README.md) — iptables init container (envoy-sidecar mode only)
+- [proxy-init](../deploy/proxy-init/README.md) — iptables init container (traffic interception in envoy-sidecar mode, `enforce-redirect` egress guard in proxy-sidecar/lite)
 - [docs/](./) — framework architecture and plugin author references
 
 Keycloak client registration is handled by the [operator](https://github.com/rossoctl/operator)'s `ClientRegistrationReconciler`, not by an in-pod sidecar.

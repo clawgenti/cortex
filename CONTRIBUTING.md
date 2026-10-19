@@ -1,4 +1,4 @@
-# Contributing to Rossoctl Extensions
+# Contributing to Cortex
 
 Greetings! We are grateful for your interest in joining the Rossoctl community and making a positive impact. Whether you're raising issues, enhancing documentation, fixing bugs, or developing new features, your contributions are essential to our success.
 
@@ -197,6 +197,48 @@ unfiltered parent resolves the rolling release as its version and installs unrel
 binaries. Cutting a release first stops that window growing; it cannot fix copies already
 published.
 
+## Prebuilt release binaries
+
+Prefer not to compile from source? Every `v*` release attaches prebuilt `agentop` (the
+session-inspector TUI) and `cortex` binaries for linux and macOS (amd64 +
+arm64) on the [Releases page](https://github.com/rossoctl/cortex/releases).
+
+```sh
+VER=v0.9.0                 # a released tag
+OS=darwin ARCH=arm64       # one of: linux/darwin × amd64/arm64
+base="https://github.com/rossoctl/cortex/releases/download/${VER}"
+
+curl -fsSLO "${base}/agentop_${VER}_${OS}_${ARCH}.tar.gz"
+curl -fsSLO "${base}/checksums.txt"
+sha256sum -c checksums.txt --ignore-missing    # macOS: shasum -a 256 -c ... --ignore-missing
+tar xzf "agentop_${VER}_${OS}_${ARCH}.tar.gz"
+sudo mv agentop /usr/local/bin/                # onto PATH
+agentop --version
+```
+
+`cortex` ships the same way (`cortex_${VER}_${OS}_${ARCH}.tar.gz`).
+
+- **Linux** binaries are fully static (`CGO_ENABLED=0`) — no libc dependency, run anywhere.
+- **macOS** binaries are portable but unsigned; after extracting, clear the Gatekeeper
+  quarantine once — `xattr -dr com.apple.quarantine ./agentop` (or `codesign --sign -
+  ./agentop`) — **before** `sudo mv` moves the binary out of the directory, while
+  `./agentop` still names it.
+
+`cortex` defaults to the `full` plugin profile when built with `make cortex`;
+pass `PROFILE=lite` or `local` for smaller sets. See
+[architecture.md's build-tag section](docs/architecture.md#build-tag-plugin-selection)
+for the underlying `go build` invocations.
+
+`PROFILE` has to satisfy the config you are running. `~/.cortex/config.yaml` names the
+plugins it wants, and a profile that omits one is a fatal error at startup rather than a
+reduced feature set — `PROFILE=lite` against a config using `inference-parser` will not
+start at all. What you find afterwards differs by platform: macOS restarts it
+indefinitely (the plist supervises the proxy, which backs off between attempts), while
+Linux gives up after five failures inside five minutes and leaves the unit `failed`, so
+there you get a stopped service rather than a looping one. Either way the proxy logs the
+missing plugin and the set it does have, and `agentop service status` shows the last log
+lines; the default `full` avoids the question.
+
 ## Release candidates
 
 A tag with `-rc`, `-alpha` or `-beta` in it publishes a **prerelease**: binaries and
@@ -215,7 +257,7 @@ Testers install it by name — the release page prints the same command — and 
 one-liner takes them back to the newest stable release afterwards:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh \
+curl -fsSL https://www.rossoctl.dev/cortex/install.sh \
   | sh -s -- --ref=v0.9.0-rc.1
 ```
 
@@ -278,16 +320,25 @@ All commits must be signed off (`git commit -s`) per the [Developer Certificate 
 
 ### PR Title Convention
 
-PRs must follow **conventional commits** format:
+PR titles must follow the format:
 
 ```
-<type>: <Subject starting with uppercase>
+<Prefix>: <Subject starting with uppercase>
 ```
 
-Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+The CI title check matches prefixes **case-insensitively** (the shared
+`pr-verifier` workflow sets `prefix_case_sensitive: false`), and
+`scripts/release_notes.sh` lowercases titles before matching, so `feat:` and
+`Feat:` both pass and both file the same way. The capitalized spelling is the
+repo's convention — the allowed set is written capitalized: `Build`, `Chore`,
+`CI`, `Docs`, `Feat`, `Fix`, `Perf`, `Refactor`, `Revert`, `Style`, `Test`,
+`Feature`, `Bug fix`, `Proposal`, `Breaking change`, `Other`, `Other/Misc`.
+Use it; nothing enforces the capitals.
 
-The type also decides where the PR appears in the release notes: `feat` under New features,
-`fix` and `perf` under Bug fixes, a `!` before the colon (`feat!:`) under Breaking changes,
+The prefix also decides where the PR appears in the release notes, which
+`scripts/release_notes.sh` builds from the PRs merged since the previous
+release: `Feat`/`Feature` under New features, `Fix`/`Bug fix`/`Perf` under Bug
+fixes, `Breaking change` (or a `!` before the colon) under Breaking changes,
 and everything else under a collapsed Other changes.
 
 ## Pull Requests
@@ -308,7 +359,7 @@ Smaller pull requests are typically easier to review and merge. If your pull req
   Always give `gofmt` a path — a bare `gofmt -l` reads stdin, so it scans nothing
   and exits 0. `gofmt -l .` also lists any pre-existing offenders, so check the
   names it prints are yours.
-- `go vet` is gated: all four `Go CI (…)` jobs run it, and a finding fails the job.
+- `go vet` is gated: all five `Go CI (…)` jobs run it, and a finding fails the job.
   `gofmt` is not — CI's lint step runs `go fmt`, which rewrites files and exits 0,
   so unformatted code still goes green. There are no Go hooks in pre-commit either.
 - Run per-module with `GOWORK=off` — how the root Makefile builds, and how every
@@ -325,7 +376,7 @@ Smaller pull requests are typically easier to review and merge. If your pull req
 
 ## Licensing
 
-Rossoctl Extensions is [Apache 2.0 licensed](LICENSE) and we accept contributions via
+Cortex is [Apache 2.0 licensed](LICENSE) and we accept contributions via
 GitHub pull requests.
 
 ## Certificate of Origin

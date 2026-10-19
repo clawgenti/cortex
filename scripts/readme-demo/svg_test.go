@@ -141,3 +141,51 @@ func TestEmitSVG_RejectsNoStates(t *testing.T) {
 		t.Error("want an error for an empty state list")
 	}
 }
+
+// A bar fills under a clip that starts at its first cell and steps one cell at a
+// time, and draws no cursor: install.sh hides the cursor while the bar is up.
+func TestEmitSVG_BarRevealStepsByCellWithNoCursor(t *testing.T) {
+	states := []State{{Label: "bar", Dur: 10 * time.Second, Final: true, Rows: []Row{
+		{Runs: []Run{{Text: "  ━━━━  100%"}}, Reveal: Reveal{Kind: "bar", At: time.Second, Dur: 2 * time.Second, From: 2, To: 6}},
+	}}}
+	var buf bytes.Buffer
+	if err := EmitSVG(&buf, states, 10*time.Second, Grid{Cols: 20, Rows: 2}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `clip-path="url(#cl0_0)"`) {
+		t.Error("bar row is not clipped")
+	}
+	if !strings.Contains(out, "steps(4,end)") {
+		t.Error("bar does not step one cell at a time")
+	}
+	if !strings.Contains(out, "10.0000%{width:16.8px}30.0000%{width:50.4px}") {
+		t.Errorf("bar does not widen from its first cell to its last over the delay:\n%s", out)
+	}
+	if strings.Contains(out, "cur0_0") {
+		t.Error("bar row drew a cursor")
+	}
+}
+
+// A shell row's █ becomes one rect per run, the full cell height, and leaves the
+// text; agentop's rows keep their block glyphs, since their bars sit on adjacent rows.
+func TestEmitSVG_SolidBlocksDrawCellsNotGlyphs(t *testing.T) {
+	states := []State{{Label: "logo", Dur: 10 * time.Second, Final: true, Rows: []Row{
+		{Runs: []Run{{Text: " ██╗", FG: "#f97066"}}, SolidBlocks: true},
+		{Runs: []Run{{Text: "██", FG: "#9ca3af"}}},
+	}}}
+	var buf bytes.Buffer
+	if err := EmitSVG(&buf, states, 10*time.Second, Grid{Cols: 20, Rows: 2}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<rect x="24.4" y="45.0" width="16.8" height="18.0" fill="#f97066"/>`) {
+		t.Errorf("want one 2-cell rect for the logo row's █ run:\n%s", out)
+	}
+	if strings.Contains(out, `fill="#f97066"> ██╗`) || !strings.Contains(out, "╗</tspan>") {
+		t.Errorf("logo row should keep ╗ as text and drop its █ glyphs:\n%s", out)
+	}
+	if !strings.Contains(out, ">██</tspan>") {
+		t.Errorf("a row without SolidBlocks lost its █ glyphs:\n%s", out)
+	}
+}

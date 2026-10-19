@@ -2,11 +2,11 @@
 
 **See what your coding agent actually sends — and pay less for it.**
 
-Works with **Claude Code**, **OpenCode** and **IBM Bob**, and with any agent that can
-use an HTTPS proxy.
+Works with **Claude Code**, **OpenCode**, **Codex** and **IBM Bob**, and with any agent
+that can use an HTTPS proxy.
 
 <img src="./docs/assets/cortex-demo.svg" width="100%"
-     alt="A terminal installs Cortex with one command and points Claude Code at it. Three Claude Code sessions run in separate directories, and agentop then lists all three with their token counts, cost and remaining context. Pressing $ breaks the spend down by tier, where cache reads dominate. Drilling into the busiest session shows the whole conversation and the fifteen-tool manifest it re-sends on every turn.">
+     alt="A terminal installs Cortex with one command, and a second command points Claude Code at it. Three Claude Code sessions run in separate directories, and agentop then lists all three with their token counts, cost and remaining context. Pressing $ breaks the spend down by tier, where cache reads dominate. Drilling into the busiest session shows the whole conversation and the fifteen-tool manifest it re-sends on every turn.">
 
 Cortex sits in your agent's request path on your own machine, decrypts the traffic,
 and shows you every model call, tool call and agent-to-agent message as it happens.
@@ -23,15 +23,17 @@ One binary, no Kubernetes. macOS or Linux, amd64 or arm64.
      Change both, or they drift — the --ref wording already did once. -->
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh | sh
+curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh
 ```
 
-Setup lists every change it will make, and asks once.
+Setup lists every change it will make, and asks once. If rossoctl.dev is unreachable
+from where you are, the same script is served straight from this repository, at
+`https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh`.
 
 Then connect your agent — once, in a new terminal. The table below has each command.
 
 ```sh
-agentop configure claude-code enable    # or opencode, bob, bobshell
+agentop configure claude-code enable    # or opencode, bob
 ```
 
 Run your agent the way you always do. No flags, no environment variables.
@@ -57,9 +59,9 @@ names the command that fixes it.
 |---|---|---|
 | **Claude Code** | `agentop configure claude-code enable` | [Guide](./docs/agents/claude-code.md) |
 | **OpenCode** | `agentop configure opencode enable` | [Guide](./docs/agents/opencode.md) |
-| **IBM Bob** | `agentop configure bob enable` | [Guide](./cmd/agentop/README.md#routing-the-ibm-bob-editor-through-cortex-agentop-configure-bob) |
-| **Bob Shell** | `agentop configure bobshell enable` | [Guide](./cmd/agentop/README.md#typing-bob-instead-of-agentop-exec----bob-agentop-configure-bobshell) |
-| **Any other agent** | `agentop exec -- <command>` | [Guide](./cmd/agentop/README.md#running-one-command-through-cortex-agentop-exec) |
+| **Codex** | `agentop configure codex enable` | [Guide](./docs/agents/codex.md) |
+| **IBM Bob** | `agentop configure bob enable` — the editor and the `bob` shell command both | [Guide](./docs/agents/bob.md) |
+| **Any other agent** | `agentop exec -- <command>` | [Guide](./docs/agents/any-agent.md) |
 
 Each `configure` command is a one-time setup: it asks before it writes, and afterwards
 you start the agent exactly as before. `status` and `disable` check and undo it. An
@@ -92,9 +94,13 @@ binaries. [Remove it](./docs/laptop-service.md#remove-it) has the details.
 
 ## Learn more
 
+- [All documentation](./docs/README.md) — the docs index, grouped by what you
+  are trying to do
 - [Running Cortex](./docs/laptop-service.md) — the service, how sessions are grouped,
   troubleshooting
 - [agentop](./cmd/agentop/README.md) — every pane, key and command
+- [Run an agent on a local model](./docs/laptop-local-model.md) — Ollama on
+  your laptop, for when a provider is out or you want the traffic local
 - [Pricing](./docs/pricing.md) — rates, gateway discounts, unpriced traffic
 - [Full install guide](https://www.rossoctl.dev/docs/dev/get-started/laptop) —
   prerequisites and a walkthrough. Ending the install command in `sh -s -- --help`

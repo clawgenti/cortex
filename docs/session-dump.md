@@ -11,7 +11,7 @@
 
 Outside a local install Cortex keeps intercepted sessions **in memory only**, so a
 proxy restart loses every session it was holding. `cortex-session-dump`
-walks the [Session Events API](#where-the-data-comes-from) and writes what is
+walks the [Session Events API](session-api.md) and writes what is
 currently resident to files.
 
 Reach for it when you want to keep a session past a restart, hand traffic to

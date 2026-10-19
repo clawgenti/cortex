@@ -19,6 +19,7 @@ import (
 
 	"github.com/rossoctl/cortex/cmd/agentop/servers"
 	"github.com/rossoctl/cortex/core/config"
+	"github.com/rossoctl/cortex/core/pipeline"
 	"github.com/rossoctl/cortex/core/plugins/inferencerouter/routerconfig"
 )
 
@@ -35,6 +36,7 @@ Usage:
   agentop server remove <name> [--config PATH]
   agentop server use <name> --agent <agent> [--config PATH]
   agentop server reset --agent <agent> [--config PATH]
+  agentop server move <session-id> <name|own> [--config PATH]
 
 With no action, lists the servers, the model each one's main and helper word
 names now, and the agents routed to each.
@@ -63,6 +65,10 @@ refuses a word that names none of its models.
 
 Every change is written to ~/.cortex/config.yaml, or to --config PATH, and returns
 once the proxy has reloaded it. Nothing restarts. Flags go after the action.
+
+Setting up a local model server — installing it, picking a model, its context
+length — is walked at
+https://github.com/rossoctl/cortex/blob/main/docs/laptop-local-model.md
 `
 
 // runServer handles the `server` subcommand. Returns the process exit code.
@@ -85,6 +91,8 @@ func runServer(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return serverUse(args, stdout, stderr)
 	case "reset":
 		return serverReset(args, stdout, stderr)
+	case "move":
+		return serverMove(args, stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "agentop server: unknown action %q\n\n", action)
 	fmt.Fprint(stderr, serverUsage)
@@ -159,6 +167,11 @@ func readRouter(cfg *config.Config) (c routerconfig.Config, present bool, err er
 				return routerconfig.Config{}, true, fmt.Errorf("the %s entry's config: %w", routerName, err)
 			}
 		}
+		// Agents keyed by CANONICAL name, the same fold the router keys its routing
+		// table with (pipeline.FoldAgentNames), so what `server` lists, checks and
+		// changes agrees with what the proxy routes: a config written before an
+		// agent-name rename still names the agent today's spelling on both sides.
+		c.Agents = pipeline.FoldAgentNames(c.Agents)
 		return c, true, nil
 	}
 	return routerconfig.Config{}, false, nil

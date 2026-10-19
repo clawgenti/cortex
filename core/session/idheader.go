@@ -58,6 +58,41 @@ const BobSessionHeader = "X-Task-Id"
 // session that holds its user's intent. Canonical casing, for the same reason as the others.
 const SessionIDHeader = "X-Session-Id"
 
+// CodexSessionHeader is the request header Codex sets on its inference requests
+// to name the session they belong to. Verified on codex_exec/0.160.1 by logging
+// every header name Codex sends: the value is a UUID, constant across all nine
+// inference requests of one multi-turn session and different in the next, which
+// is the property a bucket keyed on it needs.
+//
+// NOT X-Session-Id, which is the one letter-prefix this nearly was: Codex sends
+// the BARE name, so the header Cortex already read for OpenCode missed it and
+// Codex's traffic grouped by process instead of by conversation.
+//
+// Codex sends two other headers carrying the same value — Thread-Id and
+// X-Client-Request-Id. This one is read because its NAME matches the intent: if
+// Codex later makes X-Client-Request-Id per-request as its name implies, a
+// bucket keyed on that would split one session into one session per request,
+// and nothing would announce the change.
+//
+// UNNAMESPACED, and the least namespaced of the four — a bare Session-Id is a
+// name any client might send for its own reasons. So it is read by default only
+// on a loopback-only install, exactly as SessionIDHeader is and for the same
+// reason given there: on a laptop the only clients are the user's own agents,
+// while in a cluster an agent sending this for its own purposes would have its
+// calls filed away from the session holding its user's intent. It also sits LAST
+// in that list, so any client sending one of the three dedicated headers still
+// wins. Canonical casing, for the reason the others give.
+//
+// WHICH REQUESTS CARRY IT DIFFERS BY FRONT-END, measured on both. Under `codex
+// exec` only the inference requests do, so a run also leaves a small
+// pending:codex@<pid> bucket for the chatter that preceded them. The TUI sends
+// it on its chatter too — a TUI session was named with zero inference requests
+// in it — so a TUI run leaves one row rather than two. Both confirmed by
+// driving the real clients through the proxy; the TUI needed
+// `-c check_for_update_on_startup=false -c features.api_key_model_discovery=false`
+// to suppress the two modal dialogs that otherwise block its composer.
+const CodexSessionHeader = "Session-Id"
+
 // IDFromHeaders returns the first usable session id found in h among names,
 // in order, or "" when none is present. Callers treat "" as "fall back to
 // whatever bucketing you did before" — never as an error, so a client that

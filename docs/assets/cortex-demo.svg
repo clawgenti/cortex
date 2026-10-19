@@ -5,183 +5,245 @@ g.st{opacity:0}
 .rv{visibility:hidden}
 .cur{fill:#58a6ff}
 @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0.15}}
-@keyframes st0{0.0000%,27.9990%{opacity:1}28.0000%,100%{opacity:0}}
-g.st0{animation:st0 50s linear infinite}
-@keyframes tp0_0{0%,0.0000%{width:0}9.1560%,100%{width:932.4px}}
-#cl0_0 rect{animation:tp0_0 50s steps(111,end) infinite}
-@keyframes cx0_0{0%,0.0000%{x:16.0px}9.1560%,100%{x:948.4px}}
-@keyframes cv0_0{0%,0.0000%{visibility:hidden}0.0000%,9.1560%{visibility:visible}9.7560%,100%{visibility:hidden}}
-.cur0_0{animation:cx0_0 50s steps(111,end) infinite,cv0_0 50s linear infinite,blink 1s steps(1,end) infinite}
-@keyframes rv0_1{0%,10.1550%{visibility:hidden}10.1560%,100%{visibility:visible}}
-.rv0_1{animation:rv0_1 50s linear infinite}
-@keyframes rv0_2{0%,14.9550%{visibility:hidden}14.9560%,100%{visibility:visible}}
-.rv0_2{animation:rv0_2 50s linear infinite}
-@keyframes rv0_3{0%,15.0150%{visibility:hidden}15.0160%,100%{visibility:visible}}
-.rv0_3{animation:rv0_3 50s linear infinite}
-@keyframes rv0_4{0%,15.0750%{visibility:hidden}15.0760%,100%{visibility:visible}}
-.rv0_4{animation:rv0_4 50s linear infinite}
-@keyframes rv0_5{0%,15.5750%{visibility:hidden}15.5760%,100%{visibility:visible}}
-.rv0_5{animation:rv0_5 50s linear infinite}
-@keyframes rv0_6{0%,15.6550%{visibility:hidden}15.6560%,100%{visibility:visible}}
-.rv0_6{animation:rv0_6 50s linear infinite}
-@keyframes rv0_7{0%,15.7350%{visibility:hidden}15.7360%,100%{visibility:visible}}
-.rv0_7{animation:rv0_7 50s linear infinite}
-@keyframes rv0_8{0%,15.8150%{visibility:hidden}15.8160%,100%{visibility:visible}}
-.rv0_8{animation:rv0_8 50s linear infinite}
-@keyframes rv0_9{0%,15.8950%{visibility:hidden}15.8960%,100%{visibility:visible}}
-.rv0_9{animation:rv0_9 50s linear infinite}
-@keyframes rv0_10{0%,15.9750%{visibility:hidden}15.9760%,100%{visibility:visible}}
-.rv0_10{animation:rv0_10 50s linear infinite}
-@keyframes rv0_11{0%,16.0350%{visibility:hidden}16.0360%,100%{visibility:visible}}
-.rv0_11{animation:rv0_11 50s linear infinite}
-@keyframes rv0_12{0%,16.0950%{visibility:hidden}16.0960%,100%{visibility:visible}}
-.rv0_12{animation:rv0_12 50s linear infinite}
-@keyframes rv0_13{0%,16.1550%{visibility:hidden}16.1560%,100%{visibility:visible}}
-.rv0_13{animation:rv0_13 50s linear infinite}
-@keyframes rv0_14{0%,18.5550%{visibility:hidden}18.5560%,100%{visibility:visible}}
-.rv0_14{animation:rv0_14 50s linear infinite}
-@keyframes rv0_15{0%,18.6150%{visibility:hidden}18.6160%,100%{visibility:visible}}
-.rv0_15{animation:rv0_15 50s linear infinite}
-@keyframes rv0_16{0%,19.2150%{visibility:hidden}19.2160%,100%{visibility:visible}}
-.rv0_16{animation:rv0_16 50s linear infinite}
-@keyframes rv0_17{0%,19.5150%{visibility:hidden}19.5160%,100%{visibility:visible}}
-.rv0_17{animation:rv0_17 50s linear infinite}
-@keyframes rv0_18{0%,20.0150%{visibility:hidden}20.0160%,100%{visibility:visible}}
-.rv0_18{animation:rv0_18 50s linear infinite}
-@keyframes rv0_19{0%,22.6150%{visibility:hidden}22.6160%,100%{visibility:visible}}
-.rv0_19{animation:rv0_19 50s linear infinite}
-@keyframes rv0_20{0%,23.1150%{visibility:hidden}23.1160%,100%{visibility:visible}}
-.rv0_20{animation:rv0_20 50s linear infinite}
-@keyframes rv0_21{0%,23.1750%{visibility:hidden}23.1760%,100%{visibility:visible}}
-.rv0_21{animation:rv0_21 50s linear infinite}
-@keyframes rv0_22{0%,23.4150%{visibility:hidden}23.4160%,100%{visibility:visible}}
-.rv0_22{animation:rv0_22 50s linear infinite}
-@keyframes rv0_23{0%,23.4750%{visibility:hidden}23.4760%,100%{visibility:visible}}
-.rv0_23{animation:rv0_23 50s linear infinite}
-@keyframes rv0_24{0%,23.5350%{visibility:hidden}23.5360%,100%{visibility:visible}}
-.rv0_24{animation:rv0_24 50s linear infinite}
-@keyframes rv0_25{0%,23.5950%{visibility:hidden}23.5960%,100%{visibility:visible}}
-.rv0_25{animation:rv0_25 50s linear infinite}
-@keyframes rv0_26{0%,23.6550%{visibility:hidden}23.6560%,100%{visibility:visible}}
-.rv0_26{animation:rv0_26 50s linear infinite}
-@keyframes rv0_27{0%,23.7150%{visibility:hidden}23.7160%,100%{visibility:visible}}
-.rv0_27{animation:rv0_27 50s linear infinite}
-@keyframes rv0_28{0%,23.7750%{visibility:hidden}23.7760%,100%{visibility:visible}}
-.rv0_28{animation:rv0_28 50s linear infinite}
-@keyframes st1{0%,27.9990%{opacity:0}28.0000%,39.9990%{opacity:1}40.0000%,100%{opacity:0}}
-g.st1{animation:st1 50s linear infinite}
-@keyframes rv1_0{0%,27.9990%{visibility:hidden}28.0000%,100%{visibility:visible}}
-.rv1_0{animation:rv1_0 50s linear infinite}
-@keyframes rv1_1{0%,28.7990%{visibility:hidden}28.8000%,100%{visibility:visible}}
-.rv1_1{animation:rv1_1 50s linear infinite}
-@keyframes rv1_2{0%,29.4390%{visibility:hidden}29.4400%,100%{visibility:visible}}
-.rv1_2{animation:rv1_2 50s linear infinite}
-@keyframes rv1_3{0%,30.0790%{visibility:hidden}30.0800%,100%{visibility:visible}}
-.rv1_3{animation:rv1_3 50s linear infinite}
-@keyframes rv1_4{0%,28.3990%{visibility:hidden}28.4000%,100%{visibility:visible}}
-.rv1_4{animation:rv1_4 50s linear infinite}
-@keyframes rv1_6{0%,31.9990%{visibility:hidden}32.0000%,100%{visibility:visible}}
-.rv1_6{animation:rv1_6 50s linear infinite}
-@keyframes rv1_7{0%,32.7990%{visibility:hidden}32.8000%,100%{visibility:visible}}
-.rv1_7{animation:rv1_7 50s linear infinite}
-@keyframes rv1_8{0%,33.4390%{visibility:hidden}33.4400%,100%{visibility:visible}}
-.rv1_8{animation:rv1_8 50s linear infinite}
-@keyframes rv1_9{0%,34.0790%{visibility:hidden}34.0800%,100%{visibility:visible}}
-.rv1_9{animation:rv1_9 50s linear infinite}
-@keyframes rv1_10{0%,32.3990%{visibility:hidden}32.4000%,100%{visibility:visible}}
-.rv1_10{animation:rv1_10 50s linear infinite}
-@keyframes rv1_12{0%,35.9990%{visibility:hidden}36.0000%,100%{visibility:visible}}
-.rv1_12{animation:rv1_12 50s linear infinite}
-@keyframes rv1_13{0%,36.7990%{visibility:hidden}36.8000%,100%{visibility:visible}}
-.rv1_13{animation:rv1_13 50s linear infinite}
-@keyframes rv1_14{0%,37.4390%{visibility:hidden}37.4400%,100%{visibility:visible}}
-.rv1_14{animation:rv1_14 50s linear infinite}
-@keyframes rv1_15{0%,38.0790%{visibility:hidden}38.0800%,100%{visibility:visible}}
-.rv1_15{animation:rv1_15 50s linear infinite}
-@keyframes rv1_16{0%,36.3990%{visibility:hidden}36.4000%,100%{visibility:visible}}
-.rv1_16{animation:rv1_16 50s linear infinite}
-@keyframes st2{0%,39.9990%{opacity:0}40.0000%,49.9990%{opacity:1}50.0000%,100%{opacity:0}}
-g.st2{animation:st2 50s linear infinite}
-@keyframes rv2_0{0%,39.9990%{visibility:hidden}40.0000%,100%{visibility:visible}}
-.rv2_0{animation:rv2_0 50s linear infinite}
-@keyframes rv2_1{0%,40.1390%{visibility:hidden}40.1400%,100%{visibility:visible}}
-.rv2_1{animation:rv2_1 50s linear infinite}
-@keyframes rv2_2{0%,40.2790%{visibility:hidden}40.2800%,100%{visibility:visible}}
-.rv2_2{animation:rv2_2 50s linear infinite}
-@keyframes rv2_3{0%,40.4190%{visibility:hidden}40.4200%,100%{visibility:visible}}
-.rv2_3{animation:rv2_3 50s linear infinite}
-@keyframes rv2_4{0%,40.5590%{visibility:hidden}40.5600%,100%{visibility:visible}}
-.rv2_4{animation:rv2_4 50s linear infinite}
-@keyframes rv2_5{0%,40.6990%{visibility:hidden}40.7000%,100%{visibility:visible}}
-.rv2_5{animation:rv2_5 50s linear infinite}
-@keyframes rv2_6{0%,40.8390%{visibility:hidden}40.8400%,100%{visibility:visible}}
-.rv2_6{animation:rv2_6 50s linear infinite}
-@keyframes rv2_7{0%,40.9790%{visibility:hidden}40.9800%,100%{visibility:visible}}
-.rv2_7{animation:rv2_7 50s linear infinite}
-@keyframes rv2_8{0%,41.1190%{visibility:hidden}41.1200%,100%{visibility:visible}}
-.rv2_8{animation:rv2_8 50s linear infinite}
-@keyframes rv2_9{0%,41.2590%{visibility:hidden}41.2600%,100%{visibility:visible}}
-.rv2_9{animation:rv2_9 50s linear infinite}
-@keyframes rv2_10{0%,41.3990%{visibility:hidden}41.4000%,100%{visibility:visible}}
-.rv2_10{animation:rv2_10 50s linear infinite}
-@keyframes rv2_11{0%,41.5390%{visibility:hidden}41.5400%,100%{visibility:visible}}
-.rv2_11{animation:rv2_11 50s linear infinite}
-@keyframes rv2_12{0%,41.6790%{visibility:hidden}41.6800%,100%{visibility:visible}}
-.rv2_12{animation:rv2_12 50s linear infinite}
-@keyframes rv2_13{0%,41.8190%{visibility:hidden}41.8200%,100%{visibility:visible}}
-.rv2_13{animation:rv2_13 50s linear infinite}
-@keyframes rv2_14{0%,41.9590%{visibility:hidden}41.9600%,100%{visibility:visible}}
-.rv2_14{animation:rv2_14 50s linear infinite}
-@keyframes rv2_15{0%,42.0990%{visibility:hidden}42.1000%,100%{visibility:visible}}
-.rv2_15{animation:rv2_15 50s linear infinite}
-@keyframes rv2_16{0%,42.2390%{visibility:hidden}42.2400%,100%{visibility:visible}}
-.rv2_16{animation:rv2_16 50s linear infinite}
-@keyframes rv2_17{0%,42.3790%{visibility:hidden}42.3800%,100%{visibility:visible}}
-.rv2_17{animation:rv2_17 50s linear infinite}
-@keyframes rv2_18{0%,42.5190%{visibility:hidden}42.5200%,100%{visibility:visible}}
-.rv2_18{animation:rv2_18 50s linear infinite}
-@keyframes rv2_19{0%,42.6590%{visibility:hidden}42.6600%,100%{visibility:visible}}
-.rv2_19{animation:rv2_19 50s linear infinite}
-@keyframes rv2_20{0%,42.7990%{visibility:hidden}42.8000%,100%{visibility:visible}}
-.rv2_20{animation:rv2_20 50s linear infinite}
-@keyframes rv2_21{0%,42.9390%{visibility:hidden}42.9400%,100%{visibility:visible}}
-.rv2_21{animation:rv2_21 50s linear infinite}
-@keyframes rv2_22{0%,43.0790%{visibility:hidden}43.0800%,100%{visibility:visible}}
-.rv2_22{animation:rv2_22 50s linear infinite}
-@keyframes rv2_23{0%,43.2190%{visibility:hidden}43.2200%,100%{visibility:visible}}
-.rv2_23{animation:rv2_23 50s linear infinite}
-@keyframes rv2_24{0%,43.3590%{visibility:hidden}43.3600%,100%{visibility:visible}}
-.rv2_24{animation:rv2_24 50s linear infinite}
-@keyframes rv2_25{0%,43.4990%{visibility:hidden}43.5000%,100%{visibility:visible}}
-.rv2_25{animation:rv2_25 50s linear infinite}
-@keyframes rv2_26{0%,43.6390%{visibility:hidden}43.6400%,100%{visibility:visible}}
-.rv2_26{animation:rv2_26 50s linear infinite}
-@keyframes rv2_27{0%,43.7790%{visibility:hidden}43.7800%,100%{visibility:visible}}
-.rv2_27{animation:rv2_27 50s linear infinite}
-@keyframes rv2_28{0%,43.9190%{visibility:hidden}43.9200%,100%{visibility:visible}}
-.rv2_28{animation:rv2_28 50s linear infinite}
-@keyframes rv2_29{0%,44.0590%{visibility:hidden}44.0600%,100%{visibility:visible}}
-.rv2_29{animation:rv2_29 50s linear infinite}
-@keyframes rv2_30{0%,44.1990%{visibility:hidden}44.2000%,100%{visibility:visible}}
-.rv2_30{animation:rv2_30 50s linear infinite}
-@keyframes rv2_31{0%,44.3390%{visibility:hidden}44.3400%,100%{visibility:visible}}
-.rv2_31{animation:rv2_31 50s linear infinite}
-@keyframes rv2_32{0%,44.4790%{visibility:hidden}44.4800%,100%{visibility:visible}}
-.rv2_32{animation:rv2_32 50s linear infinite}
-@keyframes rv2_33{0%,44.6190%{visibility:hidden}44.6200%,100%{visibility:visible}}
-.rv2_33{animation:rv2_33 50s linear infinite}
-@keyframes st3{0%,49.9990%{opacity:0}50.0000%,61.9990%{opacity:1}62.0000%,100%{opacity:0}}
-g.st3{animation:st3 50s linear infinite}
-@keyframes st4{0%,61.9990%{opacity:0}62.0000%,69.9990%{opacity:1}70.0000%,100%{opacity:0}}
-g.st4{animation:st4 50s linear infinite}
-@keyframes st5{0%,69.9990%{opacity:0}70.0000%,79.9990%{opacity:1}80.0000%,100%{opacity:0}}
-g.st5{animation:st5 50s linear infinite}
-@keyframes st6{0%,79.9990%{opacity:0}80.0000%,87.9990%{opacity:1}88.0000%,100%{opacity:0}}
-g.st6{animation:st6 50s linear infinite}
-@keyframes st7{0%,87.9990%{opacity:0}88.0000%,95.9990%{opacity:1}96.0000%,100%{opacity:0}}
-g.st7{animation:st7 50s linear infinite}
-@keyframes st8{0%,95.9990%{opacity:0}96.0000%,100%{opacity:1}}
-g.st8{animation:st8 50s linear infinite}
+@keyframes st0{0.0000%,22.4128%{opacity:1}22.4138%,100%{opacity:0}}
+g.st0{animation:st0 58s linear infinite}
+@keyframes tp0_0{0%,0.0000%{width:0}4.2000%,100%{width:504.0px}}
+#cl0_0 rect{animation:tp0_0 58s steps(60,end) infinite}
+@keyframes cx0_0{0%,0.0000%{x:16.0px}4.2000%,100%{x:520.0px}}
+@keyframes cv0_0{0%,0.0000%{visibility:hidden}0.0000%,4.2000%{visibility:visible}4.8000%,100%{visibility:hidden}}
+.cur0_0{animation:cx0_0 58s steps(60,end) infinite,cv0_0 58s linear infinite,blink 1s steps(1,end) infinite}
+@keyframes rv0_1{0%,5.0611%{visibility:hidden}5.0621%,100%{visibility:visible}}
+.rv0_1{animation:rv0_1 58s linear infinite}
+@keyframes tp0_2{0%,5.0621%{width:16.8px}8.5103%{width:352.8px}8.5113%,100%{width:621.6px}}
+#cl0_2 rect{animation:tp0_2 58s steps(40,end) infinite}
+@keyframes rv0_3{0%,8.9404%{visibility:hidden}8.9414%,100%{visibility:visible}}
+.rv0_3{animation:rv0_3 58s linear infinite}
+@keyframes rv0_4{0%,8.9921%{visibility:hidden}8.9931%,100%{visibility:visible}}
+.rv0_4{animation:rv0_4 58s linear infinite}
+@keyframes rv0_5{0%,9.0611%{visibility:hidden}9.0621%,100%{visibility:visible}}
+.rv0_5{animation:rv0_5 58s linear infinite}
+@keyframes rv0_6{0%,9.1300%{visibility:hidden}9.1310%,100%{visibility:visible}}
+.rv0_6{animation:rv0_6 58s linear infinite}
+@keyframes rv0_7{0%,9.1990%{visibility:hidden}9.2000%,100%{visibility:visible}}
+.rv0_7{animation:rv0_7 58s linear infinite}
+@keyframes rv0_8{0%,9.2680%{visibility:hidden}9.2690%,100%{visibility:visible}}
+.rv0_8{animation:rv0_8 58s linear infinite}
+@keyframes rv0_9{0%,9.3197%{visibility:hidden}9.3207%,100%{visibility:visible}}
+.rv0_9{animation:rv0_9 58s linear infinite}
+@keyframes rv0_10{0%,9.3714%{visibility:hidden}9.3724%,100%{visibility:visible}}
+.rv0_10{animation:rv0_10 58s linear infinite}
+@keyframes rv0_11{0%,9.4231%{visibility:hidden}9.4241%,100%{visibility:visible}}
+.rv0_11{animation:rv0_11 58s linear infinite}
+@keyframes rv0_12{0%,11.4921%{visibility:hidden}11.4931%,100%{visibility:visible}}
+.rv0_12{animation:rv0_12 58s linear infinite}
+@keyframes rv0_13{0%,11.5438%{visibility:hidden}11.5448%,100%{visibility:visible}}
+.rv0_13{animation:rv0_13 58s linear infinite}
+@keyframes rv0_14{0%,12.0611%{visibility:hidden}12.0621%,100%{visibility:visible}}
+.rv0_14{animation:rv0_14 58s linear infinite}
+@keyframes rv0_15{0%,12.2335%{visibility:hidden}12.2345%,100%{visibility:visible}}
+.rv0_15{animation:rv0_15 58s linear infinite}
+@keyframes rv0_16{0%,12.5783%{visibility:hidden}12.5793%,100%{visibility:visible}}
+.rv0_16{animation:rv0_16 58s linear infinite}
+@keyframes rv0_17{0%,14.8197%{visibility:hidden}14.8207%,100%{visibility:visible}}
+.rv0_17{animation:rv0_17 58s linear infinite}
+@keyframes rv0_18{0%,14.8714%{visibility:hidden}14.8724%,100%{visibility:visible}}
+.rv0_18{animation:rv0_18 58s linear infinite}
+@keyframes rv0_19{0%,14.9231%{visibility:hidden}14.9241%,100%{visibility:visible}}
+.rv0_19{animation:rv0_19 58s linear infinite}
+@keyframes rv0_20{0%,14.9749%{visibility:hidden}14.9759%,100%{visibility:visible}}
+.rv0_20{animation:rv0_20 58s linear infinite}
+@keyframes rv0_21{0%,15.0266%{visibility:hidden}15.0276%,100%{visibility:visible}}
+.rv0_21{animation:rv0_21 58s linear infinite}
+@keyframes rv0_22{0%,15.0783%{visibility:hidden}15.0793%,100%{visibility:visible}}
+.rv0_22{animation:rv0_22 58s linear infinite}
+@keyframes rv0_23{0%,15.1300%{visibility:hidden}15.1310%,100%{visibility:visible}}
+.rv0_23{animation:rv0_23 58s linear infinite}
+@keyframes rv0_24{0%,15.1818%{visibility:hidden}15.1828%,100%{visibility:visible}}
+.rv0_24{animation:rv0_24 58s linear infinite}
+@keyframes rv0_25{0%,15.2335%{visibility:hidden}15.2345%,100%{visibility:visible}}
+.rv0_25{animation:rv0_25 58s linear infinite}
+@keyframes rv0_26{0%,15.2852%{visibility:hidden}15.2862%,100%{visibility:visible}}
+.rv0_26{animation:rv0_26 58s linear infinite}
+@keyframes rv0_27{0%,15.3369%{visibility:hidden}15.3379%,100%{visibility:visible}}
+.rv0_27{animation:rv0_27 58s linear infinite}
+@keyframes rv0_28{0%,15.3887%{visibility:hidden}15.3897%,100%{visibility:visible}}
+.rv0_28{animation:rv0_28 58s linear infinite}
+@keyframes rv0_29{0%,15.4404%{visibility:hidden}15.4414%,100%{visibility:visible}}
+.rv0_29{animation:rv0_29 58s linear infinite}
+@keyframes rv0_30{0%,15.4921%{visibility:hidden}15.4931%,100%{visibility:visible}}
+.rv0_30{animation:rv0_30 58s linear infinite}
+@keyframes rv0_31{0%,15.5438%{visibility:hidden}15.5448%,100%{visibility:visible}}
+.rv0_31{animation:rv0_31 58s linear infinite}
+@keyframes rv0_32{0%,15.5956%{visibility:hidden}15.5966%,100%{visibility:visible}}
+.rv0_32{animation:rv0_32 58s linear infinite}
+@keyframes st1{0%,22.4128%{opacity:0}22.4138%,34.4818%{opacity:1}34.4828%,100%{opacity:0}}
+g.st1{animation:st1 58s linear infinite}
+@keyframes tp1_0{0%,22.4138%{width:0}25.0207%,100%{width:319.2px}}
+#cl1_0 rect{animation:tp1_0 58s steps(38,end) infinite}
+@keyframes cx1_0{0%,22.4138%{x:16.0px}25.0207%,100%{x:335.2px}}
+@keyframes cv1_0{0%,22.4128%{visibility:hidden}22.4138%,25.0207%{visibility:visible}25.6207%,100%{visibility:hidden}}
+.cur1_0{animation:cx1_0 58s steps(38,end) infinite,cv1_0 58s linear infinite,blink 1s steps(1,end) infinite}
+@keyframes rv1_1{0%,25.9680%{visibility:hidden}25.9690%,100%{visibility:visible}}
+.rv1_1{animation:rv1_1 58s linear infinite}
+@keyframes rv1_2{0%,26.0197%{visibility:hidden}26.0207%,100%{visibility:visible}}
+.rv1_2{animation:rv1_2 58s linear infinite}
+@keyframes rv1_3{0%,26.0714%{visibility:hidden}26.0724%,100%{visibility:visible}}
+.rv1_3{animation:rv1_3 58s linear infinite}
+@keyframes rv1_4{0%,26.1231%{visibility:hidden}26.1241%,100%{visibility:visible}}
+.rv1_4{animation:rv1_4 58s linear infinite}
+@keyframes rv1_5{0%,26.1749%{visibility:hidden}26.1759%,100%{visibility:visible}}
+.rv1_5{animation:rv1_5 58s linear infinite}
+@keyframes rv1_6{0%,26.2266%{visibility:hidden}26.2276%,100%{visibility:visible}}
+.rv1_6{animation:rv1_6 58s linear infinite}
+@keyframes rv1_7{0%,26.2783%{visibility:hidden}26.2793%,100%{visibility:visible}}
+.rv1_7{animation:rv1_7 58s linear infinite}
+@keyframes rv1_8{0%,26.3300%{visibility:hidden}26.3310%,100%{visibility:visible}}
+.rv1_8{animation:rv1_8 58s linear infinite}
+@keyframes rv1_9{0%,26.3818%{visibility:hidden}26.3828%,100%{visibility:visible}}
+.rv1_9{animation:rv1_9 58s linear infinite}
+@keyframes rv1_10{0%,26.4335%{visibility:hidden}26.4345%,100%{visibility:visible}}
+.rv1_10{animation:rv1_10 58s linear infinite}
+@keyframes rv1_11{0%,26.4852%{visibility:hidden}26.4862%,100%{visibility:visible}}
+.rv1_11{animation:rv1_11 58s linear infinite}
+@keyframes rv1_12{0%,26.5369%{visibility:hidden}26.5379%,100%{visibility:visible}}
+.rv1_12{animation:rv1_12 58s linear infinite}
+@keyframes rv1_13{0%,26.5887%{visibility:hidden}26.5897%,100%{visibility:visible}}
+.rv1_13{animation:rv1_13 58s linear infinite}
+@keyframes rv1_14{0%,26.6404%{visibility:hidden}26.6414%,100%{visibility:visible}}
+.rv1_14{animation:rv1_14 58s linear infinite}
+@keyframes rv1_15{0%,26.6921%{visibility:hidden}26.6931%,100%{visibility:visible}}
+.rv1_15{animation:rv1_15 58s linear infinite}
+@keyframes rv1_16{0%,26.7438%{visibility:hidden}26.7448%,100%{visibility:visible}}
+.rv1_16{animation:rv1_16 58s linear infinite}
+@keyframes rv1_17{0%,26.7956%{visibility:hidden}26.7966%,100%{visibility:visible}}
+.rv1_17{animation:rv1_17 58s linear infinite}
+@keyframes rv1_18{0%,26.8473%{visibility:hidden}26.8483%,100%{visibility:visible}}
+.rv1_18{animation:rv1_18 58s linear infinite}
+@keyframes rv1_19{0%,29.4335%{visibility:hidden}29.4345%,100%{visibility:visible}}
+.rv1_19{animation:rv1_19 58s linear infinite}
+@keyframes rv1_20{0%,29.9507%{visibility:hidden}29.9517%,100%{visibility:visible}}
+.rv1_20{animation:rv1_20 58s linear infinite}
+@keyframes st2{0%,34.4818%{opacity:0}34.4828%,44.8266%{opacity:1}44.8276%,100%{opacity:0}}
+g.st2{animation:st2 58s linear infinite}
+@keyframes rv2_0{0%,34.4818%{visibility:hidden}34.4828%,100%{visibility:visible}}
+.rv2_0{animation:rv2_0 58s linear infinite}
+@keyframes rv2_1{0%,35.1714%{visibility:hidden}35.1724%,100%{visibility:visible}}
+.rv2_1{animation:rv2_1 58s linear infinite}
+@keyframes rv2_2{0%,35.7231%{visibility:hidden}35.7241%,100%{visibility:visible}}
+.rv2_2{animation:rv2_2 58s linear infinite}
+@keyframes rv2_3{0%,36.2749%{visibility:hidden}36.2759%,100%{visibility:visible}}
+.rv2_3{animation:rv2_3 58s linear infinite}
+@keyframes rv2_4{0%,34.8266%{visibility:hidden}34.8276%,100%{visibility:visible}}
+.rv2_4{animation:rv2_4 58s linear infinite}
+@keyframes rv2_6{0%,37.9300%{visibility:hidden}37.9310%,100%{visibility:visible}}
+.rv2_6{animation:rv2_6 58s linear infinite}
+@keyframes rv2_7{0%,38.6197%{visibility:hidden}38.6207%,100%{visibility:visible}}
+.rv2_7{animation:rv2_7 58s linear infinite}
+@keyframes rv2_8{0%,39.1714%{visibility:hidden}39.1724%,100%{visibility:visible}}
+.rv2_8{animation:rv2_8 58s linear infinite}
+@keyframes rv2_9{0%,39.7231%{visibility:hidden}39.7241%,100%{visibility:visible}}
+.rv2_9{animation:rv2_9 58s linear infinite}
+@keyframes rv2_10{0%,38.2749%{visibility:hidden}38.2759%,100%{visibility:visible}}
+.rv2_10{animation:rv2_10 58s linear infinite}
+@keyframes rv2_12{0%,41.3783%{visibility:hidden}41.3793%,100%{visibility:visible}}
+.rv2_12{animation:rv2_12 58s linear infinite}
+@keyframes rv2_13{0%,42.0680%{visibility:hidden}42.0690%,100%{visibility:visible}}
+.rv2_13{animation:rv2_13 58s linear infinite}
+@keyframes rv2_14{0%,42.6197%{visibility:hidden}42.6207%,100%{visibility:visible}}
+.rv2_14{animation:rv2_14 58s linear infinite}
+@keyframes rv2_15{0%,43.1714%{visibility:hidden}43.1724%,100%{visibility:visible}}
+.rv2_15{animation:rv2_15 58s linear infinite}
+@keyframes rv2_16{0%,41.7231%{visibility:hidden}41.7241%,100%{visibility:visible}}
+.rv2_16{animation:rv2_16 58s linear infinite}
+@keyframes st3{0%,44.8266%{opacity:0}44.8276%,48.2749%{opacity:1}48.2759%,100%{opacity:0}}
+g.st3{animation:st3 58s linear infinite}
+@keyframes tp3_0{0%,44.8276%{width:0}45.9138%,100%{width:142.8px}}
+#cl3_0 rect{animation:tp3_0 58s steps(17,end) infinite}
+@keyframes cx3_0{0%,44.8276%{x:16.0px}45.9138%,100%{x:158.8px}}
+@keyframes cv3_0{0%,44.8266%{visibility:hidden}44.8276%,45.9138%{visibility:visible}46.5138%,100%{visibility:hidden}}
+.cur3_0{animation:cx3_0 58s steps(17,end) infinite,cv3_0 58s linear infinite,blink 1s steps(1,end) infinite}
+@keyframes st4{0%,48.2749%{opacity:0}48.2759%,56.8956%{opacity:1}56.8966%,100%{opacity:0}}
+g.st4{animation:st4 58s linear infinite}
+@keyframes rv4_0{0%,48.2749%{visibility:hidden}48.2759%,100%{visibility:visible}}
+.rv4_0{animation:rv4_0 58s linear infinite}
+@keyframes rv4_1{0%,48.3956%{visibility:hidden}48.3966%,100%{visibility:visible}}
+.rv4_1{animation:rv4_1 58s linear infinite}
+@keyframes rv4_2{0%,48.5162%{visibility:hidden}48.5172%,100%{visibility:visible}}
+.rv4_2{animation:rv4_2 58s linear infinite}
+@keyframes rv4_3{0%,48.6369%{visibility:hidden}48.6379%,100%{visibility:visible}}
+.rv4_3{animation:rv4_3 58s linear infinite}
+@keyframes rv4_4{0%,48.7576%{visibility:hidden}48.7586%,100%{visibility:visible}}
+.rv4_4{animation:rv4_4 58s linear infinite}
+@keyframes rv4_5{0%,48.8783%{visibility:hidden}48.8793%,100%{visibility:visible}}
+.rv4_5{animation:rv4_5 58s linear infinite}
+@keyframes rv4_6{0%,48.9990%{visibility:hidden}49.0000%,100%{visibility:visible}}
+.rv4_6{animation:rv4_6 58s linear infinite}
+@keyframes rv4_7{0%,49.1197%{visibility:hidden}49.1207%,100%{visibility:visible}}
+.rv4_7{animation:rv4_7 58s linear infinite}
+@keyframes rv4_8{0%,49.2404%{visibility:hidden}49.2414%,100%{visibility:visible}}
+.rv4_8{animation:rv4_8 58s linear infinite}
+@keyframes rv4_9{0%,49.3611%{visibility:hidden}49.3621%,100%{visibility:visible}}
+.rv4_9{animation:rv4_9 58s linear infinite}
+@keyframes rv4_10{0%,49.4818%{visibility:hidden}49.4828%,100%{visibility:visible}}
+.rv4_10{animation:rv4_10 58s linear infinite}
+@keyframes rv4_11{0%,49.6024%{visibility:hidden}49.6034%,100%{visibility:visible}}
+.rv4_11{animation:rv4_11 58s linear infinite}
+@keyframes rv4_12{0%,49.7231%{visibility:hidden}49.7241%,100%{visibility:visible}}
+.rv4_12{animation:rv4_12 58s linear infinite}
+@keyframes rv4_13{0%,49.8438%{visibility:hidden}49.8448%,100%{visibility:visible}}
+.rv4_13{animation:rv4_13 58s linear infinite}
+@keyframes rv4_14{0%,49.9645%{visibility:hidden}49.9655%,100%{visibility:visible}}
+.rv4_14{animation:rv4_14 58s linear infinite}
+@keyframes rv4_15{0%,50.0852%{visibility:hidden}50.0862%,100%{visibility:visible}}
+.rv4_15{animation:rv4_15 58s linear infinite}
+@keyframes rv4_16{0%,50.2059%{visibility:hidden}50.2069%,100%{visibility:visible}}
+.rv4_16{animation:rv4_16 58s linear infinite}
+@keyframes rv4_17{0%,50.3266%{visibility:hidden}50.3276%,100%{visibility:visible}}
+.rv4_17{animation:rv4_17 58s linear infinite}
+@keyframes rv4_18{0%,50.4473%{visibility:hidden}50.4483%,100%{visibility:visible}}
+.rv4_18{animation:rv4_18 58s linear infinite}
+@keyframes rv4_19{0%,50.5680%{visibility:hidden}50.5690%,100%{visibility:visible}}
+.rv4_19{animation:rv4_19 58s linear infinite}
+@keyframes rv4_20{0%,50.6887%{visibility:hidden}50.6897%,100%{visibility:visible}}
+.rv4_20{animation:rv4_20 58s linear infinite}
+@keyframes rv4_21{0%,50.8093%{visibility:hidden}50.8103%,100%{visibility:visible}}
+.rv4_21{animation:rv4_21 58s linear infinite}
+@keyframes rv4_22{0%,50.9300%{visibility:hidden}50.9310%,100%{visibility:visible}}
+.rv4_22{animation:rv4_22 58s linear infinite}
+@keyframes rv4_23{0%,51.0507%{visibility:hidden}51.0517%,100%{visibility:visible}}
+.rv4_23{animation:rv4_23 58s linear infinite}
+@keyframes rv4_24{0%,51.1714%{visibility:hidden}51.1724%,100%{visibility:visible}}
+.rv4_24{animation:rv4_24 58s linear infinite}
+@keyframes rv4_25{0%,51.2921%{visibility:hidden}51.2931%,100%{visibility:visible}}
+.rv4_25{animation:rv4_25 58s linear infinite}
+@keyframes rv4_26{0%,51.4128%{visibility:hidden}51.4138%,100%{visibility:visible}}
+.rv4_26{animation:rv4_26 58s linear infinite}
+@keyframes rv4_27{0%,51.5335%{visibility:hidden}51.5345%,100%{visibility:visible}}
+.rv4_27{animation:rv4_27 58s linear infinite}
+@keyframes rv4_28{0%,51.6542%{visibility:hidden}51.6552%,100%{visibility:visible}}
+.rv4_28{animation:rv4_28 58s linear infinite}
+@keyframes rv4_29{0%,51.7749%{visibility:hidden}51.7759%,100%{visibility:visible}}
+.rv4_29{animation:rv4_29 58s linear infinite}
+@keyframes rv4_30{0%,51.8956%{visibility:hidden}51.8966%,100%{visibility:visible}}
+.rv4_30{animation:rv4_30 58s linear infinite}
+@keyframes rv4_31{0%,52.0162%{visibility:hidden}52.0172%,100%{visibility:visible}}
+.rv4_31{animation:rv4_31 58s linear infinite}
+@keyframes rv4_32{0%,52.1369%{visibility:hidden}52.1379%,100%{visibility:visible}}
+.rv4_32{animation:rv4_32 58s linear infinite}
+@keyframes rv4_33{0%,52.2576%{visibility:hidden}52.2586%,100%{visibility:visible}}
+.rv4_33{animation:rv4_33 58s linear infinite}
+@keyframes st5{0%,56.8956%{opacity:0}56.8966%,67.2404%{opacity:1}67.2414%,100%{opacity:0}}
+g.st5{animation:st5 58s linear infinite}
+@keyframes st6{0%,67.2404%{opacity:0}67.2414%,74.1369%{opacity:1}74.1379%,100%{opacity:0}}
+g.st6{animation:st6 58s linear infinite}
+@keyframes st7{0%,74.1369%{opacity:0}74.1379%,82.7576%{opacity:1}82.7586%,100%{opacity:0}}
+g.st7{animation:st7 58s linear infinite}
+@keyframes st8{0%,82.7576%{opacity:0}82.7586%,89.6542%{opacity:1}89.6552%,100%{opacity:0}}
+g.st8{animation:st8 58s linear infinite}
+@keyframes st9{0%,89.6542%{opacity:0}89.6552%,96.5507%{opacity:1}96.5517%,100%{opacity:0}}
+g.st9{animation:st9 58s linear infinite}
+@keyframes st10{0%,96.5507%{opacity:0}96.5517%,100%{opacity:1}}
+g.st10{animation:st10 58s linear infinite}
 @media (prefers-reduced-motion:reduce){
 g.st,.rv,.cur,clipPath rect{animation:none!important}
 g.st{opacity:0}
@@ -199,115 +261,181 @@ clipPath rect{width:100000px}
 <text x="520" y="19.0" fill="#6e7681" font-size="12" text-anchor="middle">cortex</text>
 <g class="st st0 lbl-install">
 <clipPath id="cl0_0"><rect x="16.0" y="45.0" width="0" height="18.0"/></clipPath>
-<text clip-path="url(#cl0_0)" y="58.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="32.8" textLength="915.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh | sh -s -- --claude-code</tspan></text>
+<text clip-path="url(#cl0_0)" y="58.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="32.8" textLength="487.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh</tspan></text>
 <rect class="cur cur0_0" x="16.0" y="46.0" width="8.4" height="14.0"/>
-<text class="rv rv0_1" y="76.0"><tspan x="16.0" textLength="319.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">Downloading v0.9.3 for darwin/arm64...</tspan></text>
-<text class="rv rv0_2" y="94.0"><tspan x="16.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  rosso cortex · installer   v0.9.3 · darwin/arm64</tspan></text>
-<text class="rv rv0_3" y="112.0"><tspan x="16.0" textLength="352.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  ✓ downloaded   24.0 MB · sha256 verified</tspan></text>
-<text class="rv rv0_4" y="130.0"></text>
-<text class="rv rv0_5" y="148.0"><tspan x="16.0" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  This will:</tspan></text>
-<text class="rv rv0_6" y="166.0"><tspan x="16.0" textLength="411.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">    install  agentop, cortex         ~/.local/bin</tspan></text>
-<text class="rv rv0_7" y="184.0"><tspan x="16.0" textLength="520.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">    add      ~/.local/bin to PATH    ~/.zshrc (2 marked lines)</tspan></text>
-<text class="rv rv0_8" y="202.0"><tspan x="16.0" textLength="487.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">    write    the cortex config       ~/.cortex/config.yaml</tspan></text>
-<text class="rv rv0_9" y="220.0"><tspan x="16.0" textLength="613.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">    run      the cortex proxy        launchd user agent · 127.0.0.1:47600</tspan></text>
-<text class="rv rv0_10" y="238.0"><tspan x="16.0" textLength="504.0" lengthAdjust="spacingAndGlyphs" fill="#8b949e">    route    Claude Code via Cortex  ~/.claude/settings.json</tspan></text>
-<text class="rv rv0_11" y="256.0"></text>
-<text class="rv rv0_12" y="274.0"><tspan x="16.0" textLength="285.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Undo any time: agentop uninstall</tspan></text>
-<text class="rv rv0_13" y="292.0"></text>
-<text class="rv rv0_14" y="310.0"><tspan x="16.0" textLength="159.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Continue? [Y/n] y</tspan></text>
-<text class="rv rv0_15" y="328.0"></text>
-<text class="rv rv0_16" y="346.0"><tspan x="16.0" textLength="394.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  ✓ installed    agentop, cortex → ~/.local/bin</tspan></text>
-<text class="rv rv0_17" y="364.0"><tspan x="16.0" textLength="210.0" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  ✓ PATH         ~/.zshrc</tspan></text>
-<text class="rv rv0_18" y="382.0"><tspan x="16.0" textLength="319.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  ✓ config       ~/.cortex/config.yaml</tspan></text>
-<text class="rv rv0_19" y="400.0"><tspan x="16.0" textLength="537.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  ✓ started      launchd user agent · healthy on 127.0.0.1:47600</tspan></text>
-<text class="rv rv0_20" y="418.0"><tspan x="16.0" textLength="310.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  ✓ routed       Claude Code → Cortex</tspan></text>
-<text class="rv rv0_21" y="436.0"></text>
-<text class="rv rv0_22" y="454.0"><tspan x="16.0" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  cortex v0.9.3 ready.</tspan></text>
-<text class="rv rv0_23" y="472.0"></text>
-<text class="rv rv0_24" y="490.0"><tspan x="16.0" textLength="235.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Open a new terminal, then:</tspan></text>
-<text class="rv rv0_25" y="508.0"></text>
-<text class="rv rv0_26" y="526.0"><tspan x="16.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#8b949e">    agentop        # watch your agent traffic live</tspan></text>
-<text class="rv rv0_27" y="544.0"></text>
-<text class="rv rv0_28" y="562.0"><tspan x="16.0" textLength="285.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Undo any time: agentop uninstall</tspan></text>
+<text class="rv rv0_1" y="76.0"><tspan x="16.0" textLength="655.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">  rosso cortex · installer                               v0.9.3 · darwin/arm64</tspan></text>
+<clipPath id="cl0_2"><rect x="16.0" y="81.0" width="0" height="18.0"/></clipPath>
+<text clip-path="url(#cl0_2)" y="94.0"><tspan x="32.8" textLength="336.0" lengthAdjust="spacingAndGlyphs" fill="#d75f5f">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</tspan><tspan x="368.8" textLength="268.8" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">  100%  15.6 MB · sha256 ✓  2.0s</tspan></text>
+<text class="rv rv0_4" y="130.0"><tspan x="16.0" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">  This will:</tspan></text>
+<text class="rv rv0_5" y="148.0"><tspan x="16.0" textLength="294.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">    install  agentop, cortex       </tspan><tspan x="310.0" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">~/.local/bin</tspan></text>
+<text class="rv rv0_6" y="166.0"><tspan x="16.0" textLength="294.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">    add      ~/.local/bin to PATH  </tspan><tspan x="310.0" textLength="210.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">~/.zshrc (2 marked lines)</tspan></text>
+<text class="rv rv0_7" y="184.0"><tspan x="16.0" textLength="294.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">    write    the cortex config     </tspan><tspan x="310.0" textLength="176.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">~/.cortex/config.yaml</tspan></text>
+<text class="rv rv0_8" y="202.0"><tspan x="16.0" textLength="294.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">    run      the cortex proxy      </tspan><tspan x="310.0" textLength="302.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">launchd user agent · 127.0.0.1:47600</tspan></text>
+<text class="rv rv0_10" y="238.0"><tspan x="32.8" textLength="268.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">Undo any time: agentop uninstall</tspan></text>
+<text class="rv rv0_12" y="274.0"><tspan x="16.0" textLength="159.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">  Continue? [Y/n] y</tspan></text>
+<text class="rv rv0_14" y="310.0"><tspan x="32.8" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">✓</tspan><tspan x="41.2" textLength="596.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> installed    agentop, cortex → ~/.local/bin                           </tspan><tspan x="637.6" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.3s</tspan></text>
+<text class="rv rv0_15" y="328.0"><tspan x="32.8" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">✓</tspan><tspan x="41.2" textLength="596.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> PATH         ~/.zshrc                                                 </tspan><tspan x="637.6" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.1s</tspan></text>
+<text class="rv rv0_16" y="346.0"><tspan x="32.8" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">✓</tspan><tspan x="41.2" textLength="596.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> config       ~/.cortex/config.yaml                                    </tspan><tspan x="637.6" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.2s</tspan></text>
+<text class="rv rv0_17" y="364.0"><tspan x="32.8" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">✓</tspan><tspan x="41.2" textLength="596.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> started      launchd user agent · healthy on 127.0.0.1:47600          </tspan><tspan x="637.6" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">1.3s</tspan></text>
+<rect class="rv rv0_19" x="41.2" y="387.0" width="50.4" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_19" x="108.4" y="387.0" width="50.4" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_19" x="175.6" y="387.0" width="50.4" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_19" x="242.8" y="387.0" width="67.2" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_19" x="318.4" y="387.0" width="58.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_19" x="385.6" y="387.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_19" x="427.6" y="387.0" width="16.8" height="18.0" fill="#f97066"/>
+<text class="rv rv0_19" y="400.0"><tspan x="32.8" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#f97066">       ╗       ╗       ╗         ╗       ╗  ╗    ╗</tspan></text>
+<rect class="rv rv0_20" x="32.8" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="100.0" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="150.4" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="175.6" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="217.6" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="268.0" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="318.4" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="394.0" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_20" x="419.2" y="405.0" width="16.8" height="18.0" fill="#f97066"/>
+<text class="rv rv0_20" y="418.0"><tspan x="32.8" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#f97066">  ╔════╝  ╔═══  ╗  ╔══  ╗╚══  ╔══╝  ╔════╝╚  ╗  ╔╝</tspan></text>
+<rect class="rv rv0_21" x="32.8" y="423.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_21" x="100.0" y="423.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_21" x="150.4" y="423.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_21" x="175.6" y="423.0" width="50.4" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_21" x="268.0" y="423.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_21" x="318.4" y="423.0" width="42.0" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_21" x="402.4" y="423.0" width="25.2" height="18.0" fill="#f97066"/>
+<text class="rv rv0_21" y="436.0"><tspan x="32.8" textLength="411.6" lengthAdjust="spacingAndGlyphs" fill="#f97066">  ║       ║     ║      ╔╝     ║        ╗   ╚   ╔╝</tspan></text>
+<rect class="rv rv0_22" x="32.8" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="100.0" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="150.4" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="175.6" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="217.6" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="268.0" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="318.4" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="394.0" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_22" x="419.2" y="441.0" width="16.8" height="18.0" fill="#f97066"/>
+<text class="rv rv0_22" y="454.0"><tspan x="32.8" textLength="411.6" lengthAdjust="spacingAndGlyphs" fill="#f97066">  ║       ║     ║  ╔══  ╗     ║     ╔══╝     ╔  ╗</tspan></text>
+<rect class="rv rv0_23" x="41.2" y="459.0" width="50.4" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_23" x="108.4" y="459.0" width="50.4" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_23" x="175.6" y="459.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_23" x="217.6" y="459.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_23" x="268.0" y="459.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_23" x="318.4" y="459.0" width="58.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_23" x="385.6" y="459.0" width="16.8" height="18.0" fill="#f97066"/>
+<rect class="rv rv0_23" x="427.6" y="459.0" width="16.8" height="18.0" fill="#f97066"/>
+<text class="rv rv0_23" y="472.0"><tspan x="32.8" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#f97066">╚      ╗╚      ╔╝  ║    ║     ║          ╗  ╔╝   ╗</tspan></text>
+<text class="rv rv0_24" y="490.0"><tspan x="32.8" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#f97066"> ╚═════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝</tspan></text>
+<text class="rv rv0_26" y="526.0"><tspan x="16.0" textLength="201.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">    v0.9.3 ready in 1.9s</tspan></text>
+<text class="rv rv0_28" y="562.0"><tspan x="16.0" textLength="235.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">  Open a new terminal, then:</tspan></text>
+<text class="rv rv0_30" y="598.0"><tspan x="16.0" textLength="277.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">    agentop exec -- &lt;cmd&gt;        </tspan><tspan x="293.2" textLength="252.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af"># send an agent through Cortex</tspan></text>
+<text class="rv rv0_32" y="634.0"><tspan x="32.8" textLength="268.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">Undo any time: agentop uninstall</tspan></text>
 </g>
-<g class="st st1 lbl-sessions">
-<text class="rv rv1_0" y="58.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">┌─ ~/work/api ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐</tspan></text>
-<text class="rv rv1_1" y="76.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="49.6" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">claude</tspan></text>
-<text class="rv rv1_2" y="94.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="193.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">▸ fix the retry handler</tspan></text>
-<text class="rv rv1_3" y="112.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="226.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Read src/retry/handler.go</tspan></text>
-<text class="rv rv1_4" y="130.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</tspan></text>
-<text class="rv rv1_6" y="166.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">┌─ ~/work/web ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐</tspan></text>
-<text class="rv rv1_7" y="184.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="49.6" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">claude</tspan></text>
-<text class="rv rv1_8" y="202.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">▸ add dark mode toggle</tspan></text>
-<text class="rv rv1_9" y="220.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="243.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Edit src/pages/Settings.tsx</tspan></text>
-<text class="rv rv1_10" y="238.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</tspan></text>
-<text class="rv rv1_12" y="274.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">┌─ ~/work/infra ───────────────────────────────────────────────────────────────────────────────────────────────────────┐</tspan></text>
-<text class="rv rv1_13" y="292.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="49.6" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">claude</tspan></text>
-<text class="rv rv1_14" y="310.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">▸ debug the helm chart</tspan></text>
-<text class="rv rv1_15" y="328.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Bash helm template .</tspan></text>
-<text class="rv rv1_16" y="346.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</tspan></text>
+<g class="st st1 lbl-connect">
+<clipPath id="cl1_0"><rect x="16.0" y="45.0" width="0" height="18.0"/></clipPath>
+<text clip-path="url(#cl1_0)" y="58.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="32.8" textLength="302.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">agentop configure claude-code enable</tspan></text>
+<rect class="cur cur1_0" x="16.0" y="46.0" width="8.4" height="14.0"/>
+<text class="rv rv1_1" y="76.0"><tspan x="16.0" textLength="621.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">Note: on macOS, Go tools (go, gh, helm) trust only the keychain, so unless</tspan></text>
+<text class="rv rv1_2" y="94.0"><tspan x="16.0" textLength="630.0" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  macOS trusts Cortex&apos;s CA, Cortex passes their HTTPS through unread rather</tspan></text>
+<text class="rv rv1_3" y="112.0"><tspan x="16.0" textLength="394.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  than breaking them. To have Cortex read them:</tspan></text>
+<text class="rv rv1_4" y="130.0"><tspan x="16.0" textLength="663.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">    security add-trusted-cert -k ~/Library/Keychains/login.keychain-db -p ssl \</tspan></text>
+<text class="rv rv1_5" y="148.0"><tspan x="16.0" textLength="285.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">      /Users/you/.cortex/ca/ca.crt</tspan></text>
+<text class="rv rv1_6" y="166.0"><tspan x="16.0" textLength="554.4" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  (undo: security delete-certificate -c authbridge-tls-bridge-ca \</tspan></text>
+<text class="rv rv1_7" y="184.0"><tspan x="16.0" textLength="361.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">     ~/Library/Keychains/login.keychain-db)</tspan></text>
+<text class="rv rv1_8" y="202.0"></text>
+<text class="rv rv1_9" y="220.0"><tspan x="16.0" textLength="504.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">Adds to the &quot;env&quot; block of /Users/you/.claude/settings.json:</tspan></text>
+<text class="rv rv1_10" y="238.0"><tspan x="16.0" textLength="302.4" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  HTTPS_PROXY=http://127.0.0.1:47600</tspan></text>
+<text class="rv rv1_11" y="256.0"><tspan x="16.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  NODE_EXTRA_CA_CERTS=/Users/you/.cortex/ca/ca.crt</tspan></text>
+<text class="rv rv1_12" y="274.0"><tspan x="16.0" textLength="403.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  SSL_CERT_FILE=/Users/you/.cortex/ca/bundle.crt</tspan></text>
+<text class="rv rv1_13" y="292.0"><tspan x="16.0" textLength="411.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  GIT_SSL_CAINFO=/Users/you/.cortex/ca/bundle.crt</tspan></text>
+<text class="rv rv1_14" y="310.0"><tspan x="16.0" textLength="445.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  REQUESTS_CA_BUNDLE=/Users/you/.cortex/ca/bundle.crt</tspan></text>
+<text class="rv rv1_15" y="328.0"><tspan x="16.0" textLength="411.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  CURL_CA_BUNDLE=/Users/you/.cortex/ca/bundle.crt</tspan></text>
+<text class="rv rv1_16" y="346.0"><tspan x="16.0" textLength="369.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1</tspan></text>
+<text class="rv rv1_17" y="364.0"><tspan x="16.0" textLength="739.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">Nothing else in the file changes; a copy is kept as /Users/you/.claude/settings.json.bak</tspan></text>
+<text class="rv rv1_18" y="382.0"></text>
+<text class="rv rv1_19" y="400.0"><tspan x="16.0" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#d29922">Apply? [y/N] y</tspan></text>
+<text class="rv rv1_20" y="418.0"><tspan x="16.0" textLength="268.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950">Enabled — run `claude` as usual.</tspan></text>
 </g>
 <g class="st st2 lbl-sessions">
-<text class="rv rv2_0" y="58.0"><tspan x="16.0" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · http://127.0.0.1:9094</tspan></text>
-<text class="rv rv2_1" y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
-<text class="rv rv2_2" y="94.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
-<text class="rv rv2_3" y="112.0"><tspan x="24.4" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">SESSION       </tspan><tspan x="158.8" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">TITLE                          </tspan><tspan x="436.0" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">UPDATED       </tspan><tspan x="570.4" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">  EVENTS</tspan><tspan x="654.4" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">    TOKENS</tspan><tspan x="755.2" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">      COST</tspan><tspan x="856.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">    SAVED~</tspan><tspan x="956.8" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">CTX(1M)</tspan></text>
-<rect class="rv rv2_4" x="16.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="24.4" y="117.0" width="117.6" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="142.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="150.4" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="158.8" y="117.0" width="260.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="419.2" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="427.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="436.0" y="117.0" width="117.6" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="553.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="562.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="570.4" y="117.0" width="67.2" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="637.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="646.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="654.4" y="117.0" width="84.0" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="738.4" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="746.8" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="755.2" y="117.0" width="84.0" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="839.2" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="847.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="856.0" y="117.0" width="84.0" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="940.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="948.4" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="956.8" y="117.0" width="58.8" height="18.0" fill="#303050"/>
-<rect class="rv rv2_4" x="1015.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
-<text class="rv rv2_4" y="130.0"><tspan x="24.4" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">infra-55de    </tspan><tspan x="158.8" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">debug the helm chart           </tspan><tspan x="436.0" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">42s ago       </tspan><tspan x="570.4" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">       2</tspan><tspan x="654.4" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">     16.2k</tspan><tspan x="755.2" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">     $0.02</tspan><tspan x="856.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">         —</tspan><tspan x="956.8" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">▕▏    ▏</tspan></text>
-<text class="rv rv2_5" y="148.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> web-2a91        add dark mode toggle             42s ago                4       76.0k       $0.20           —  ▕▏    ▏ </tspan></text>
-<text class="rv rv2_6" y="166.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> api-7f3c        fix the retry handler            42s ago                8      300.7k       $0.57           —  ▕▋    ▏ </tspan></text>
-<text class="rv rv2_7" y="184.0"></text>
-<text class="rv rv2_8" y="202.0"></text>
-<text class="rv rv2_9" y="220.0"></text>
-<text class="rv rv2_10" y="238.0"></text>
-<text class="rv rv2_11" y="256.0"></text>
-<text class="rv rv2_12" y="274.0"></text>
-<text class="rv rv2_13" y="292.0"></text>
-<text class="rv rv2_14" y="310.0"></text>
-<text class="rv rv2_15" y="328.0"></text>
-<text class="rv rv2_16" y="346.0"></text>
-<text class="rv rv2_17" y="364.0"></text>
-<text class="rv rv2_18" y="382.0"></text>
-<text class="rv rv2_19" y="400.0"></text>
-<text class="rv rv2_20" y="418.0"></text>
-<text class="rv rv2_21" y="436.0"></text>
-<text class="rv rv2_22" y="454.0"></text>
-<text class="rv rv2_23" y="472.0"></text>
-<text class="rv rv2_24" y="490.0"></text>
-<text class="rv rv2_25" y="508.0"></text>
-<text class="rv rv2_26" y="526.0"></text>
-<text class="rv rv2_27" y="544.0"></text>
-<text class="rv rv2_28" y="562.0"></text>
-<text class="rv rv2_29" y="580.0"></text>
-<text class="rv rv2_30" y="598.0"></text>
-<text class="rv rv2_31" y="616.0"></text>
-<text class="rv rv2_32" y="634.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
-<text class="rv rv2_33" y="652.0"><tspan x="16.0" textLength="823.2" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] nav  [↵] drill  [u] usage  [$] spend  [/] search  [p] pause  [P] pipeline  [?] keys  [q] quit</tspan></text>
+<text class="rv rv2_0" y="58.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">┌─ ~/work/api ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐</tspan></text>
+<text class="rv rv2_1" y="76.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="49.6" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">claude</tspan></text>
+<text class="rv rv2_2" y="94.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="193.2" lengthAdjust="spacingAndGlyphs" fill="#8b949e">▸ fix the retry handler</tspan></text>
+<text class="rv rv2_3" y="112.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="226.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Read src/retry/handler.go</tspan></text>
+<text class="rv rv2_4" y="130.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</tspan></text>
+<text class="rv rv2_6" y="166.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">┌─ ~/work/web ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐</tspan></text>
+<text class="rv rv2_7" y="184.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="49.6" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">claude</tspan></text>
+<text class="rv rv2_8" y="202.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">▸ add dark mode toggle</tspan></text>
+<text class="rv rv2_9" y="220.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="243.6" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Edit src/pages/Settings.tsx</tspan></text>
+<text class="rv rv2_10" y="238.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</tspan></text>
+<text class="rv rv2_12" y="274.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">┌─ ~/work/infra ───────────────────────────────────────────────────────────────────────────────────────────────────────┐</tspan></text>
+<text class="rv rv2_13" y="292.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="49.6" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">claude</tspan></text>
+<text class="rv rv2_14" y="310.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">▸ debug the helm chart</tspan></text>
+<text class="rv rv2_15" y="328.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#6e7681">│ </tspan><tspan x="32.8" textLength="184.8" lengthAdjust="spacingAndGlyphs" fill="#8b949e">  Bash helm template .</tspan></text>
+<text class="rv rv2_16" y="346.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#6e7681">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</tspan></text>
 </g>
-<g class="st st3 lbl-spend">
+<g class="st st3 lbl-observe">
+<clipPath id="cl3_0"><rect x="16.0" y="45.0" width="0" height="18.0"/></clipPath>
+<text clip-path="url(#cl3_0)" y="58.0"><tspan x="16.0" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#3fb950" font-weight="600">$ </tspan><tspan x="32.8" textLength="126.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9">agentop observe</tspan></text>
+<rect class="cur cur3_0" x="16.0" y="46.0" width="8.4" height="14.0"/>
+</g>
+<g class="st st4 lbl-sessions">
+<text class="rv rv4_0" y="58.0"><tspan x="16.0" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · http://127.0.0.1:9094</tspan></text>
+<text class="rv rv4_1" y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
+<text class="rv rv4_2" y="94.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
+<text class="rv rv4_3" y="112.0"><tspan x="24.4" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">SESSION       </tspan><tspan x="158.8" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">TITLE                          </tspan><tspan x="436.0" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">UPDATED       </tspan><tspan x="570.4" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">  EVENTS</tspan><tspan x="654.4" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">    TOKENS</tspan><tspan x="755.2" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">      COST</tspan><tspan x="856.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">    SAVED~</tspan><tspan x="956.8" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">CTX(1M)</tspan></text>
+<rect class="rv rv4_4" x="16.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="24.4" y="117.0" width="117.6" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="142.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="150.4" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="158.8" y="117.0" width="260.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="419.2" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="427.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="436.0" y="117.0" width="117.6" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="553.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="562.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="570.4" y="117.0" width="67.2" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="637.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="646.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="654.4" y="117.0" width="84.0" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="738.4" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="746.8" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="755.2" y="117.0" width="84.0" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="839.2" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="847.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="856.0" y="117.0" width="84.0" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="940.0" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="948.4" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="956.8" y="117.0" width="58.8" height="18.0" fill="#303050"/>
+<rect class="rv rv4_4" x="1015.6" y="117.0" width="8.4" height="18.0" fill="#303050"/>
+<text class="rv rv4_4" y="130.0"><tspan x="24.4" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">infra-55de    </tspan><tspan x="158.8" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">debug the helm chart           </tspan><tspan x="436.0" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">42s ago       </tspan><tspan x="570.4" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">       2</tspan><tspan x="654.4" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">     16.2k</tspan><tspan x="755.2" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">     $0.02</tspan><tspan x="856.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">         —</tspan><tspan x="956.8" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9" font-weight="600">▕▏    ▏</tspan></text>
+<text class="rv rv4_5" y="148.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> web-2a91        add dark mode toggle             42s ago                4       76.0k       $0.20           —  ▕▏    ▏ </tspan></text>
+<text class="rv rv4_6" y="166.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> api-7f3c        fix the retry handler            42s ago                8      300.7k       $0.57           —  ▕▋    ▏ </tspan></text>
+<text class="rv rv4_7" y="184.0"></text>
+<text class="rv rv4_8" y="202.0"></text>
+<text class="rv rv4_9" y="220.0"></text>
+<text class="rv rv4_10" y="238.0"></text>
+<text class="rv rv4_11" y="256.0"></text>
+<text class="rv rv4_12" y="274.0"></text>
+<text class="rv rv4_13" y="292.0"></text>
+<text class="rv rv4_14" y="310.0"></text>
+<text class="rv rv4_15" y="328.0"></text>
+<text class="rv rv4_16" y="346.0"></text>
+<text class="rv rv4_17" y="364.0"></text>
+<text class="rv rv4_18" y="382.0"></text>
+<text class="rv rv4_19" y="400.0"></text>
+<text class="rv rv4_20" y="418.0"></text>
+<text class="rv rv4_21" y="436.0"></text>
+<text class="rv rv4_22" y="454.0"></text>
+<text class="rv rv4_23" y="472.0"></text>
+<text class="rv rv4_24" y="490.0"></text>
+<text class="rv rv4_25" y="508.0"></text>
+<text class="rv rv4_26" y="526.0"></text>
+<text class="rv rv4_27" y="544.0"></text>
+<text class="rv rv4_28" y="562.0"></text>
+<text class="rv rv4_29" y="580.0"></text>
+<text class="rv rv4_30" y="598.0"></text>
+<text class="rv rv4_31" y="616.0"></text>
+<text class="rv rv4_32" y="634.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
+<text class="rv rv4_33" y="652.0"><tspan x="16.0" textLength="814.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] nav  [↵] drill  [u] usage  [$] spend  [/] search  [p] pause  [P] plugins  [?] keys  [q] quit</tspan></text>
+</g>
+<g class="st st5 lbl-spend">
 <text y="58.0"><tspan x="16.0" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · http://127.0.0.1:9094</tspan></text>
 <text y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
 <text y="94.0"><tspan x="16.0" textLength="453.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">  WHERE IT WENT                               BY MODEL</tspan></text>
@@ -365,9 +493,9 @@ clipPath rect{width:100000px}
 <text y="598.0"></text>
 <text y="616.0"></text>
 <text y="634.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
-<text y="652.0"><tspan x="16.0" textLength="823.2" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] nav  [↵] drill  [u] usage  [$] spend  [/] search  [p] pause  [P] pipeline  [?] keys  [q] quit</tspan></text>
+<text y="652.0"><tspan x="16.0" textLength="814.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] nav  [↵] drill  [u] usage  [$] spend  [/] search  [p] pause  [P] plugins  [?] keys  [q] quit</tspan></text>
 </g>
-<g class="st st4 lbl-usage">
+<g class="st st6 lbl-usage">
 <text y="58.0"><tspan x="16.0" textLength="378.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · http://127.0.0.1:9094 · usage · all</tspan></text>
 <text y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
 <text y="94.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
@@ -395,9 +523,9 @@ clipPath rect{width:100000px}
 <text y="490.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
 <text y="508.0"><tspan x="16.0" textLength="831.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[m] metric  [w] window  [b] breakdown  [s] this session  [/] search  [esc] back  [?] keys  [q] quit</tspan></text>
 </g>
-<g class="st st5 lbl-events">
+<g class="st st7 lbl-events">
 <text y="58.0"><tspan x="16.0" textLength="352.8" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · fix the retry handler (api-7f3c)</tspan></text>
-<text y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
+<text y="76.0"><tspan x="16.0" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">ALL SESSIONS</tspan><tspan x="116.8" textLength="25.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> · </tspan><tspan x="142.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="200.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="276.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="394.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="444.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="520.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="604.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                            </tspan></text>
 <text y="94.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
 <text y="112.0"><tspan x="24.4" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">#   </tspan><tspan x="74.8" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">TIME       </tspan><tspan x="184.0" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">DIR </tspan><tspan x="234.4" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">PHASE </tspan><tspan x="301.6" textLength="67.2" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">ACTION  </tspan><tspan x="385.6" textLength="151.2" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">PLUGIN            </tspan><tspan x="553.6" textLength="151.2" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">METHOD            </tspan><tspan x="721.6" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600"> STATUS</tspan><tspan x="797.2" textLength="168.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">HOST                </tspan></text>
 <text y="130.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> 1     42:24:24.24  out   req     observe   inference-parser    claude-opus-5                api.anthropic.com          </tspan></text>
@@ -458,9 +586,9 @@ clipPath rect{width:100000px}
 <text y="634.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
 <text y="652.0"><tspan x="16.0" textLength="974.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">… [s] hide passthru/skip  [p] pause  [/] search  [esc] back  ·  → 4 more columns ([c] to choose)  [?] keys  [q] quit</tspan></text>
 </g>
-<g class="st st6 lbl-detail">
+<g class="st st8 lbl-detail">
 <text y="58.0"><tspan x="16.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · fix the retry handler (api-7f3c) · event</tspan></text>
-<text y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
+<text y="76.0"><tspan x="16.0" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">ALL SESSIONS</tspan><tspan x="116.8" textLength="25.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> · </tspan><tspan x="142.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="200.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="276.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="394.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="444.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="520.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="604.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                            </tspan></text>
 <text y="94.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
 <text y="112.0"><tspan x="16.0" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">{</tspan></text>
 <text y="130.0"><tspan x="32.8" textLength="33.6" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc">&quot;at&quot;</tspan><tspan x="66.4" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">: </tspan><tspan x="83.2" textLength="285.6" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">&quot;2026-09-22T42:24:24.242424-42:24&quot;</tspan><tspan x="368.8" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">,</tspan></text>
@@ -494,9 +622,9 @@ clipPath rect{width:100000px}
 <text y="634.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
 <text y="652.0"><tspan x="16.0" textLength="638.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] scroll  [y] yank  [u] usage  [/] search  [esc] back  [?] keys  [q] quit</tspan></text>
 </g>
-<g class="st st7 lbl-manifest">
+<g class="st st9 lbl-manifest">
 <text y="58.0"><tspan x="16.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · fix the retry handler (api-7f3c) · event</tspan></text>
-<text y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
+<text y="76.0"><tspan x="16.0" textLength="100.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">ALL SESSIONS</tspan><tspan x="116.8" textLength="25.2" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> · </tspan><tspan x="142.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="200.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="276.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="394.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="444.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="520.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="604.0" textLength="420.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                            </tspan></text>
 <text y="94.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
 <text y="112.0"><tspan x="83.2" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc">&quot;role&quot;</tspan><tspan x="133.6" textLength="16.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">: </tspan><tspan x="150.4" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">&quot;assistant&quot;</tspan></text>
 <text y="130.0"><tspan x="66.4" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">}</tspan><tspan x="74.8" textLength="8.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">,</tspan></text>
@@ -530,7 +658,7 @@ clipPath rect{width:100000px}
 <text y="634.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
 <text y="652.0"><tspan x="16.0" textLength="638.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] scroll  [y] yank  [u] usage  [/] search  [esc] back  [?] keys  [q] quit</tspan></text>
 </g>
-<g class="st st8 final lbl-back">
+<g class="st st10 final lbl-back">
 <text y="58.0"><tspan x="16.0" textLength="260.4" lengthAdjust="spacingAndGlyphs" fill="#a5b3fc" font-weight="600">agentop · http://127.0.0.1:9094</tspan></text>
 <text y="76.0"><tspan x="16.0" textLength="58.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">LAST 1H</tspan><tspan x="74.8" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="150.4" textLength="42.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">TODAY</tspan><tspan x="192.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.65 · </tspan><tspan x="268.0" textLength="50.4" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">7 DAYS</tspan><tspan x="318.4" textLength="75.6" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79 · </tspan><tspan x="394.0" textLength="84.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">THIS MONTH</tspan><tspan x="478.0" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#c9d1d9"> $0.79                                                           </tspan></text>
 <text y="94.0"><tspan x="16.0" textLength="1008.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</tspan></text>
@@ -588,6 +716,6 @@ clipPath rect{width:100000px}
 <text y="598.0"></text>
 <text y="616.0"></text>
 <text y="634.0"><tspan x="16.0" textLength="92.4" lengthAdjust="spacingAndGlyphs" fill="#6ee7b7">● connected</tspan><tspan x="125.2" textLength="117.6" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">0.0 events/sec</tspan><tspan x="242.8" textLength="546.0" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">   feedback: https://github.com/rossoctl/cortex/issues/new/choose</tspan></text>
-<text y="652.0"><tspan x="16.0" textLength="823.2" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] nav  [↵] drill  [u] usage  [$] spend  [/] search  [p] pause  [P] pipeline  [?] keys  [q] quit</tspan></text>
+<text y="652.0"><tspan x="16.0" textLength="814.8" lengthAdjust="spacingAndGlyphs" fill="#9ca3af">[↑↓] nav  [↵] drill  [u] usage  [$] spend  [/] search  [p] pause  [P] plugins  [?] keys  [q] quit</tspan></text>
 </g>
 </svg>

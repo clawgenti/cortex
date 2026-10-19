@@ -120,6 +120,9 @@ type Archive struct {
 	mu      sync.Mutex
 	lastSeq map[string]uint64
 	pending *pendingClear
+	// deletes is the most recent delete per session id, for AwaitDelete; see delete.go. nil
+	// until the first.
+	deletes map[string]*pendingClear
 	// started is where the store's live entry for an id began numbering, from EntryStarted, for
 	// ids that held history then. The entry's first queued event carries it to the writer, and
 	// its rename tells the writer which segments move.
@@ -170,6 +173,7 @@ const (
 	opEvent opKind = iota
 	opRename
 	opClear
+	opDelete
 	opFunc
 )
 
@@ -439,6 +443,8 @@ func (a *Archive) take(o op) {
 		a.rename(o.id, o.to, o.after)
 	case opClear:
 		a.clearAll(o.clear)
+	case opDelete:
+		a.deleteSession(o.id, o.clear)
 	case opFunc:
 		o.f()
 		close(o.done)

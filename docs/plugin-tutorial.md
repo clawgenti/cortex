@@ -24,16 +24,18 @@ diagnostic invocations that show up in `/v1/sessions` and in `agentop`.
 
 ## Step 1 — The minimal plugin
 
-Create a file under `core/plugins/hellolog.go`:
+Create a file under `core/plugins/hellolog/plugin.go` — each plugin lives in
+its own directory with its own package:
 
 ```go
-package plugins
+package hellolog
 
 import (
 	"context"
 	"log/slog"
 
 	"github.com/rossoctl/cortex/core/pipeline"
+	"github.com/rossoctl/cortex/core/plugins"
 )
 
 type HelloLog struct{}
@@ -59,7 +61,7 @@ func (p *HelloLog) OnResponse(_ context.Context, pctx *pipeline.Context) pipelin
 }
 
 func init() {
-	RegisterPlugin("hello-log", func() pipeline.Plugin { return NewHelloLog() })
+	plugins.RegisterPlugin("hello-log", func() pipeline.Plugin { return NewHelloLog() })
 }
 ```
 
@@ -277,11 +279,11 @@ func init() {
 }
 ```
 
-The operator's authbridge build picks it up with a single side-effect
+The binary's build picks it up with a single side-effect
 import:
 
 ```go
-// cmd/authbridge/plugins_extra.go
+// cmd/cortex/plugins_extra.go
 package main
 
 import _ "github.com/acme/my-plugin"

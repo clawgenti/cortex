@@ -2,11 +2,10 @@
 // body, so every listener reports the same figure for the same response (#1309).
 //
 // It exists because the proxies read a response body through four different arms
-// — buffered whole, re-framed as SSE, relayed chunk by chunk, or copied straight
-// through — and three of those have a natural-looking number to count that is NOT
-// the body: the SSE arm sees sseframe payloads with the `data: ` prefixes and
-// blank-line separators already stripped, and a buffered read stops at the
-// listener's cap. extproc has no such ambiguity (Envoy hands it the raw chunks),
+// — buffered whole, relayed SSE block by block, relayed chunk by chunk, or copied
+// straight through — and a per-arm count is easy to get subtly wrong: the SSE arm
+// handles parsed payloads alongside the bytes it forwards, and a buffered read
+// stops at the listener's cap. extproc has no such ambiguity (Envoy hands it the raw chunks),
 // so counting at the one place where the raw bytes enter the proxy is what makes
 // the three listeners agree. Wrap once, as early as the body is in hand, and let
 // every arm downstream read through the wrapper.

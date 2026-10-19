@@ -32,17 +32,25 @@ type Grid struct {
 
 // Reveal says how a row appears once its state is visible.
 type Reveal struct {
-	// Kind is "instant", "type" (character by character, with a cursor) or
-	// "fill" (whole row at once, after a delay).
-	Kind string
-	At   time.Duration // offset from the state's start
-	Dur  time.Duration // typing duration; zero for instant and fill
+	// Kind is "instant", "type" (character by character, with a cursor), "fill"
+	// (whole row at once, after a delay) or "bar" (a progress bar: columns From to
+	// To fill in one cell at a time, with no cursor, then the whole row shows).
+	Kind     string
+	At       time.Duration // offset from the state's start
+	Dur      time.Duration // typing or filling duration; zero for instant and fill
+	From, To int           // the columns a bar fills between
 }
 
 // Row is one terminal line.
 type Row struct {
 	Runs   []Run
 	Reveal Reveal
+	// SolidBlocks draws each █ as a filled cell rather than a glyph. A terminal's
+	// cells touch, so block art such as setup's logo reads as solid there; here the
+	// line height is taller than the glyph, and drawn as text it reads as stripes.
+	// Not for agentop's screens, whose block-drawn bars sit on adjacent rows and
+	// would merge into one.
+	SolidBlocks bool
 }
 
 // Window is the chrome drawn around a group of rows, for the stacked

@@ -178,11 +178,11 @@ func TestResend_ASecondRefusalReachesTheClient(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "team_model_access_denied") {
 		t.Fatalf("client got %d %q, want the second refusal", resp.StatusCode, body)
 	}
-	if _, models := upstream.seen(); len(models) != 2 {
-		t.Errorf("upstream saw %d sends, want exactly two: nothing is asked twice", len(models))
+	if _, models := upstream.seen(); len(models) != 1+pipeline.MaxResends {
+		t.Errorf("upstream saw %d sends, want %d: the listener asks at most MaxResends times", len(models), 1+pipeline.MaxResends)
 	}
-	if len(plugin.asked) != 1 {
-		t.Errorf("Resend asked %d times, want once", len(plugin.asked))
+	if len(plugin.asked) != pipeline.MaxResends {
+		t.Errorf("Resend asked %d times, want %d", len(plugin.asked), pipeline.MaxResends)
 	}
 }
 
@@ -296,5 +296,99 @@ func TestResend_TheResentRequestIsPreparedAsTheFirstSendIs(t *testing.T) {
 	}
 	if a, b := upstream.headers[0].Get("Accept-Encoding"), upstream.headers[1].Get("Accept-Encoding"); a != b {
 		t.Errorf("Accept-Encoding %q on the first send but %q on the resend", a, b)
+	}
+}
+
+// stepper redirects to target and answers each Resend with the next model in subs,
+// as two plugins answering two different refusals would.
+type stepper struct {
+	target string
+	subs   []string
+
+	mu    sync.Mutex
+	asked int
+}
+
+func (p *stepper) Name() string { return "stepper" }
+func (p *stepper) Capabilities() pipeline.PluginCapabilities {
+	return pipeline.PluginCapabilities{WritesDestination: true, WritesRequestBody: true, Description: "test"}
+}
+func (p *stepper) OnRequest(_ context.Context, pctx *pipeline.Context) pipeline.Action {
+	if m, ok := pctx.RequestModel(); ok {
+		pctx.Extensions.Inference = &pipeline.InferenceExtension{Model: m}
+	}
+	u, _ := url.Parse(p.target)
+	if err := pctx.Redirect(u); err != nil {
+		panic(err)
+	}
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (p *stepper) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (p *stepper) Resend(_ context.Context, pctx *pipeline.Context, _ int, _ []byte) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.asked >= len(p.subs) {
+		p.asked++
+		return false
+	}
+	sub := p.subs[p.asked]
+	p.asked++
+	pctx.MarkResend("step")
+	return pctx.SetRequestModel(sub) == nil
+}
+
+func TestResend_ASecondRoundReachesTheThirdAttempt(t *testing.T) {
+	upstream := &modelServer{served: "third"}
+	backend := httptest.NewServer(upstream)
+	defer backend.Close()
+
+	resp, body, store := postVia(t, &stepper{target: backend.URL, subs: []string{"second", "third"}}, "first")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "PONG") {
+		t.Fatalf("client got %d %q, want the third attempt's answer", resp.StatusCode, body)
+	}
+	if _, models := upstream.seen(); strings.Join(models, ",") != "first,second,third" {
+		t.Errorf("upstream saw %v, want first,second,third", models)
+	}
+	// Request, refusal, request, refusal, request, answer: each attempt paired with
+	// its own answer, as TestResend_BothAttemptsAreRecordedAndPairByRequestID checks
+	// for one round.
+	v := store.View(session.DefaultSessionID)
+	if v == nil || len(v.Events) != 6 {
+		t.Fatalf("rows = %+v, want three requests and three answers", v)
+	}
+	ev := v.Events
+	for i := 0; i < 6; i += 2 {
+		if ev[i].Phase != pipeline.SessionRequest || ev[i+1].Phase != pipeline.SessionResponse {
+			t.Fatalf("rows %d,%d are %s,%s; want request then response", i, i+1, ev[i].Phase, ev[i+1].Phase)
+		}
+		if ev[i].RequestID != ev[i+1].RequestID {
+			t.Errorf("attempt %d: request id %q, response id %q; want them paired", i/2+1, ev[i].RequestID, ev[i+1].RequestID)
+		}
+	}
+	if ev[1].StatusCode != http.StatusForbidden || ev[3].StatusCode != http.StatusForbidden || ev[5].StatusCode != http.StatusOK {
+		t.Errorf("answers %d %d %d, want 403 403 200", ev[1].StatusCode, ev[3].StatusCode, ev[5].StatusCode)
+	}
+}
+
+func TestResend_NoThirdRound(t *testing.T) {
+	upstream := &modelServer{served: "never"}
+	backend := httptest.NewServer(upstream)
+	defer backend.Close()
+
+	plugin := &stepper{target: backend.URL, subs: []string{"b", "c", "d"}}
+	resp, body, _ := postVia(t, plugin, "a")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "team_model_access_denied") {
+		t.Fatalf("client got %d %q, want the last refusal byte for byte", resp.StatusCode, body)
+	}
+	if _, models := upstream.seen(); len(models) != 1+pipeline.MaxResends {
+		t.Errorf("upstream saw %d attempts, want %d", len(models), 1+pipeline.MaxResends)
+	}
+	plugin.mu.Lock()
+	asked := plugin.asked
+	plugin.mu.Unlock()
+	if asked != pipeline.MaxResends {
+		t.Errorf("plugin was asked %d times, want %d", asked, pipeline.MaxResends)
 	}
 }

@@ -23,6 +23,62 @@ func fakeHome(t *testing.T) string {
 	return home
 }
 
+// shellRun drives the shell half of one verb through the merged command, the
+// way runBob assembles it for a user the editor half knows nothing about: no
+// settings path, a synthetic non-macOS launch, and the rc file resolved from the
+// environment exactly as runBob resolves it. The args are the merged command's —
+// a verb and optionally --yes — because that is the only spelling left; the shell
+// half has had no command of its own since the two halves merged, and what these
+// tests pin is its file mechanics, which do not differ by platform.
+//
+// The editor half is skipped the way runBob skips it off macOS, so a successful
+// enable or disable still exits 1 here: that 1 is the skipped half's, the same
+// code bobNotInstalled produces, and not the shell half's. status is exempt — a
+// report is a success — and the assertions below say which of the two they mean.
+func shellRun(args []string, stdout, stderr io.Writer) int {
+	verb := args[0]
+	yes := len(args) > 1 && args[1] == "--yes"
+	home, _ := os.UserHomeDir()
+	shell := os.Getenv("SHELL")
+	rc, advise, readErr := bobShellResolve(home, shell)
+	if readErr != nil {
+		fmt.Fprintf(stderr, "agentop: %v\n", readErr)
+		return 1
+	}
+	c := bobCommand{
+		home:        home,
+		ideSkip:     true,
+		launch:      bobLaunch{shell: shell},
+		shellRC:     rc,
+		shellAdvise: advise,
+		yes:         yes,
+		stdout:      stdout,
+		stderr:      stderr,
+	}
+	switch verb {
+	case "enable":
+		return c.enable()
+	case "disable":
+		return c.disable()
+	case "status":
+		return c.statusShellOnly()
+	}
+	return 2
+}
+
+// enableBobShellAt writes the bob function block into rc the way enable does,
+// for tests that need the enabled state on disk without driving the command.
+func enableBobShellAt(t *testing.T, rc string) {
+	t.Helper()
+	p, err := bobShellEnablePlan(rc)
+	if err != nil {
+		t.Fatalf("fixture: planning the bobshell block: %v", err)
+	}
+	if code := p.apply(io.Discard); code != 0 {
+		t.Fatalf("fixture: writing the bobshell block: exit %d", code)
+	}
+}
+
 // The whole of the file-selection policy, pinned as a table. No file need exist:
 // this maps a shell name to a path and nothing more.
 //
@@ -85,8 +141,8 @@ func TestBobShellEnableAppends(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
-		t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+	if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 	}
 	if errb.Len() != 0 {
 		t.Errorf("stderr not empty: %q", errb.String())
@@ -127,8 +183,8 @@ func TestBobShellEnableAddsMissingNewline(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
-		t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+	if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 	}
 	got, err := os.ReadFile(rc)
 	if err != nil {
@@ -151,8 +207,8 @@ func TestBobShellEnableCreatesTheFile(t *testing.T) {
 	rc := filepath.Join(home, ".zshrc")
 
 	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
-		t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+	if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 	}
 	got, err := os.ReadFile(rc)
 	if err != nil {
@@ -197,8 +253,8 @@ func TestBobShellEnablePreservesAnExistingMode(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
-		t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+	if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 	}
 
 	st, err := os.Stat(rc)
@@ -227,7 +283,7 @@ func TestBobShellEnableIsIdempotent(t *testing.T) {
 	rc := filepath.Join(home, ".zshrc")
 
 	var out1, errb bytes.Buffer
-	if code := runBobShell([]string{"enable", "--yes"}, &out1, &errb); code != 0 {
+	if code := shellRun([]string{"enable", "--yes"}, &out1, &errb); code != 1 {
 		t.Fatalf("first enable: exit = %d; stderr: %s", code, errb.String())
 	}
 	first, err := os.ReadFile(rc)
@@ -237,7 +293,7 @@ func TestBobShellEnableIsIdempotent(t *testing.T) {
 
 	var out2 bytes.Buffer
 	errb.Reset()
-	if code := runBobShell([]string{"enable", "--yes"}, &out2, &errb); code != 0 {
+	if code := shellRun([]string{"enable", "--yes"}, &out2, &errb); code != 1 {
 		t.Fatalf("second enable: exit = %d; stderr: %s", code, errb.String())
 	}
 	second, err := os.ReadFile(rc)
@@ -253,8 +309,8 @@ func TestBobShellEnableIsIdempotent(t *testing.T) {
 	if !bytes.Equal(first, second) {
 		t.Errorf("second enable changed the file:\n%q\nvs\n%q", first, second)
 	}
-	if !strings.Contains(out2.String(), "Already enabled") {
-		t.Errorf("second run did not say it was already enabled:\n%s", out2.String())
+	if !strings.Contains(out2.String(), "already in") {
+		t.Errorf("second run did not say the function was already in place:\n%s", out2.String())
 	}
 }
 
@@ -280,14 +336,16 @@ func TestBobShellEnableDeclinesAHandEditedBlock(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	// Exit 0, like disable's equivalent. This is agentop declining to GUESS, which is
-	// not the same thing as the user declining a prompt: --yes is passed, so nothing
-	// asked. agentop found a block it does not recognise, said what it found and why
-	// it stopped, and that is the most it can honestly do — a successful outcome for
-	// a command whose job is "or do nothing". A refused PROMPT is exitDeclined (3);
-	// see the decline test below. Do not unify the two.
-	if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
-		t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+	// Exit 1, like disable's equivalent — but not because declining to guess is a
+	// failure: the 1 is the skipped editor half's code (see shellRun), while the
+	// shell half's own outcome for this row is 0. This is agentop declining to
+	// GUESS, which is not the same thing as the user declining a prompt: --yes is
+	// passed, so nothing asked. agentop found a block it does not recognise, said
+	// what it found and why it stopped, and that is the most it can honestly do —
+	// a successful outcome for a command whose job is "or do nothing". A refused
+	// PROMPT is exitDeclined (3); see the decline test below. Do not unify the two.
+	if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 	}
 	if errb.Len() != 0 {
 		t.Errorf("stderr not empty: %q", errb.String())
@@ -343,12 +401,12 @@ func TestBobShellRoundTripIsByteIdentical(t *testing.T) {
 			}
 
 			var out, errb bytes.Buffer
-			if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
+			if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
 				t.Fatalf("enable: exit = %d; stderr: %s", code, errb.String())
 			}
 			out.Reset()
 			errb.Reset()
-			if code := runBobShell([]string{"disable", "--yes"}, &out, &errb); code != 0 {
+			if code := shellRun([]string{"disable", "--yes"}, &out, &errb); code != 1 {
 				t.Fatalf("disable: exit = %d; stderr: %s", code, errb.String())
 			}
 
@@ -415,12 +473,14 @@ func TestBobShellDisable(t *testing.T) {
 			}
 
 			var out, errb bytes.Buffer
-			// Every one of these is exit 0, for the same reason as enable's sibling
-			// case above: --yes is passed, so no prompt is reached and nobody
-			// declined anything. agentop is the one stopping, and it explains why.
-			// Only a refused prompt is exitDeclined (3).
-			if code := runBobShell([]string{"disable", "--yes"}, &out, &errb); code != 0 {
-				t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+			// The shell half's own outcome for every one of these rows is 0, for
+			// the same reason as enable's sibling case above: --yes is passed, so
+			// no prompt is reached and nobody declined anything. agentop is the
+			// one stopping, and it explains why. Only a refused prompt is
+			// exitDeclined (3). The 1 the assertion sees is the skipped editor
+			// half's — see shellRun.
+			if code := shellRun([]string{"disable", "--yes"}, &out, &errb); code != 1 {
+				t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 			}
 			if errb.Len() != 0 {
 				t.Errorf("stderr not empty: %q", errb.String())
@@ -457,8 +517,8 @@ func TestBobShellDisable(t *testing.T) {
 	}
 }
 
-// status reads the environment and nothing else, and succeeds either way — "not
-// enabled" is a report, not a failure, matching claudeCodeStatus.
+// The shell half's status line reads the environment and nothing else, and
+// answers either way — "not enabled" is a report, not a failure.
 func TestBobShellStatus(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -492,41 +552,31 @@ func TestBobShellStatus(t *testing.T) {
 				t.Setenv(bobShellEnvVar, "")
 				os.Unsetenv(bobShellEnvVar)
 			}
-			var out, errb bytes.Buffer
-			if code := runBobShell([]string{"status"}, &out, &errb); code != 0 {
-				t.Errorf("exit = %d, want 0", code)
+			got := bobShellStatusLine()
+			if !strings.Contains(got, tc.wantSays) {
+				t.Errorf("line missing %q: %s", tc.wantSays, got)
 			}
-			if !strings.Contains(out.String(), tc.wantSays) {
-				t.Errorf("stdout missing %q:\n%s", tc.wantSays, out.String())
-			}
-			if strings.Contains(out.String(), tc.wantNotSays) {
-				t.Errorf("stdout carries the other state's report %q:\n%s", tc.wantNotSays, out.String())
-			}
-			// A status a script cannot pipe is half a status.
-			if errb.Len() != 0 {
-				t.Errorf("stderr not empty: %q", errb.String())
+			if strings.Contains(got, tc.wantNotSays) {
+				t.Errorf("line carries the other state's report %q: %s", tc.wantNotSays, got)
 			}
 		})
 	}
 }
 
-// status must not need a home directory, an rc file, or a recognisable $SHELL:
-// it answers from the environment, so it has to work where enable would refuse.
+// The status line must not need a home directory, an rc file, or a recognisable
+// $SHELL: it answers from the environment, so it has to work where enable would
+// refuse.
 func TestBobShellStatusNeedsNothingButTheEnvironment(t *testing.T) {
 	fakeHome(t)
 	t.Setenv("SHELL", "/usr/bin/fish")
 	t.Setenv(bobShellEnvVar, "1")
 
-	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"status"}, &out, &errb); code != 0 {
-		t.Errorf("exit = %d, want 0", code)
-	}
-	if !strings.Contains(out.String(), "configured") {
-		t.Errorf("status did not answer under an unrecognised shell:\n%s", out.String())
+	if !strings.Contains(bobShellStatusLine(), "configured") {
+		t.Errorf("status did not answer under an unrecognised shell: %s", bobShellStatusLine())
 	}
 }
 
-// rcTarget's own contract, tested directly because runBobShell can only observe
+// rcTarget's own contract, tested directly because the command can only observe
 // it through outcomes. The hop count is the value the caller branches on, and
 // EvalSymlinks cannot produce it — which is why this is hand-rolled.
 func TestRCTarget(t *testing.T) {
@@ -663,8 +713,8 @@ func TestBobShellUnknownShell(t *testing.T) {
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			var out, errb bytes.Buffer
-			if code := runBobShell([]string{tc.action}, &out, &errb); code != 0 {
-				t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+			if code := shellRun([]string{tc.action}, &out, &errb); code != 1 {
+				t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 			}
 			// Nothing at all in the home directory: not .bashrc, not .zshrc, and
 			// no leftover temp file from a write that was attempted and undone.
@@ -749,8 +799,8 @@ func TestBobShellUnwritableLinkAdvisesPerVerb(t *testing.T) {
 				shape.setup(t, home)
 
 				var out, errb bytes.Buffer
-				if code := runBobShell([]string{tc.action}, &out, &errb); code != 0 {
-					t.Fatalf("exit = %d, want 0; stderr: %s", code, errb.String())
+				if code := shellRun([]string{tc.action}, &out, &errb); code != 1 {
+					t.Fatalf("exit = %d, want 1; stderr: %s", code, errb.String())
 				}
 				if got := strings.Contains(out.String(), bobShellBlock); got != tc.wantBlock {
 					t.Errorf("block printed = %v, want %v; stdout:\n%s", got, tc.wantBlock, out.String())
@@ -807,10 +857,12 @@ func TestBobShellUnwritableLinkAdvisesPerVerb(t *testing.T) {
 // must not be silently dropped.
 //
 // Both of these did real damage before the verbs went through a FlagSet:
-// runBobShell read args[0] and never looked at the rest, so `disable --help`
-// DELETED the block instead of printing help, and `enable --dry-run` enabled for
-// real. Each row therefore asserts the file too, not just the exit code — a
-// refusal that still wrote is the failure this is guarding.
+// the old shell-half command read args[0] and never looked at the rest, so
+// `disable --help` DELETED the block instead of printing help, and
+// `enable --dry-run` enabled for real. Each row therefore asserts the file too,
+// not just the exit code — a refusal that still wrote is the failure this is
+// guarding. Driven through runBob, the one command that parses flags since the
+// halves merged.
 func TestBobShellRejectsStrayArguments(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -834,7 +886,7 @@ func TestBobShellRejectsStrayArguments(t *testing.T) {
 			// Enabled first, so a `disable` that wrongly went ahead has something to
 			// remove and shows up as a changed file rather than a no-op.
 			var out, errb bytes.Buffer
-			if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
+			if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
 				t.Fatalf("setup enable: exit = %d; stderr: %s", code, errb.String())
 			}
 			before, err := os.ReadFile(rc)
@@ -844,7 +896,7 @@ func TestBobShellRejectsStrayArguments(t *testing.T) {
 
 			out.Reset()
 			errb.Reset()
-			code := runBobShell(tc.args, &out, &errb)
+			code := runBob(tc.args, &out, &errb)
 
 			// --help is a successful answer even here: the FlagSet reports it as
 			// flag.ErrHelp, and the usage goes to stdout with exit 0. Every other
@@ -854,7 +906,7 @@ func TestBobShellRejectsStrayArguments(t *testing.T) {
 				if code != 0 {
 					t.Errorf("exit = %d, want 0; stderr: %s", code, errb.String())
 				}
-				if !strings.Contains(out.String(), "agentop configure bobshell —") {
+				if !strings.Contains(out.String(), "agentop configure bob —") {
 					t.Errorf("usage not on stdout:\n%s", out.String())
 				}
 			} else {
@@ -881,10 +933,10 @@ func TestBobShellHelpAndUsageErrors(t *testing.T) {
 	for _, arg := range []string{"-h", "--help", "help"} {
 		t.Run("help "+arg, func(t *testing.T) {
 			var out, errb bytes.Buffer
-			if code := runBobShell([]string{arg}, &out, &errb); code != 0 {
+			if code := runBob([]string{arg}, &out, &errb); code != 0 {
 				t.Errorf("exit = %d, want 0", code)
 			}
-			if !strings.Contains(out.String(), "agentop configure bobshell —") {
+			if !strings.Contains(out.String(), "agentop configure bob —") {
 				t.Errorf("usage not on stdout:\n%s", out.String())
 			}
 			if strings.Contains(out.String()+errb.String(), "unknown bobshell action") {
@@ -899,10 +951,10 @@ func TestBobShellHelpAndUsageErrors(t *testing.T) {
 
 	t.Run("no action", func(t *testing.T) {
 		var out, errb bytes.Buffer
-		if code := runBobShell(nil, &out, &errb); code != 2 {
+		if code := runBob(nil, &out, &errb); code != 2 {
 			t.Errorf("exit = %d, want 2", code)
 		}
-		if !strings.Contains(errb.String(), "agentop configure bobshell —") {
+		if !strings.Contains(errb.String(), "Usage:") {
 			t.Errorf("usage not on stderr:\n%s", errb.String())
 		}
 		if out.Len() != 0 {
@@ -916,7 +968,7 @@ func TestBobShellHelpAndUsageErrors(t *testing.T) {
 		var out, errb bytes.Buffer
 		// A genuine typo must still be an error — the help case above must not
 		// have widened into swallowing every unrecognised action.
-		if code := runBobShell([]string{"enabel"}, &out, &errb); code != 2 {
+		if code := runBob([]string{"enabel"}, &out, &errb); code != 2 {
 			t.Errorf("exit = %d, want 2", code)
 		}
 		// Quoted, so an action carrying a stray shell character is legible.
@@ -984,7 +1036,7 @@ func TestBobShellHelpAndUsageErrors(t *testing.T) {
 				}
 
 				var out, errb bytes.Buffer
-				if code := runBobShell([]string{"enabel"}, &out, &errb); code != 2 {
+				if code := runBob([]string{"enabel"}, &out, &errb); code != 2 {
 					t.Errorf("exit = %d, want 2", code)
 				}
 				if !strings.Contains(errb.String(), `"enabel"`) {
@@ -1028,8 +1080,8 @@ func TestBobShellEnableQuotesThePathItTellsYouToSource(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh")
 
 	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"enable", "--yes"}, &out, &errb); code != 0 {
-		t.Fatalf("exit = %d, want 0\nstderr: %s", code, errb.String())
+	if code := shellRun([]string{"enable", "--yes"}, &out, &errb); code != 1 {
+		t.Fatalf("exit = %d, want 1\nstderr: %s", code, errb.String())
 	}
 
 	rc := filepath.Join(home, ".zshrc")
@@ -1103,10 +1155,10 @@ func TestBobShellEnableQuotesThePathItTellsYouToSource(t *testing.T) {
 // the inverse of the usual trap, and worse, because the hang looks like a
 // deadlock in the code under test.
 //
-// The stub stands in for the whole bobShellConfirm wrapper, so it has to print
-// what the real pair prints when it declines — the filename line from the
-// wrapper, the "--yes" advice from confirm's no-tty branch — or the two output
-// assertions below would pass vacuously against a silent stub.
+// The stub stands in for the merged command's one prompt, so it has to print
+// what the real confirm prints when it declines without a terminal — the
+// "--yes" advice from its no-tty branch — or the output assertions below would
+// pass vacuously against a silent stub.
 //
 // This is the guard on a real hazard in the confirm/--yes pair: the prompt sits
 // between "decided to write" and "wrote", so a mistake there does not fail
@@ -1118,13 +1170,15 @@ func TestBobShellWithoutYesAndWhenTheUserDeclinesWritesNothing(t *testing.T) {
 	for _, verb := range []string{"enable", "disable"} {
 		t.Run(verb, func(t *testing.T) {
 			// Restored by t.Cleanup via the closure below, so neither the other
-			// subtest nor any later test sees the stub.
-			realConfirm := bobShellConfirm
-			t.Cleanup(func() { bobShellConfirm = realConfirm })
+			// subtest nor any later test sees the stub. It stands in for the merged
+			// command's ONE prompt, and prints what the real confirm prints when it
+			// declines without a terminal, so the output assertions below do not
+			// pass vacuously against a silent stub.
+			realConfirm := bobConfirm
+			t.Cleanup(func() { bobConfirm = realConfirm })
 			var prompted int
-			bobShellConfirm = func(path, what string, stdout io.Writer) bool {
+			bobConfirm = func(stdout io.Writer) bool {
 				prompted++
-				fmt.Fprintf(stdout, "%s %s\n", what, path)
 				fmt.Fprintln(stdout, "Not a terminal, so not prompting. Re-run with --yes to apply.")
 				return false
 			}
@@ -1136,7 +1190,7 @@ func TestBobShellWithoutYesAndWhenTheUserDeclinesWritesNothing(t *testing.T) {
 			// before ever reaching the prompt — which would pass this test for the
 			// wrong reason.
 			var setup bytes.Buffer
-			if code := runBobShell([]string{"enable", "--yes"}, &setup, &setup); code != 0 {
+			if code := shellRun([]string{"enable", "--yes"}, &setup, &setup); code != 1 {
 				t.Fatalf("setup enable: exit = %d: %s", code, setup.String())
 			}
 			before, err := os.ReadFile(rc)
@@ -1155,7 +1209,7 @@ func TestBobShellWithoutYesAndWhenTheUserDeclinesWritesNothing(t *testing.T) {
 			}
 
 			var out, errb bytes.Buffer
-			code := runBobShell([]string{verb}, &out, &errb)
+			code := shellRun([]string{verb}, &out, &errb)
 
 			// exitDeclined, and NOT the 0 this asserted at first. Declining is not a
 			// failure, which is why it is not 1 — but it is also not the same outcome
@@ -1180,9 +1234,11 @@ func TestBobShellWithoutYesAndWhenTheUserDeclinesWritesNothing(t *testing.T) {
 			if !strings.Contains(out.String(), "--yes") {
 				t.Errorf("stdout does not mention --yes:\n%s", out.String())
 			}
-			// And which file was at stake, since $SHELL chose it rather than the user.
-			if !strings.Contains(out.String(), rc) {
-				t.Errorf("stdout does not name the file %q:\n%s", rc, out.String())
+			// And which file was at stake, since $SHELL chose it rather than the
+			// user. The preview abbreviates $HOME to ~, so the tilde spelling is
+			// what names it.
+			if !strings.Contains(out.String(), "~/.zshrc") {
+				t.Errorf("stdout does not name the rc file:\n%s", out.String())
 			}
 			// The whole test is vacuous if the verb returned before ever asking —
 			// which is exactly how disable passes for the wrong reason when no block
@@ -1203,15 +1259,12 @@ func TestBobShellWithoutYesAndWhenTheUserDeclinesWritesNothing(t *testing.T) {
 // it works in one of the two shells this command writes a file for.
 func TestBobShellStatusAdvisesTypeNotWhich(t *testing.T) {
 	t.Setenv(bobShellEnvVar, "1")
-	var out bytes.Buffer
-	if code := bobShellStatus(&out); code != 0 {
-		t.Fatalf("exit = %d", code)
+	got := bobShellStatusLine()
+	if !strings.Contains(got, "type bob") {
+		t.Errorf("status does not advise \"type bob\": %s", got)
 	}
-	if !strings.Contains(out.String(), "type bob") {
-		t.Errorf("status does not advise \"type bob\":\n%s", out.String())
-	}
-	if strings.Contains(out.String(), "which bob") {
-		t.Errorf("status still advises \"which bob\", which is wrong in bash:\n%s", out.String())
+	if strings.Contains(got, "which bob") {
+		t.Errorf("status still advises \"which bob\", which is wrong in bash: %s", got)
 	}
 }
 
@@ -1256,8 +1309,8 @@ func TestBobShellFollowsOneHopIntoTheTrackedFile(t *testing.T) {
 			}
 
 			var out, errb bytes.Buffer
-			if code := runBobShell([]string{verb, "--yes"}, &out, &errb); code != 0 {
-				t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
+			if code := shellRun([]string{verb, "--yes"}, &out, &errb); code != 1 {
+				t.Fatalf("exit = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
 			}
 
 			// Half one: the link is still a link. A write to the path would have
@@ -1334,7 +1387,7 @@ func TestBobShellUnreadableRCFileIsAFailureNotAdvice(t *testing.T) {
 			t.Setenv("SHELL", "/bin/zsh")
 
 			var out, errb bytes.Buffer
-			code := runBobShell([]string{verb, "--yes"}, &out, &errb)
+			code := shellRun([]string{verb, "--yes"}, &out, &errb)
 			if code != 1 {
 				t.Errorf("exit = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
 			}
@@ -1369,7 +1422,7 @@ func TestBobShellStatusRejectsYes(t *testing.T) {
 	fakeHome(t)
 
 	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"status", "--yes"}, &out, &errb); code != 2 {
+	if code := runBob([]string{"status", "--yes"}, &out, &errb); code != 2 {
 		t.Errorf("status --yes exit = %d, want 2\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
 	}
 	if errb.Len() == 0 {
@@ -1380,12 +1433,12 @@ func TestBobShellStatusRejectsYes(t *testing.T) {
 	// still works, and the writing verbs still take it. Without these, deleting the
 	// flag outright would pass the assertion above.
 	var out2, errb2 bytes.Buffer
-	if code := runBobShell([]string{"status"}, &out2, &errb2); code != 0 {
+	if code := shellRun([]string{"status"}, &out2, &errb2); code != 0 {
 		t.Errorf("plain status exit = %d, want 0; stderr: %s", code, errb2.String())
 	}
 	var out3, errb3 bytes.Buffer
-	if code := runBobShell([]string{"enable", "--yes"}, &out3, &errb3); code != 0 {
-		t.Errorf("enable --yes exit = %d, want 0; stderr: %s", code, errb3.String())
+	if code := shellRun([]string{"enable", "--yes"}, &out3, &errb3); code != 1 {
+		t.Errorf("enable --yes exit = %d, want 1; stderr: %s", code, errb3.String())
 	}
 }
 
@@ -1397,8 +1450,9 @@ func TestBobShellStatusRejectsYes(t *testing.T) {
 // directory (readable and searchable, not writable) fails os.CreateTemp, which is
 // the first arm and the only one reachable without faking the filesystem.
 //
-// Asserted through runBobShell rather than by calling writeRCFile directly, so the
-// exit code the user actually gets is what is pinned, not just the error value.
+// Asserted through the shell half's command rather than by calling writeRCFile
+// directly, so the exit code the user actually gets is what is pinned, not just
+// the error value.
 func TestBobShellWriteFailureIsExit1AndLeavesNoLitter(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: a 0o500 directory is still writable")
@@ -1425,7 +1479,7 @@ func TestBobShellWriteFailureIsExit1AndLeavesNoLitter(t *testing.T) {
 			t.Setenv("SHELL", "/bin/zsh")
 
 			var out, errb bytes.Buffer
-			if code := runBobShell([]string{verb, "--yes"}, &out, &errb); code != 1 {
+			if code := shellRun([]string{verb, "--yes"}, &out, &errb); code != 1 {
 				t.Errorf("exit = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
 			}
 			if errb.Len() == 0 {
@@ -1473,7 +1527,7 @@ func TestBobShellWriteFailureIsExit1AndLeavesNoLitter(t *testing.T) {
 // them so the three cannot diverge again.
 func TestBobShellUsageDocumentsTheRealExitCodes(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := runBobShell([]string{"--help"}, &out, &errb); code != 0 {
+	if code := runBob([]string{"--help"}, &out, &errb); code != 0 {
 		t.Fatalf("--help exit = %d, want 0; stderr: %s", code, errb.String())
 	}
 	usage := out.String()
@@ -1490,10 +1544,10 @@ func TestBobShellUsageDocumentsTheRealExitCodes(t *testing.T) {
 	if !strings.Contains(usage, "no terminal") {
 		t.Errorf("usage does not tell a scripted caller the no-terminal case also exits %d:\n%s", exitDeclined, usage)
 	}
-	// --yes prose names the code too, since that is the paragraph an unattended
-	// caller reads first.
-	if !strings.Contains(usage, "exit 3") {
-		t.Errorf("the --yes paragraph does not name the code it returns:\n%s", usage)
+	// The exit-status paragraph names every code, so a renumbering anywhere is
+	// caught here.
+	if !strings.Contains(usage, "Exit status:") {
+		t.Errorf("usage has no exit-status paragraph:\n%s", usage)
 	}
 	// And the other three, so a renumbering anywhere is caught here.
 	for _, want := range []string{"0 applied", "1 something went wrong", "2 a"} {
@@ -1584,8 +1638,8 @@ func TestBobShellDeclinesExactlyTwoHops(t *testing.T) {
 				var out, errb bytes.Buffer
 				// Declining here is advice, not failure: the chain is the user's
 				// deliberate arrangement and agentop can describe it exactly.
-				if code := runBobShell([]string{verb, "--yes"}, &out, &errb); code != 0 {
-					t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
+				if code := shellRun([]string{verb, "--yes"}, &out, &errb); code != 1 {
+					t.Fatalf("exit = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
 				}
 				if !strings.Contains(out.String(), "deeper than") {
 					t.Errorf("did not decline the chain:\n%s", out.String())
@@ -1650,7 +1704,7 @@ func TestBobShellUnreadableFileWithReadableParentIsExit1(t *testing.T) {
 			}
 
 			var out, errb bytes.Buffer
-			if code := runBobShell([]string{verb, "--yes"}, &out, &errb); code != 1 {
+			if code := shellRun([]string{verb, "--yes"}, &out, &errb); code != 1 {
 				t.Errorf("exit = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
 			}
 			// "read", the ReadFile arm's word — not rcTarget's "cannot read ... lstat".

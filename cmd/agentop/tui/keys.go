@@ -82,10 +82,10 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	// S's picker is modal too, and for the same pane-scoping reason as the column picker: a
 	// message can move the pane under it, and then it is inert rather than eating keys.
-	if m.serverPicker != nil && m.pane == paneAgents {
+	if m.serverPicker != nil && (m.pane == paneAgents || m.pane == paneSessions) {
 		return m.serverPickerKey(msg)
 	}
-	if m.serverNotice != "" && m.pane == paneAgents {
+	if m.serverNotice != "" && (m.pane == paneAgents || m.pane == paneSessions) {
 		return m.serverNoticeKey(msg)
 	}
 
@@ -227,6 +227,10 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 				return m.cycleSpendAxis()
 			}
 		case "w":
+			// The agents pane's window, drawer open or closed; see cycleAgentsWindow.
+			if m.pane == paneAgents {
+				return m.cycleAgentsWindow()
+			}
 			if m.spendDrawerVisible() {
 				return m.cycleSpendWindow()
 			}
@@ -766,6 +770,21 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// detail viewport pages too.
 		return m.pageActivePane(msg)
 
+	case "x":
+		// Erase the row under the cursor, after a confirmation: the highlighted session on the
+		// sessions pane, every session of the highlighted agent on the agents pane — on All agents,
+		// everything, which is X's confirmation. Off the footer, like X — the `?` overlay names it.
+		if m.client == nil {
+			return nil
+		}
+		switch m.pane {
+		case paneSessions:
+			return m.openSessionErase()
+		case paneAgents:
+			return m.openAgentErase()
+		}
+		return nil
+
 	case "X":
 		// Clear all history, after a confirmation. Capital, and off the footer like `A`: a
 		// destructive key should not be one stray press of a common letter, nor advertised on
@@ -826,11 +845,15 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "S":
-		// Choose where the highlighted agent's new sessions go. Capital, for the reason `A` and
-		// `P` are: lowercase `s` hides skip rows on every pane. On the AGENTS pane only, the one
-		// surface whose rows are agents.
-		if m.pane == paneAgents {
+		// Choose where the highlighted agent's new sessions go, or move the highlighted session.
+		// Capital, for the reason `A` and `P` are: lowercase `s` hides skip rows on every pane.
+		// AGENTS rows are agents; SESSIONS rows are sessions, and a session move is the user's
+		// explicit instruction — the one thing that moves a running conversation.
+		switch m.pane {
+		case paneAgents:
 			return m.openServerPicker()
+		case paneSessions:
+			return m.openSessionServerPicker()
 		}
 		return nil
 
@@ -1100,10 +1123,21 @@ func (m *model) helpView() string {
 		// from the line those two describe — so the drawer existed only for a reader who went
 		// looking for it. Placed after [u] so fitHintLine, which drops from the front, gives up
 		// the navigation keys before either of the two that reach cost.
-		// [P] pipeline sits at the TAIL, not where [tab] pipeline used to sit third
+		// [P] plugins sits at the TAIL, not where [tab] pipeline used to sit third
 		// from the left. The tab strip in the title bar survived every width; a footer
 		// hint does not, and fitHintLine drops from the front — so the key that
 		// replaced the strip is placed behind the hints it is willing to outlive.
+		//
+		// THE HINT SAYS "plugins" WHILE THE PANE TITLES ITSELF "pipeline", and the
+		// mismatch is deliberate (#1212). "pipeline" is the config noun — what the
+		// YAML declares and what [e] edits — but a reader meeting this footer has not
+		// seen that YAML, and the first thing the pane shows them is a table whose main
+		// column is PLUGIN. The footer is where a key gets DISCOVERED, so it is named
+		// for what the pane shows rather than for the concept behind it; the [?]
+		// overlay, which has room, carries the precise version ("the plugin chain this
+		// proxy runs"). Not to be confused with [C], the plugin CATALOG — every plugin
+		// the proxy offers, against the chain it actually runs. That pair is only ever
+		// adjacent in the overlay, since [C] appears in no footer.
 		//
 		// MEASURED, because the intuition here is off by more than it looks: the
 		// un-drilled line is 98 columns, and [P] survives down to 34 columns at the
@@ -1118,12 +1152,12 @@ func (m *model) helpView() string {
 		// the picker instead when this list was reached through it.
 		search := m.searchHints(m.pane)
 		if m.sessionsViaAgents {
-			return "[↑↓] nav  [↵] drill  [u] usage  [$] spend  " + search + "  [esc] agents  [p] pause  [P] pipeline  [?] keys  [q] quit"
+			return "[↑↓] nav  [↵] drill  [u] usage  [$] spend  " + search + "  [esc] agents  [p] pause  [P] plugins  [?] keys  [q] quit"
 		}
 		if m.parentCtx != nil {
-			return "[↑↓] nav  [↵] drill  [u] usage  [$] spend  " + search + "  [esc] pods  [p] pause  [P] pipeline  [?] keys  [q] quit"
+			return "[↑↓] nav  [↵] drill  [u] usage  [$] spend  " + search + "  [esc] pods  [p] pause  [P] plugins  [?] keys  [q] quit"
 		}
-		return "[↑↓] nav  [↵] drill  [u] usage  [$] spend  " + search + "  [p] pause  [P] pipeline  [?] keys  [q] quit"
+		return "[↑↓] nav  [↵] drill  [u] usage  [$] spend  " + search + "  [p] pause  [P] plugins  [?] keys  [q] quit"
 	case paneEvents:
 		skipHint := "[s] hide passthru/skip"
 		if m.hideInactive {
@@ -1249,7 +1283,11 @@ func (m *model) helpView() string {
 		if m.serverKeyOffered() {
 			serverHint = "  [S] server"
 		}
-		return "[↑↓] nav" + enterHint + escHint + serverHint + "  " + m.searchHints(m.pane) + "  [?] keys  [q] quit"
+		// [$] SPEND, for the same reason the sessions footer carries it: the footer is where a
+		// key gets discovered. The drawer here breaks down the row under the cursor.
+		spendHint := "  [$] spend"
+		// [w] the pane's window, which the title names; see cycleAgentsWindow.
+		return "[↑↓] nav" + enterHint + escHint + serverHint + "  [w] window" + spendHint + "  " + m.searchHints(m.pane) + "  [?] keys  [q] quit"
 	}
 	return "[?] keys  [q] quit"
 }

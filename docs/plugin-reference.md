@@ -88,7 +88,7 @@ key.
 ### `jwt-validation`: `placeholder_mode` / `placeholder_ttl` (optional, off by default)
 
 Two fields enable the **mint** half of [credential placeholder
-swap](#credential-placeholder-swap) (read that section for the full
+swap](token-exchange-plugin.md#credential-placeholder-swap) (read that section for the full
 model — these are the field-level reference).
 
 - **`placeholder_mode`** — bool, default `false`. After validating the
@@ -211,8 +211,8 @@ canaried; auth gates should stay on `enforce` (the default).
 
 ## Declaring plugin relationships
 
-`PluginCapabilities` carries two fields that let a plugin express how it
-depends on other plugins in the same chain. Both are checked at
+`PluginCapabilities` carries three fields that let a plugin express how it
+depends on other plugins in the same chain. All are checked at
 `plugins.Build` time (startup and hot-reload), and misconfigurations
 fail loud before serving traffic.
 
@@ -223,8 +223,9 @@ type PluginCapabilities struct {
     WritesResponseBody bool
     WritesDestination  bool   // plugin may call pctx.Redirect
 
-    Requires    []string   // ALL must be present + earlier (hard)
-    RequiresAny []string   // AT LEAST ONE must be present + run after it (hard)
+    Requires      []string   // ALL must be present + earlier (hard)
+    RequiresAny   []string   // AT LEAST ONE must be present + run after it (hard)
+    RequiresLater []string   // ALL must be present + later in the chain (hard)
 
     Description string
 }
@@ -232,8 +233,9 @@ type PluginCapabilities struct {
 
 | Field | All present? | At least one? | Ordering enforced? |
 |---|---|---|---|
-| `Requires` | ✓ | — | ✓ |
-| `RequiresAny` | — | ✓ | ✓ |
+| `Requires` | ✓ | — | must be earlier |
+| `RequiresAny` | — | ✓ | must be earlier |
+| `RequiresLater` | ✓ | — | must be later |
 
 Both are chain-scoped — validation runs within the inbound chain
 OR within the outbound chain, independently. Plugin names are
@@ -271,6 +273,24 @@ func (p *PIIScrubber) Capabilities() pipeline.PluginCapabilities {
         RequiresAny: []string{
             "a2a-parser", "mcp-parser", "inference-parser",
         },
+    }
+}
+```
+
+### `RequiresLater` — hard dependency on a later plugin
+
+The mirror of `Requires`, for dependencies on another plugin's
+*response-phase* output. The response pass walks the chain in reverse,
+so "runs before me on the response" means "later in the chain" — declare
+the producer with `RequiresLater` and it must sit at a *higher* index
+than your plugin.
+
+```go
+// Reads what the parser found in the response, on the response pass —
+// only makes sense with a parser after it in the chain.
+func (p *ResponseAuditor) Capabilities() pipeline.PluginCapabilities {
+    return pipeline.PluginCapabilities{
+        RequiresLater: []string{"mcp-parser"},
     }
 }
 ```
@@ -1127,7 +1147,7 @@ func (p *JailbreakDetector) OnRequest(_ context.Context, pctx *pipeline.Context)
 }
 ```
 
-One import (`contracts`), one iteration pattern, works across A2A +
+One import (`capabilities`), one iteration pattern, works across A2A +
 MCP + Inference. A fourth protocol that implements `Fragments` is
 picked up with no guardrail change.
 
@@ -1230,7 +1250,7 @@ lives in this module. The pattern mirrors `database/sql` drivers and
 ### Factory shape
 
 ```go
-// core/plugins/jwtvalidation.go
+// core/plugins/jwtvalidation/plugin.go
 func init() {
     RegisterPlugin("jwt-validation", func() pipeline.Plugin { return NewJWTValidation() })
 }
@@ -1303,134 +1323,6 @@ Plugins keep ownership of:
 
 The IBAC plugin (`core/plugins/ibac/judge.go`) is the in-tree reference; copy its shape when adding a new LLM-using plugin. For what IBAC actually does end-to-end (threat model, configuration, deny-reason vocabulary), see [`ibac-plugin.md`](ibac-plugin.md).
 
-## `static-inject`: static credential injection
-
-An outbound plugin (`core/plugins/staticinject`, registered name
-`static-inject`) that swaps a placeholder credential on the outbound
-`Authorization` header for a real static credential, so a
-model-influenced workload never holds the real secret. Unlike
-[Credential placeholder swap](#credential-placeholder-swap) below —
-which mints and resolves a per-request `abph_` handle for a real user
-token across two cooperating plugins — `static-inject` is a single
-self-contained plugin that injects one operator-provisioned static
-credential (an API key, a shared service credential) keyed by
-destination host or a fixed key. The two mechanisms solve different
-problems and do not interact.
-
-The workload authenticates outbound calls with an agreed-upon
-placeholder string; `static-inject` verifies that placeholder (if
-configured) and replaces it with the real credential resolved from
-either a secret-mounted file or an inline map (tests/dev only). The
-real credential is never present in the workload's own config or
-environment.
-
-### Config
-
-| Field | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `source` | string | yes | — | `secret_dir` or `mappings`. |
-| `secret_dir` | string | when `source: secret_dir` | — | Directory containing one file per credential key; read via the same whitespace-trimmed `config.ReadCredentialFile` convention other plugins use for file-sourced values (see [File-sourced values](#file-sourced-values)). |
-| `mappings` | map[string]string | when `source: mappings` | — | Inline key→credential map. Tests/dev only — do not put real secrets in YAML. |
-| `key_by` | string | no | `host` | `host` (resolve by the outbound request's destination host) or `static` (always use `key`). |
-| `key` | string | when `key_by: static` | — | The single lookup key used when `key_by` is `static`. |
-| `placeholder` | string | no | — | When set, injection only proceeds if the inbound bearer equals this exact string. |
-
-### Fail-closed
-
-`static-inject` denies (`401`, `static-inject.<reason>`) and leaves the
-`Authorization` header unchanged whenever any step of the swap can't be
-completed cleanly:
-
-- missing or unparsable bearer token (`static-inject.missing-auth`);
-- `placeholder` is set and the inbound bearer doesn't match
-  (`static-inject.placeholder-mismatch`);
-- the resolved key has no credential in the configured source
-  (`static-inject.unresolved-key`);
-- the resolved value would be unsafe to place in a header — contains
-  `\r`, `\n`, or `\x00` — a CWE-113 header-splitting guard
-  (`static-inject.unsafe-value`);
-- the plugin was never successfully `Configure`d
-  (`static-inject.unconfigured`).
-
-There is no partial-injection path: a denied request never forwards
-the placeholder, and a successful swap only ever writes the fully
-resolved real credential.
-
-## Credential placeholder swap
-
-An opt-in mode that keeps the **real** user token out of the agent. With
-it on, `jwt-validation` validates the inbound token and then replaces it
-with an opaque `abph_` placeholder before forwarding to the agent; the
-real token is held in a process-scoped shared store. On the way out,
-`token-exchange` resolves the placeholder back to the real token (on a
-matched route) before its normal RFC 8693 exchange. The agent thus holds
-only an opaque handle, never a usable credential.
-
-For the design rationale, data flow, and branch table, see
-[`docs/superpowers/specs/2026-06-02-credential-placeholder-swap-design.md`](./superpowers/specs/2026-06-02-credential-placeholder-swap-design.md).
-
-### The two flags are a matched pair
-
-| Flag | Plugin | Chain | Role |
-|---|---|---|---|
-| `placeholder_mode` | `jwt-validation` | inbound | **mint** — swap real token → `abph_` handle |
-| `resolve_placeholders` | `token-exchange` | outbound | **resolve** — swap `abph_` handle → real token, then exchange |
-
-Both must be on to be coherent:
-
-- **Mint on, resolve off** → the outbound side sees an `abph_` subject it
-  can't use and **fails closed (deny)**. Safe and visible, but broken.
-- **Resolve on, mint off** → no `abph_` tokens are ever produced, so
-  resolve is a **no-op**; normal exchange is unaffected.
-
-The pairing can't be expressed via `Requires` (that checks plugin
-*name*, not config *state*), so v1 relies on the fail-closed deny plus
-this documentation rather than build-time cross-validation.
-
-### `token-exchange`: `resolve_placeholders`
-
-Bool, default `false`. When the outbound bearer carries the `abph_`
-prefix, resolve it from the shared store to the real token before the
-normal exchange. An unresolvable placeholder (unknown or expired —
-e.g. after a sidecar restart) is **denied, fail-closed**; the opaque
-string is never sent to an upstream. A non-placeholder bearer skips
-resolve and runs the normal exchange (backward compatible). Resolve is
-gated by the same route match as the exchange — the handle is never
-resolved before a route is confirmed, so a leaked handle can't pull the
-real token into a header bound for an unmatched host.
-
-### Passthrough hosts receive the placeholder, not the real token
-
-With mint on, the agent never holds the real token, so any non-exchange
-(passthrough) egress forwards the opaque `abph_` handle as-is. It is
-useless off-box. Any host that needs a real credential MUST be
-configured as a `token-exchange` route — passthrough egress cannot
-produce one.
-
-### The store is in-memory and process-scoped
-
-The handle→token store lives in memory and is shared only within a
-single process. The mode therefore works only where inbound mint and
-outbound resolve run in the **same** process:
-
-- the reverse+forward proxy sidecar (`cortex`, and its
-  `authbridge-lite` image variant);
-- a **single-replica** extproc (`cortex-envoy`).
-
-Multi-replica (HA) deployments can land mint and resolve on different
-processes, which the in-memory store cannot bridge. Those need an external store behind the same
-interface — a **current limitation**, tracked as a future enhancement.
-
-### Security
-
-- The handle is a random `abph_`-prefixed token (CSPRNG ≥256-bit),
-  meaningless outside the minting process's store.
-- The real token never reaches the agent and never persists to disk
-  (in-memory store only).
-- Neither the real token nor the handle is logged in cleartext —
-  records carry a hash or the prefix only (see the "NEVER put raw
-  tokens" rules under [Emitting session events](#emitting-session-events)).
-
 ## Cross-references
 
 - `core/pipeline/configurable.go` — the interface.
@@ -1440,7 +1332,7 @@ interface — a **current limitation**, tracked as a future enhancement.
   parsing.
 - `core/plugins/registry.go` — how Build calls Configure.
 - `core/pipeline/extensions.go` — named categories
-  (`MCP`, `A2A`, `Inference`, `Auth`) + `Custom` map + escape-hatch
+  (`MCP`, `A2A`, `Inference`, `Security`, `Delegation`, `Auth`) + `Custom` map + escape-hatch
   convention.
 - `core/pipeline/session.go` — `SessionEvent` wire shape
   and the `SessionDenied` phase.
@@ -1448,6 +1340,6 @@ interface — a **current limitation**, tracked as a future enhancement.
   plugins that call an LLM (see "Plugins making outbound LLM calls"
   above).
 - `core/plugins/staticinject/` — the `static-inject`
-  plugin (see [`static-inject`: static credential injection](#static-inject-static-credential-injection)
-  above); resolver + header-safety helpers are self-contained in this
+  plugin (see [`static-inject-plugin.md`](static-inject-plugin.md));
+  resolver + header-safety helpers are self-contained in this
   package.

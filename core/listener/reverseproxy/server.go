@@ -179,15 +179,14 @@ func NewServer(inbound *pipeline.Holder, sessions *session.Store, backendURL str
 		}
 		// Strip the client's Accept-Encoding, but only when a plugin will
 		// actually inspect the response body: a StreamingResponder (SSE
-		// re-framing) or any ReadsBody/WritesRequestBody plugin (buffered read into
+		// parsing) or any ReadsBody/WritesRequestBody plugin (buffered read into
 		// pctx.ResponseBody). Those paths must see plaintext — with no explicit
 		// Accept-Encoding, Go's transport negotiates gzip itself and
 		// transparently decompresses the response (dropping Content-Encoding /
 		// Content-Length), so both the inspection here and the downstream client
 		// get plaintext. Leaving an explicit "Accept-Encoding: gzip" through
-		// would yield a gzipped body the SSE re-framer reads as garbage plus a
-		// Content-Encoding: gzip header over re-emitted plaintext — which makes
-		// SSE clients (e.g. the Anthropic SDK) decode zero events. When no plugin
+		// would yield a gzipped body the SSE parser reads as garbage, so plugins
+		// would see no events and finalize on empty state. When no plugin
 		// reads the response body this proxy is a pure pass-through, so leave
 		// Accept-Encoding intact rather than force needless upstream→client
 		// decompression (matters for a remote backend or large non-streamed
@@ -845,16 +844,15 @@ func (s *Server) recordInboundResponseEvent(pctx *pipeline.Context, statusCode i
 
 // streamingResponseBody is the io.ReadCloser ReverseProxy ferries
 // downstream. Each Read call pulls one SSE frame from the upstream,
-// dispatches it through the pipeline, and writes the re-framed event
-// into the caller's buffer. On end-of-stream a final last=true
+// dispatches it through the pipeline, and copies the block's upstream
+// bytes into the caller's buffer. On end-of-stream a final last=true
 // dispatch lets aggregating plugins finalize, and onClose records
 // the response SessionEvent.
 //
 // The struct holds an internal buffer (`pending`) that may not
-// drain in one Read — large frames are returned across multiple
-// Reads, byte-for-byte. Streaming preserves SSE wire framing
-// (`data: <payload>\n\n`) regardless of how the upstream emitted
-// each frame's data lines.
+// drain in one Read — a large block is returned across several Reads.
+// Every block is emitted exactly as the upstream sent it; plugins see
+// only the data payload of the blocks that carry one.
 type streamingResponseBody struct {
 	upstream io.ReadCloser
 	reader   *sseframe.Reader
@@ -918,7 +916,7 @@ func (b *streamingResponseBody) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	frame, err := b.reader.ReadFrame()
+	block, err := b.reader.ReadBlock()
 	if err == io.EOF {
 		// End of upstream. Finalize aggregating plugins.
 		b.finalize()
@@ -934,52 +932,26 @@ func (b *streamingResponseBody) Read(p []byte) (int, error) {
 		return 0, err
 	}
 
-	action := b.pipeline.RunResponseFrame(b.ctx, b.pctx, frame, false)
-	if action.Type == pipeline.Reject {
-		// Mid-stream reject from a streaming-aware plugin. Headers and
-		// earlier frames are already on the wire, so the cleanest
-		// signal is to abort the read; the client sees a truncated
-		// stream. Finalize first so plugin state is consistent.
-		b.finalize()
-		b.finished = true
-		return 0, fmt.Errorf("reverseproxy: streaming response rejected mid-stream")
-	}
-
-	// Re-frame as SSE. The decoder folds multi-line `data:` events
-	// with `\n` separators per spec; split here so each original line
-	// gets its own `data: ` prefix and the downstream parser sees the
-	// same event boundaries the upstream produced. For single-line
-	// JSON-RPC payloads this is equivalent to one `data: <payload>\n\n`.
-	out := make([]byte, 0, len(frame)+16)
-	// Preserve the upstream SSE "event:" line. sseframe surfaces only the
-	// data payload, but clients like the Anthropic SDK type each event from
-	// the "event:" field; dropping it makes the re-framed stream parse to
-	// zero typed events downstream.
-	if ev := b.reader.LastEvent(); len(ev) > 0 {
-		out = append(out, "event: "...)
-		out = append(out, ev...)
-		out = append(out, '\n')
-	}
-	rest := frame
-	for len(rest) > 0 {
-		nl := bytes.IndexByte(rest, '\n')
-		var line []byte
-		if nl < 0 {
-			line = rest
-			rest = nil
-		} else {
-			line = rest[:nl]
-			rest = rest[nl+1:]
+	if block.HasData {
+		action := b.pipeline.RunResponseFrame(b.ctx, b.pctx, block.Data, false)
+		if action.Type == pipeline.Reject {
+			// Mid-stream reject from a streaming-aware plugin. Headers and
+			// earlier frames are already on the wire, so the cleanest
+			// signal is to abort the read; the client sees a truncated
+			// stream. Finalize first so plugin state is consistent.
+			b.finalize()
+			b.finished = true
+			return 0, fmt.Errorf("reverseproxy: streaming response rejected mid-stream")
 		}
-		out = append(out, "data: "...)
-		out = append(out, line...)
-		out = append(out, '\n')
 	}
-	out = append(out, '\n')
 
-	n := copy(p, out)
-	if n < len(out) {
-		b.pending = out[n:]
+	// The block exactly as the upstream sent it — see the forward proxy's
+	// handleStreamingResponse for why nothing needs a rebuilt frame. Copied
+	// into pending when p is too small, because block.Raw is the Reader's
+	// buffer and the next ReadBlock overwrites it.
+	n := copy(p, block.Raw)
+	if n < len(block.Raw) {
+		b.pending = append(b.pending[:0], block.Raw[n:]...)
 	}
 	return n, nil
 }

@@ -109,6 +109,29 @@ func redirectHeader(e *pipeline.SessionEvent) string {
 	return fmt.Sprintf("redirected:  %s → %s", sanitizeLabel(e.RequestedHost), sanitizeLabel(e.Host))
 }
 
+// upgradeHeader says a request asked to switch protocol and that Cortex removed the
+// header asking. Empty on every request that asked for nothing, which is nearly all
+// of them, so the caller can prepend unconditionally.
+//
+//	upgrade:     websocket stripped (hop-by-hop) — origin may answer 405
+//
+// It names the likely symptom because that is the question this line exists to
+// answer. Codex asks chatgpt.com for a WebSocket, Cortex must not forward Upgrade
+// (RFC 9110 makes it hop-by-hop), the origin gets a bare GET on an endpoint wanting
+// a POST or an upgrade and answers 405 — and the user sees `405 Method Not Allowed`
+// in their agent's output and blames Cortex, which then works a second later over
+// HTTPS. Without this the paired response row says `backend_error/405` and nothing
+// on the timeline connects the two.
+func upgradeHeader(e *pipeline.SessionEvent) string {
+	if e.UpgradeStripped == "" {
+		return ""
+	}
+	// Sanitised at record time already; passed through sanitizeLabel anyway, as
+	// every caller-supplied label agentop prints is, so one rule covers them all.
+	return fmt.Sprintf("upgrade:     %s stripped (hop-by-hop) — origin may answer 405",
+		sanitizeLabel(e.UpgradeStripped))
+}
+
 // modelHeader names both models of a request a plugin sent for another model: the
 // one the client asked for, then the one it was sent for. The events table's model
 // column already shows the second. Empty when nothing changed the model.
@@ -123,12 +146,19 @@ func modelHeader(e *pipeline.SessionEvent) string {
 	return fmt.Sprintf("model:       %s → %s", sanitizeLabel(e.Inference.RequestedModel), sanitizeLabel(e.Inference.Model))
 }
 
-// rewriteHeader is what plugins changed about a request's destination and model,
-// as one block: redirectHeader's line, then modelHeader's, each only when it
-// applies. Empty when neither does, so the caller can prepend unconditionally.
+// rewriteHeader is how the request that went upstream differs from the one the
+// client sent, as one block: redirectHeader's line, then modelHeader's, then
+// upgradeHeader's, each only when it applies. Empty when none does, so the caller
+// can prepend unconditionally.
+//
+// Not all of it is a plugin's doing, which is why this is no longer described as
+// such: the first two are (pctx.Redirect, pctx.SetRequestModel) and the third is
+// the proxy's own hop-by-hop strip. What groups them is the reader's question —
+// "why doesn't this row match what my agent asked for" — and that is the same
+// question whoever did it.
 func rewriteHeader(e *pipeline.SessionEvent) string {
 	var lines []string
-	for _, line := range []string{redirectHeader(e), modelHeader(e)} {
+	for _, line := range []string{redirectHeader(e), modelHeader(e), upgradeHeader(e)} {
 		if line != "" {
 			lines = append(lines, line)
 		}

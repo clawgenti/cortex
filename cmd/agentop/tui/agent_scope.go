@@ -51,9 +51,9 @@ func (m *model) sessionsScope() string {
 }
 
 // spendAxes are the drawer's axes: every one, less the agent axis under a scope, where it would
-// be a single row.
+// be a single row. The DRAWER'S scope, which on the agents pane is the highlighted row.
 func (m *model) spendAxes() []usage.Group {
-	if m.agentScope == "" {
+	if m.spendScopeAgent() == "" {
 		return spendDrawerAxes
 	}
 	out := make([]usage.Group, 0, len(spendDrawerAxes))
@@ -69,7 +69,7 @@ func (m *model) spendAxes() []usage.Group {
 // first axis instead.
 func (m *model) spendAxis() usage.Group {
 	a := m.spend.axis()
-	if m.agentScope != "" && a == usage.GroupAgent {
+	if m.spendScopeAgent() != "" && a == usage.GroupAgent {
 		return spendDrawerAxes[0]
 	}
 	return a

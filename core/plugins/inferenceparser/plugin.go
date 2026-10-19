@@ -236,29 +236,62 @@ func (p *InferenceParser) OnResponse(_ context.Context, pctx *pipeline.Context) 
 // hasUsage flags whether any event carried usage counts (some providers
 // omit the block unless the client opts in).
 //
-// A streamed Anthropic tool call is spread over many frames — id and name
-// on the opening frame, arguments as fragments after it — so it has to be
-// assembled here rather than read off any single frame. toolCalls keeps
-// emission order; toolsByIndex resolves a fragment to its call, since
-// interleaved blocks (a text block and two tool calls) are only
-// distinguishable by the block index the provider stamps on each frame.
-// openTool is the fallback for a provider that omits the index.
+// A streamed tool call is spread over many frames on both dialects that
+// fragment one — id and name up front, arguments as fragments after — so it
+// has to be assembled here rather than read off any single frame. The
+// Anthropic fields keep emission order (toolCalls), resolve a fragment to
+// its call by the block index the provider stamps on each frame
+// (toolsByIndex), and fall back to the most recently opened call for a
+// provider that omits the index (openTool).
+//
+// openAIToolCalls/openAIByIndex are the same assembly for OpenAI Chat
+// Completions streams, keyed by the index each delta.tool_calls fragment
+// carries. Separate fields rather than shared ones: the two indexes are
+// different namespaces, and only one dialect ever runs against one state —
+// keeping them apart costs nothing and means an OpenAI fragment can never be
+// resolved into a half-open Anthropic block by a misrouted frame.
 //
 // responsesToolCalls holds the Responses API's tool calls instead — a
-// different shape with the same destination. foldResponsesFrame reads a
-// completed call whole off a single response.output_item.done event (see
-// responses.go), so there is nothing to assemble: no index map, no
-// in-progress fallback, just a plain append-as-they-complete list.
+// different shape with the same destination. A call opens on
+// response.output_item.added and is completed whole by its
+// response.output_item.done (see responses.go); one whose done never arrives
+// stays as the stream left it, as an Anthropic block cut mid-arguments does.
 type inferenceStreamState struct {
 	completion strings.Builder
 	usage      parsercommon.TokenUsage
 	hasUsage   bool
 
-	toolCalls    []*anthropicToolCallState
-	toolsByIndex map[int]*anthropicToolCallState
-	openTool     *anthropicToolCallState
+	toolCalls    []*toolCallState
+	toolsByIndex map[int]*toolCallState
+	openTool     *toolCallState
 
-	responsesToolCalls []pipeline.InferenceToolCall
+	openAIToolCalls []*toolCallState
+	openAIByIndex   map[int]*toolCallState
+
+	responsesToolCalls []*responsesCallState
+}
+
+// foldOpenAIToolCallFragment folds one delta.tool_calls fragment into the call it
+// belongs to, opening one at that index on first sight. Only the first fragment for
+// an index carries the id and function name; later ones carry only argument
+// fragments, so each field is written when present rather than required.
+func (s *inferenceStreamState) foldOpenAIToolCallFragment(tc *inferenceStreamToolCall) {
+	acc := s.openAIByIndex[tc.Index]
+	if acc == nil {
+		acc = &toolCallState{}
+		s.openAIToolCalls = append(s.openAIToolCalls, acc)
+		if s.openAIByIndex == nil {
+			s.openAIByIndex = map[int]*toolCallState{}
+		}
+		s.openAIByIndex[tc.Index] = acc
+	}
+	if tc.ID != "" {
+		acc.id = tc.ID
+	}
+	if tc.Function.Name != "" {
+		acc.name = tc.Function.Name
+	}
+	acc.args.WriteString(tc.Function.Arguments)
 }
 
 // finalize copies the accumulated stream state onto the public extension
@@ -270,7 +303,7 @@ func (s *inferenceStreamState) finalize(ext *pipeline.InferenceExtension) {
 	if s.hasUsage {
 		s.usage.Fill(ext)
 	}
-	calls := make([]pipeline.InferenceToolCall, 0, len(s.toolCalls)+len(s.responsesToolCalls))
+	calls := make([]pipeline.InferenceToolCall, 0, len(s.toolCalls)+len(s.openAIToolCalls)+len(s.responsesToolCalls))
 	for _, tc := range s.toolCalls {
 		calls = append(calls, pipeline.InferenceToolCall{
 			ID:        tc.id,
@@ -278,7 +311,20 @@ func (s *inferenceStreamState) finalize(ext *pipeline.InferenceExtension) {
 			Arguments: tc.args.String(),
 		})
 	}
-	calls = append(calls, s.responsesToolCalls...)
+	for _, tc := range s.openAIToolCalls {
+		calls = append(calls, pipeline.InferenceToolCall{
+			ID:        tc.id,
+			Name:      tc.name,
+			Arguments: tc.args.String(),
+		})
+	}
+	for _, tc := range s.responsesToolCalls {
+		calls = append(calls, pipeline.InferenceToolCall{
+			ID:        tc.id,
+			Name:      tc.name,
+			Arguments: tc.args.String(),
+		})
+	}
 	if len(calls) == 0 {
 		return
 	}
@@ -587,7 +633,8 @@ func foldResponseFrame(pctx *pipeline.Context, frame []byte, state *inferenceStr
 // foldOpenAIFrame folds one OpenAI streaming chunk (data: {choices,usage}) into
 // the running stream state. The "[DONE]" sentinel and malformed chunks are
 // skipped. Usage arrives (cumulative) when the client set
-// stream_options.include_usage.
+// stream_options.include_usage. Tool calls arrive as index-keyed fragments
+// and are assembled by foldOpenAIToolCallFragment.
 func foldOpenAIFrame(frame []byte, state *inferenceStreamState, ext *pipeline.InferenceExtension) {
 	if bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) {
 		return
@@ -600,6 +647,9 @@ func foldOpenAIFrame(frame []byte, state *inferenceStreamState, ext *pipeline.In
 	for _, c := range chunk.Choices {
 		if c.Delta.Content != "" {
 			state.completion.WriteString(c.Delta.Content)
+		}
+		for i := range c.Delta.ToolCalls {
+			state.foldOpenAIToolCallFragment(&c.Delta.ToolCalls[i])
 		}
 		if c.FinishReason != "" {
 			ext.FinishReason = c.FinishReason
@@ -689,13 +739,14 @@ func parseInferenceJSON(body []byte, ext *pipeline.InferenceExtension) {
 //
 // OpenAI streams cumulative usage: each usage-bearing chunk restates the full
 // totals, so the latest chunk's neutral form is authoritative. Accumulate into
-// a local TokenUsage and Fill once at the end — matching foldOpenAIFrame's
+// the shared TokenUsage and Fill once at the end — matching foldOpenAIFrame's
 // contract, so PresentKinds and ReportedTotal reflect only the final chunk.
+//
+// Tool calls fold through the same inferenceStreamState the frame path uses,
+// so the two paths cannot drift on what a fragmented call assembles into.
 func parseInferenceSSE(body []byte, ext *pipeline.InferenceExtension) {
 	markStreamedResponse(body, ext)
-	var completion strings.Builder
-	var usage parsercommon.TokenUsage
-	var hasUsage bool
+	state := &inferenceStreamState{}
 	for _, line := range bytes.Split(normalizeSSE(body), []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if !bytes.HasPrefix(line, []byte("data:")) {
@@ -712,21 +763,21 @@ func parseInferenceSSE(body []byte, ext *pipeline.InferenceExtension) {
 		}
 		for _, c := range chunk.Choices {
 			if c.Delta.Content != "" {
-				completion.WriteString(c.Delta.Content)
+				state.completion.WriteString(c.Delta.Content)
+			}
+			for i := range c.Delta.ToolCalls {
+				state.foldOpenAIToolCallFragment(&c.Delta.ToolCalls[i])
 			}
 			if c.FinishReason != "" {
 				ext.FinishReason = c.FinishReason
 			}
 		}
 		if chunk.Usage.hasAny() {
-			usage = chunk.Usage.toNeutral()
-			hasUsage = true
+			state.usage = chunk.Usage.toNeutral()
+			state.hasUsage = true
 		}
 	}
-	ext.Completion = completion.String()
-	if hasUsage {
-		usage.Fill(ext)
-	}
+	state.finalize(ext)
 }
 
 type inferenceResponse struct {
@@ -772,7 +823,27 @@ type inferenceStreamChoice struct {
 }
 
 type inferenceDelta struct {
-	Content string `json:"content"`
+	Content   string                    `json:"content"`
+	ToolCalls []inferenceStreamToolCall `json:"tool_calls"`
+}
+
+// inferenceStreamToolCall is one entry of a streamed delta's tool_calls array.
+// Unlike inferenceRespToolCall (the non-streaming shape, one self-contained
+// object per call), each entry is a FRAGMENT: the index names which
+// accumulating call it belongs to, only the first fragment for an index
+// carries the id and function name, and the arguments arrive as
+// JSON-string fragments that are only valid once every fragment for that
+// index is concatenated — the same assembly problem as Anthropic's
+// input_json_delta, keyed differently. The index is what OpenAI documents
+// and what every observed stream stamps on each fragment; a fragment
+// without one reads as index 0.
+type inferenceStreamToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 // inferenceUsage decodes the OpenAI usage block. All fields are pointers

@@ -72,3 +72,103 @@ func TestClearSessions_405IsErrClearUnsupported(t *testing.T) {
 		t.Fatalf("err = %v, want ErrClearUnsupported", err)
 	}
 }
+
+// The id is escaped into one path segment, so a pending bucket's id or one holding a slash
+// erases that session and no other.
+func TestDeleteSession_EscapesTheIDAndDecodesCounts(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.EscapedPath() != "/v1/sessions/pending:bob%2Fshell" || r.Header.Get("Origin") != "" {
+			t.Errorf("request %s %s origin=%q, want DELETE /v1/sessions/pending:bob%%2Fshell with no Origin",
+				r.Method, r.URL.EscapedPath(), r.Header.Get("Origin"))
+		}
+		w.Write([]byte(`{"sessions":1,"archivedSessions":1,"bytes":4096}`))
+	}))
+	defer ts.Close()
+	res, err := New(ts.URL).DeleteSession(context.Background(), "pending:bob/shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Sessions != 1 || res.ArchivedSessions != 1 || res.Bytes != 4096 {
+		t.Fatalf("DeleteSession = %+v", res)
+	}
+}
+
+// Each status the route answers maps to what the TUI needs to tell apart: gone already, a proxy
+// to upgrade, a refusal with its reason, and memory erased with the disk half failed.
+func TestDeleteSession_MapsEveryStatus(t *testing.T) {
+	for _, tc := range []struct {
+		code    int
+		body    string
+		wantErr error
+		check   func(ClearResult, error) bool
+	}{
+		{http.StatusNotFound, `404 page not found`, ErrSessionGone, nil},
+		{http.StatusMethodNotAllowed, ``, ErrDeleteUnsupported, nil},
+		{http.StatusForbidden, `{"error":"not bound to loopback only"}`, ErrClearRefused,
+			func(_ ClearResult, err error) bool {
+				return strings.Contains(err.Error(), "not bound to loopback only")
+			}},
+		{http.StatusInternalServerError, `{"sessions":1,"archivedSessions":0,"bytes":0,"archiveError":"disk says no"}`, nil,
+			func(r ClearResult, err error) bool {
+				return err == nil && r.Sessions == 1 && r.ArchiveError == "disk says no"
+			}},
+	} {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.code)
+			w.Write([]byte(tc.body))
+		}))
+		res, err := New(ts.URL).DeleteSession(context.Background(), "s1")
+		ts.Close()
+		if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+			t.Errorf("%d: err = %v, want %v", tc.code, err, tc.wantErr)
+		}
+		if tc.check != nil && !tc.check(res, err) {
+			t.Errorf("%d: DeleteSession = %+v, %v", tc.code, res, err)
+		}
+	}
+}
+
+// A dot-segment id is sent escaped. Left bare, a mux cleans DELETE /v1/sessions/. into a redirect
+// to /v1/sessions, and following it would clear every session instead of erasing this one.
+func TestDeleteSession_EscapesDotSegments(t *testing.T) {
+	for id, want := range map[string]string{".": "/v1/sessions/%2E", "..": "/v1/sessions/%2E%2E"} {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete || r.URL.EscapedPath() != want {
+				t.Errorf("id %q: request %s %s, want DELETE %s", id, r.Method, r.URL.EscapedPath(), want)
+			}
+			w.Write([]byte(`{"sessions":1,"archivedSessions":1,"bytes":10}`))
+		}))
+		res, err := New(ts.URL).DeleteSession(context.Background(), id)
+		ts.Close()
+		if err != nil {
+			t.Fatalf("id %q: %v", id, err)
+		}
+		if res.Sessions != 1 || res.ArchivedSessions != 1 || res.Bytes != 10 {
+			t.Fatalf("id %q: DeleteSession = %+v", id, res)
+		}
+	}
+}
+
+// Neither erase follows a redirect, so it can only reach the route it named: a 307 to
+// /v1/sessions would otherwise re-send the DELETE there, and clear everything.
+func TestErase_DoesNotFollowRedirects(t *testing.T) {
+	for name, erase := range map[string]func(*Client) error{
+		"DeleteSession": func(c *Client) error { _, err := c.DeleteSession(context.Background(), "s1"); return err },
+		"ClearSessions": func(c *Client) error { _, err := c.ClearSessions(context.Background()); return err },
+	} {
+		var requests int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			w.Header().Set("Location", "/v1/sessions")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		}))
+		err := erase(New(ts.URL))
+		ts.Close()
+		if err == nil {
+			t.Errorf("%s: err = nil, want an error for a 307", name)
+		}
+		if requests != 1 {
+			t.Errorf("%s: server saw %d requests, want 1 (the redirect not followed)", name, requests)
+		}
+	}
+}

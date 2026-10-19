@@ -127,6 +127,19 @@ type spendState struct {
 	windowStep int
 	// drawerAxis is the grouping drawer.snap was asked for, which a scoped reply may not carry.
 	drawerAxis usage.Group
+	// drawerAgent is the agent the drawer's last fetch asked for, so a cursor move — or a
+	// pane change — can tell a refetch it owes from one it does not. Recorded at ISSUE time
+	// by fetchSpendDrawer, including for a fetch that goes on to fail: the ask is what
+	// matters, not whether it was answered. Cleared by invalidate, which is always followed
+	// by a fetch that re-records it (startSpendPolling) or by a closed drawer.
+	drawerAgent string
+	// drawerSpan is the span that same fetch asked for: on the agents pane the drawer breaks
+	// down the pane's own window, so a pane change can move it without any key touching `w`.
+	drawerSpan spendSpan
+	// bandAgent is the agent the band's chains were last asked for — the highlighted row on
+	// the agents pane, the committed scope elsewhere — so syncSpendScope can tell a restart it
+	// owes from one it does not.
+	bandAgent string
 }
 
 // spendSpan identifies one of the four budget spans the band reports.
@@ -275,6 +288,7 @@ func (s *spendState) invalidate() {
 		s.chains[i].invalidate()
 	}
 	s.drawer.invalidate()
+	s.drawerAgent = ""
 }
 
 // spendLoadedMsg carries one span's fetched snapshot back to Update.
@@ -902,7 +916,7 @@ func (m *model) startSpendPolling() tea.Cmd {
 		cmds = append(cmds, m.fetchSpendSpan(span), spendTick(span, m.spend.chains[span].tickGen))
 	}
 	if m.spend.expanded {
-		cmds = append(cmds, m.fetchSpendDrawer(), spendDrawerTick(m.spend.drawer.tickGen, m.spend.pollInterval()))
+		cmds = append(cmds, m.fetchSpendDrawer(), spendDrawerTick(m.spend.drawer.tickGen, m.spendDrawerPollInterval()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -955,7 +969,8 @@ func (m *model) fetchSpendSpan(span spendSpan) tea.Cmd {
 	// Read on the update goroutine and captured, not read inside the closure: the closure
 	// runs on bubbletea's command goroutine, where touching m is a data race.
 	def := spendSpanDefs[span]
-	agent := m.agentScope
+	agent := m.spendScopeAgent()
+	m.spend.bandAgent = agent
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), spendFetchTimeout)
 		defer cancel()
@@ -993,7 +1008,7 @@ func (m *model) applySpendDrawerLoaded(msg spendDrawerLoadedMsg) {
 // the breakdown has to keep up with the figure above it: the hour's cell refreshes every twenty
 // seconds, so an hour breakdown on a five-minute cadence disagreed with it for up to five
 // minutes. A month keeps the slow cadence — re-folding thirty-one day files to redraw four rows
-// is what the slow cadence was chosen for. See spendState.pollInterval.
+// is what the slow cadence was chosen for. See spendDrawerPollInterval.
 //
 // A keypress refetches immediately — see cycleSpendAxis and cycleSpendWindow — so this only
 // governs how stale an UNTOUCHED open drawer gets.
@@ -1001,6 +1016,24 @@ func spendDrawerTick(gen uint64, every time.Duration) tea.Cmd {
 	return tea.Tick(every, func(time.Time) tea.Msg {
 		return spendDrawerTickMsg{gen: gen}
 	})
+}
+
+// spendScopeAgent is the scope the band's and the drawer's next fetches carry: the committed
+// scope everywhere, and on the agents pane THE ROW UNDER THE CURSOR — the same row Enter would
+// commit (selectedAgentScope), read here at fetch time and never stored. Both follow the cursor
+// without anything being narrowed: Enter stays the only key that writes the scope, and leaving
+// the pane puts both back on it.
+//
+// THE BAND FOLLOWS TOO, which it did not at first: it kept the committed scope while the drawer
+// under it followed the cursor, so one screen showed claude-code's spend above bob-shell's
+// breakdown under a title saying "scoped to claude-code". The title names this agent now.
+func (m *model) spendScopeAgent() string {
+	if m.pane == paneAgents {
+		if row, ok := m.selectedAgentScope(); ok {
+			return row
+		}
+	}
+	return m.agentScope
 }
 
 // fetchSpendDrawer requests the breakdown: ONE window, folded by the current axis.
@@ -1017,7 +1050,11 @@ func (m *model) fetchSpendDrawer() tea.Cmd {
 	// GetUsageWindow, not GetUsage: the drawer's span can now be a symbolic boundary, which a
 	// time.Duration cannot express. One request-building path for every span it can be pointed
 	// at, so the hour cannot drift from the other three.
-	window, resolution, axis, agent := m.spend.window(), m.spend.windowResolution(), m.spendAxis(), m.agentScope
+	span, axis, agent := m.spendDrawerSpan(), m.spendAxis(), m.spendScopeAgent()
+	window, resolution := spendSpanDefs[span].window, spanResolution(span)
+	// Recorded at issue so syncSpendScope can tell a refetch it owes from one it does not — a
+	// cursor move on the agents pane changes the agent, a clamped one must not refetch.
+	m.spend.drawerAgent, m.spend.drawerSpan = agent, span
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), spendFetchTimeout)
 		defer cancel()

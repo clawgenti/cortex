@@ -194,7 +194,7 @@ func TestHandleClear_RefusalsAreLoggedOncePerInterval(t *testing.T) {
 			t.Fatalf("DELETE = %d, want 403", code)
 		}
 	}
-	if n := strings.Count(logs.String(), "refused to clear"); n != 1 {
+	if n := strings.Count(logs.String(), "refused to erase"); n != 1 {
 		t.Fatalf("20 refusals logged %d lines, want 1:\n%s", n, logs.String())
 	}
 }

@@ -136,8 +136,10 @@ type entry struct {
 	Title     string
 	titleRank int
 
-	// agents is the first label each known coding agent sent into this session, one entry per
-	// agent; see SessionSummary.Agent. First-wins and not shed on trim, like Title.
+	// agents is the first label each CLIENT sent into this session, one entry per client —
+	// recognised coding agents and, since #1214, the clients the parser could not name, which
+	// carry known: false and are preferred only after every recognised one. See
+	// SessionSummary.Agent and sessionAgent. First-wins and not shed on trim, like Title.
 	agents []sessionAgent
 
 	// context is the CONTEXT gauge's answer for this session: the main-agent turn that RANKS
@@ -875,10 +877,21 @@ type SessionSummary struct {
 	// running agentop — an agent that routes through the proxy without writing Claude Code
 	// transcripts is the case that motivated it. Do not assume a change here is invisible.
 	Title string `json:"title,omitempty"`
-	// Agent is the coding agent this session belongs to, as usage.AgentLabel names it, which is
-	// the label agent= matches: the affinity owner's when one claimed the session, else the first
-	// known agent's. Absent for the default and pending buckets, which are no one agent's, and for
-	// a claimed session its owner has sent nothing into.
+	// Agent is the client this session belongs to, as usage.AgentLabel names it, which is the
+	// label agent= matches: the affinity owner's when one claimed the session, else the first
+	// recognised agent's, else — #1214 — the first UNRECOGNISED client's, which is its raw
+	// User-Agent folded by pipeline.AgentName. Absent for the default and pending buckets, which
+	// are no one agent's, for a claimed session its owner has sent nothing into, and for a session
+	// whose every event carried no User-Agent at all, since "unknown" is a reserved bucket rather
+	// than a name (see pipeline.EventClient.Label).
+	//
+	// NOT A STATEMENT THAT THE AGENT IS RECOGNISED, and a consumer that reads it as one is the
+	// one thing this field's widening can surprise. pipeline.IsKnownAgent(agent) still answers
+	// correctly — that is what it exists for, and agentop's AGENTS pane uses it to pool every
+	// label it rejects under one row — but presence alone no longer implies it. The alternative
+	// was a session that nothing in the list could attribute to any program, which is what #1214
+	// was filed about; a spoofable label is the same axis the usage ring and the ledger already
+	// key on, never an identity.
 	Agent string `json:"agent,omitempty"`
 	// Adopted names the pending buckets this session took in (see Store.Claim), so a client still
 	// holding one of those buckets' events can tell they now head this session.
@@ -993,8 +1006,7 @@ type SessionSummary struct {
 	//
 	// GENERIC, NOT THE ROUTER'S: it says where a session's inference goes with or without the
 	// inference-router. agentop names a session's server from it, which is why the router refuses
-	// two servers on one host. A host[:port] as the request carried it, so compare it
-	// port-stripped and lowercased.
+	// two servers on one host. A host[:port] as the request carried it.
 	//
 	// CONTINUES ACROSS A RESTART WHERE A SESSION ARCHIVE RUNS, like Title: the archive's fold
 	// persists it, and a resumed session reports it until its own next inference request.
@@ -1021,8 +1033,18 @@ type SessionSummary struct {
 	Resident *bool `json:"resident,omitempty"`
 }
 
-// sessionAgent is one known coding agent's first label in a session.
-type sessionAgent struct{ name, label string }
+// sessionAgent is one client's first label in a session.
+//
+// name is how the agents slice is KEYED, so each client contributes one entry: a recognised
+// agent's canonical AffinityName, and — since #1214 — an unrecognised client's own label, which
+// is the only name it has. known is what tells the two apart, and it has to be a field rather
+// than a pipeline.IsKnownAgent(name) call at the point of use: name is an AffinityName, which
+// reads an agent's canonical name out of a COMMENT (Claude Code's WebFetch), so the recognised
+// entry's name and its label can disagree, and only the producer knows which rule made it.
+type sessionAgent struct {
+	name, label string
+	known       bool
+}
 
 // agentLabel is the first label the agent named name sent into this session, or "".
 func (e *entry) agentLabel(name string) string {
@@ -1030,8 +1052,23 @@ func (e *entry) agentLabel(name string) string {
 }
 
 // agentOfLocked is SessionSummary.Agent: the label of the owner that claimed the session, else of
-// the first known agent in it. earlier is the agents of the history before this entry (see
-// PriorKeeper), nil when there is none; being earlier, it is searched first.
+// the first RECOGNISED agent in it, else — #1214 — of the first unrecognised client. earlier is
+// the agents of the history before this entry (see PriorKeeper), nil when there is none; being
+// earlier, it is searched first.
+//
+// THE UNRECOGNISED FALLBACK IS LAST FOR A REASON, and it is not a tie-break detail. Appending an
+// unrecognised client into one first-wins order with the recognised ones would re-label a Claude
+// Code session after whatever `curl` or an SDK probe happened to reach it first — the field's
+// existing contract, which this change is not allowed to move. Two orders, recognised first,
+// leaves every session that already names an agent naming the same one.
+//
+// WHY "FIRST UNRECOGNISED" IS ALSO "THE ONE THAT NAMED THE SESSION", which is what #1214 asks
+// for. An unrecognised client's own session header is the only thing that files its traffic under
+// its id: SessionForClient answers "" or the default bucket for a client it cannot name
+// (affinity.go, cases 2 and 3), and Claim refuses the empty name, so an unrecognised client's
+// header-less calls never route into the session it named. The headered request is therefore the
+// first of its client's events to land there, and the store needs no record of which request
+// carried the header in order to prefer it.
 func (s *Store) agentOfLocked(id string, sess *entry, earlier []sessionAgent) string {
 	if id == DefaultSessionID || strings.HasPrefix(id, PendingPrefix) {
 		return ""
@@ -1042,13 +1079,10 @@ func (s *Store) agentOfLocked(id string, sess *entry, earlier []sessionAgent) st
 		}
 		return sess.agentLabel(owner)
 	}
-	if len(earlier) > 0 {
-		return earlier[0].label
+	if l := firstAgentLabel(earlier, sess.agents, true); l != "" {
+		return l
 	}
-	if len(sess.agents) == 0 {
-		return ""
-	}
-	return sess.agents[0].label
+	return firstAgentLabel(earlier, sess.agents, false)
 }
 
 // adoptedByLocked maps each session to the pending buckets it adopted; see SessionSummary.Adopted.
@@ -1305,6 +1339,18 @@ func (s *Store) rekeyLocked(oldID, newID string) bool {
 	return true
 }
 
+// removeLocked drops id's entry and every map that names it: its owner, its adoption records and
+// the active-session mark. Eviction, ttl expiry and Delete all remove a session through it. s.mu
+// held.
+func (s *Store) removeLocked(id string) {
+	delete(s.sessions, id)
+	delete(s.owners, id)
+	s.forgetAdoptedLocked(id)
+	if s.activeID == id {
+		s.activeID = ""
+	}
+}
+
 // Cleanup removes expired sessions. Safe for concurrent use.
 func (s *Store) Cleanup() {
 	s.mu.Lock()
@@ -1315,12 +1361,7 @@ func (s *Store) Cleanup() {
 func (s *Store) cleanupLocked(now time.Time) {
 	for id, sess := range s.sessions {
 		if s.isExpired(sess, now) {
-			delete(s.sessions, id)
-			delete(s.owners, id)
-			s.forgetAdoptedLocked(id)
-			if s.activeID == id {
-				s.activeID = ""
-			}
+			s.removeLocked(id)
 		}
 	}
 }
@@ -1340,12 +1381,9 @@ func (s *Store) evictOldestLocked() {
 	if oldestID == "" {
 		// All sessions are the active session — evict it as last resort.
 		oldestID = s.activeID
-		s.activeID = ""
 	}
 	if oldestID != "" {
-		delete(s.sessions, oldestID)
-		delete(s.owners, oldestID)
-		s.forgetAdoptedLocked(oldestID)
+		s.removeLocked(oldestID)
 	}
 }
 

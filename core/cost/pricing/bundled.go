@@ -39,6 +39,18 @@ func Bundled() []Entry {
 }
 
 var bundledEntries = []Entry{
+	{Host: "*", Model: "chat-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 5e-07, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "chatgpt-4o-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierOutput: 1.5e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "chatgpt-image-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 1.25e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true},
+	}},
 	{Host: "*", Model: "claude-3-7-sonnet-20250219", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 3e-06, TierCacheWrite: 3.75e-06, TierCacheRead: 3e-07, TierOutput: 1.5e-05},
 		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
@@ -58,11 +70,13 @@ var bundledEntries = []Entry{
 	{Host: "*", Model: "claude-4-sonnet-20250514", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 3e-06, TierCacheWrite: 3.75e-06, TierCacheRead: 3e-07, TierOutput: 1.5e-05},
 		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		Thresholds: []ContextThreshold{{
-			AbovePromptTokens: 200000,
-			Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
-			Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		}},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 200000,
+				Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
 	}},
 	{Host: "*", Model: "claude-fable-5", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 1e-05, TierCacheWrite: 1.25e-05, TierCacheRead: 1e-06, TierOutput: 5e-05},
@@ -139,29 +153,35 @@ var bundledEntries = []Entry{
 	{Host: "*", Model: "claude-sonnet-4-20250514", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 3e-06, TierCacheWrite: 3.75e-06, TierCacheRead: 3e-07, TierOutput: 1.5e-05},
 		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		Thresholds: []ContextThreshold{{
-			AbovePromptTokens: 200000,
-			Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
-			Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		}},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 200000,
+				Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
 	}},
 	{Host: "*", Model: "claude-sonnet-4-5", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 3e-06, TierCacheWrite: 3.75e-06, TierCacheRead: 3e-07, TierOutput: 1.5e-05},
 		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		Thresholds: []ContextThreshold{{
-			AbovePromptTokens: 200000,
-			Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
-			Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		}},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 200000,
+				Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
 	}},
 	{Host: "*", Model: "claude-sonnet-4-5-20250929", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 3e-06, TierCacheWrite: 3.75e-06, TierCacheRead: 3e-07, TierOutput: 1.5e-05},
 		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		Thresholds: []ContextThreshold{{
-			AbovePromptTokens: 200000,
-			Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
-			Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
-		}},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 200000,
+				Rate:              [numTiers]float64{TierInput: 6e-06, TierCacheWrite: 7.5e-06, TierCacheRead: 6e-07, TierOutput: 2.25e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
 	}},
 	{Host: "*", Model: "claude-sonnet-4-6", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 3e-06, TierCacheWrite: 3.75e-06, TierCacheRead: 3e-07, TierOutput: 1.5e-05},
@@ -170,6 +190,627 @@ var bundledEntries = []Entry{
 	{Host: "*", Model: "claude-sonnet-5", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 2e-06, TierCacheWrite: 2.5e-06, TierCacheRead: 2e-07, TierOutput: 1e-05},
 		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "codex-mini-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-06, TierCacheRead: 3.75e-07, TierOutput: 6e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "daybreak-blue-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheWrite: 5e-06, TierCacheRead: 4e-07, TierOutput: 2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 8e-06, TierCacheWrite: 1e-05, TierCacheRead: 8e-07, TierOutput: 3e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "ft:gpt-3.5-turbo", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-06, TierOutput: 6e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-3.5-turbo-0125", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-06, TierOutput: 6e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-3.5-turbo-0613", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-06, TierOutput: 6e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-3.5-turbo-1106", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-06, TierOutput: 6e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-4-0613", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-05, TierOutput: 6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-4.1-2025-04-14", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-06, TierCacheRead: 7.5e-07, TierOutput: 1.2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-4.1-mini-2025-04-14", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 8e-07, TierCacheRead: 2e-07, TierOutput: 3.2e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-4.1-nano-2025-04-14", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-07, TierCacheRead: 5e-08, TierOutput: 8e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-4o-2024-08-06", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3.75e-06, TierCacheRead: 1.875e-06, TierOutput: 1.5e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-4o-2024-11-20", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3.75e-06, TierCacheWrite: 1.875e-06, TierOutput: 1.5e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:gpt-4o-mini-2024-07-18", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-07, TierCacheRead: 1.5e-07, TierOutput: 1.2e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "ft:o4-mini-2025-04-16", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheRead: 1e-06, TierOutput: 1.6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-3.5-turbo", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-07, TierOutput: 1.5e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-3.5-turbo-0125", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-07, TierOutput: 1.5e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-3.5-turbo-1106", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-06, TierOutput: 2e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-3.5-turbo-16k", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-06, TierOutput: 4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-05, TierOutput: 6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4-0125-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4-0314", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-05, TierOutput: 6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4-0613", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 3e-05, TierOutput: 6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4-1106-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4-turbo", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4-turbo-2024-04-09", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4-turbo-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4.1", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheRead: 5e-07, TierOutput: 8e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4.1-2025-04-14", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheRead: 5e-07, TierOutput: 8e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4.1-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-07, TierCacheRead: 1e-07, TierOutput: 1.6e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4.1-mini-2025-04-14", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-07, TierCacheRead: 1e-07, TierOutput: 1.6e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4.1-nano", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-07, TierCacheRead: 2.5e-08, TierOutput: 4e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4.1-nano-2025-04-14", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-07, TierCacheRead: 2.5e-08, TierOutput: 4e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierCacheRead: 1.25e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-2024-05-13", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierOutput: 1.5e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-2024-08-06", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierCacheRead: 1.25e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-2024-11-20", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierCacheRead: 1.25e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-audio-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-audio-preview-2024-12-17", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-audio-preview-2025-06-03", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-07, TierCacheRead: 7.5e-08, TierOutput: 6e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-2024-07-18", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-07, TierCacheRead: 7.5e-08, TierOutput: 6e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-audio-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-07, TierOutput: 6e-07},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-audio-preview-2024-12-17", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-07, TierOutput: 6e-07},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-realtime-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierCacheRead: 3e-07, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-realtime-preview-2024-12-17", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierCacheRead: 3e-07, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-search-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-07, TierCacheRead: 7.5e-08, TierOutput: 6e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-search-preview-2025-03-11", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-07, TierCacheRead: 7.5e-08, TierOutput: 6e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-transcribe", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierOutput: 5e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-transcribe-2025-03-20", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierOutput: 5e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-transcribe-2025-12-15", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierOutput: 5e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-tts", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-tts-2025-03-20", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-mini-tts-2025-12-15", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-realtime-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 2.5e-06, TierOutput: 2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-realtime-preview-2024-12-17", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 2.5e-06, TierOutput: 2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-realtime-preview-2025-06-03", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 2.5e-06, TierOutput: 2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-search-preview", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierCacheRead: 1.25e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-search-preview-2025-03-11", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierCacheRead: 1.25e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-transcribe", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-4o-transcribe-diarize", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-2025-08-07", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-chat", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-chat-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-codex", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-07, TierCacheRead: 2.5e-08, TierOutput: 2e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-mini-2025-08-07", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-07, TierCacheRead: 2.5e-08, TierOutput: 2e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-nano", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-08, TierCacheRead: 5e-09, TierOutput: 4e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-nano-2025-08-07", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-08, TierCacheRead: 5e-09, TierOutput: 4e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-search-api", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5-search-api-2025-10-14", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.1", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.1-2025-11-13", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.1-chat-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.1-codex", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.1-codex-max", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.25e-06, TierCacheRead: 1.25e-07, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.1-codex-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-07, TierCacheRead: 2.5e-08, TierOutput: 2e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.2", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.75e-06, TierCacheRead: 1.75e-07, TierOutput: 1.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.2-2025-12-11", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.75e-06, TierCacheRead: 1.75e-07, TierOutput: 1.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.2-chat-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.75e-06, TierCacheRead: 1.75e-07, TierOutput: 1.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.2-codex", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.75e-06, TierCacheRead: 1.75e-07, TierOutput: 1.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.3-chat-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.75e-06, TierCacheRead: 1.75e-07, TierOutput: 1.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.3-codex", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.75e-06, TierCacheRead: 1.75e-07, TierOutput: 1.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.4", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierCacheRead: 2.5e-07, TierOutput: 1.5e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 5e-06, TierCacheRead: 5e-07, TierOutput: 2.25e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-5.4-2026-03-05", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierCacheRead: 2.5e-07, TierOutput: 1.5e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 5e-06, TierCacheRead: 5e-07, TierOutput: 2.25e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-5.4-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 7.5e-07, TierCacheRead: 7.5e-08, TierOutput: 4.5e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.4-mini-2026-03-17", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 7.5e-07, TierCacheRead: 7.5e-08, TierOutput: 4.5e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.4-nano", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-07, TierCacheRead: 2e-08, TierOutput: 1.25e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.4-nano-2026-03-17", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-07, TierCacheRead: 2e-08, TierOutput: 1.25e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-5.5", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 5e-07, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 1e-05, TierCacheRead: 1e-06, TierOutput: 4.5e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-5.5-2026-04-23", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 5e-07, TierOutput: 3e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 1e-05, TierCacheRead: 1e-06, TierOutput: 4.5e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-5.6", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheWrite: 5e-06, TierCacheRead: 4e-07, TierOutput: 2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 8e-06, TierCacheWrite: 1e-05, TierCacheRead: 8e-07, TierOutput: 3e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-5.6-luna", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-07, TierCacheWrite: 2.5e-07, TierCacheRead: 2e-08, TierOutput: 1.2e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 4e-07, TierCacheWrite: 5e-07, TierCacheRead: 4e-08, TierOutput: 1.8e-06},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-5.6-sol", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheWrite: 5e-06, TierCacheRead: 4e-07, TierOutput: 2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 8e-06, TierCacheWrite: 1e-05, TierCacheRead: 8e-07, TierOutput: 3e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-5.6-terra", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheWrite: 2.5e-06, TierCacheRead: 2e-07, TierOutput: 1.2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 4e-06, TierCacheWrite: 5e-06, TierCacheRead: 4e-07, TierOutput: 1.8e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-6-astra", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierCacheWrite: 1.25e-05, TierCacheRead: 1e-06, TierOutput: 5e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 2e-05, TierCacheWrite: 2.5e-05, TierCacheRead: 2e-06, TierOutput: 7.5e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-audio", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-audio-1.5", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-audio-2025-08-28", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2.5e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-audio-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-audio-mini-2025-10-06", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-audio-mini-2025-12-15", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-daybreak-blue-latest", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheWrite: 5e-06, TierCacheRead: 4e-07, TierOutput: 2e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+		Thresholds: []ContextThreshold{
+			{
+				AbovePromptTokens: 272000,
+				Rate:              [numTiers]float64{TierInput: 8e-06, TierCacheWrite: 1e-05, TierCacheRead: 8e-07, TierOutput: 3e-05},
+				Set:               [numTiers]bool{TierInput: true, TierCacheWrite: true, TierCacheRead: true, TierOutput: true},
+			},
+		},
+	}},
+	{Host: "*", Model: "gpt-image-1", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 1.25e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true},
+	}},
+	{Host: "*", Model: "gpt-image-1-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheRead: 2e-07},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true},
+	}},
+	{Host: "*", Model: "gpt-image-1.5", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 1.25e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-image-1.5-2025-12-16", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 1.25e-06, TierOutput: 1e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-image-2", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 1.25e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true},
+	}},
+	{Host: "*", Model: "gpt-image-2-2026-04-21", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 5e-06, TierCacheRead: 1.25e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true},
+	}},
+	{Host: "*", Model: "gpt-realtime", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheRead: 4e-07, TierOutput: 1.6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-1.5", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheRead: 4e-07, TierOutput: 1.6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-2", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheRead: 4e-07, TierOutput: 2.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-2.1", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheRead: 4e-07, TierOutput: 2.4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-2.1-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierCacheRead: 6e-08, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-2025-08-28", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 4e-06, TierCacheRead: 4e-07, TierOutput: 1.6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-mini-2025-10-06", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierCacheRead: 6e-08, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "gpt-realtime-mini-2025-12-15", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 6e-07, TierCacheRead: 6e-08, TierOutput: 2.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o1", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-05, TierCacheRead: 7.5e-06, TierOutput: 6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o1-2024-12-17", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.5e-05, TierCacheRead: 7.5e-06, TierOutput: 6e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheRead: 5e-07, TierOutput: 8e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3-2025-04-16", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheRead: 5e-07, TierOutput: 8e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3-deep-research", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierCacheRead: 2.5e-06, TierOutput: 4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3-deep-research-2025-06-26", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-05, TierCacheRead: 2.5e-06, TierOutput: 4e-05},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.1e-06, TierCacheRead: 5.5e-07, TierOutput: 4.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3-mini-2025-01-31", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.1e-06, TierCacheRead: 5.5e-07, TierOutput: 4.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3-pro", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-05, TierOutput: 8e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o3-pro-2025-06-10", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-05, TierOutput: 8e-05},
+		Set:  [numTiers]bool{TierInput: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o4-mini", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.1e-06, TierCacheRead: 2.75e-07, TierOutput: 4.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o4-mini-2025-04-16", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.1e-06, TierCacheRead: 2.75e-07, TierOutput: 4.4e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o4-mini-deep-research", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheRead: 5e-07, TierOutput: 8e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "o4-mini-deep-research-2025-06-26", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-06, TierCacheRead: 5e-07, TierOutput: 8e-06},
+		Set:  [numTiers]bool{TierInput: true, TierCacheRead: true, TierOutput: true},
+	}},
+	{Host: "*", Model: "text-embedding-3-large", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1.3e-07},
+		Set:  [numTiers]bool{TierInput: true},
+	}},
+	{Host: "*", Model: "text-embedding-3-small", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 2e-08},
+		Set:  [numTiers]bool{TierInput: true},
+	}},
+	{Host: "*", Model: "text-embedding-ada-002", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-07},
+		Set:  [numTiers]bool{TierInput: true},
+	}},
+	{Host: "*", Model: "text-embedding-ada-002-v2", Prov: ProvBundled, Rates: Rates{
+		Base: [numTiers]float64{TierInput: 1e-07},
+		Set:  [numTiers]bool{TierInput: true},
 	}},
 	{Host: "*", Model: "*claude-*fable-*", Prov: ProvBundled, Rates: Rates{
 		Base: [numTiers]float64{TierInput: 1e-05, TierCacheWrite: 1.25e-05, TierCacheRead: 2.5e-07, TierOutput: 5e-05},

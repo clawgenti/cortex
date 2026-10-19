@@ -339,8 +339,8 @@ func TestProcessAttribution_FallsBackWhenTheClientCannotBeLookedUp(t *testing.T)
 	plain := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(mustParseURL(proxyURL))}}
 
 	sendAs(t, plain, backendURL+"/admin/v1/profile", "bob-shell/2.0.5", "", "")
-	if store.View(session.PendingSessionID("bob-shell")) == nil {
-		t.Error("an unknown client's Bob call did not reach client affinity's pending:bob-shell")
+	if store.View(session.PendingSessionID("bob")) == nil {
+		t.Error("an unknown client's Bob call did not reach client affinity's pending:bob")
 	}
 }
 

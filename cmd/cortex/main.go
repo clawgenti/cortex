@@ -573,7 +573,9 @@ func main() {
 	}
 	listeners, lerr := reserveListeners(plan)
 	if lerr != nil {
-		log.Fatalf("%v — is another cortex already running? Nothing on disk was opened", lerr)
+		// Names the process holding the address and exits with exitPortInUse, which the
+		// supervisor tells apart from a crash. See portconflict.go; it does not return.
+		reportListenFailure(lerr)
 	}
 
 	initCtx, initCancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -1040,8 +1042,9 @@ func main() {
 			sessionapi.WithCostLedger(costLedger),
 			// nil unless the archive runs; pages and ?archived=true then read history from disk.
 			sessionapi.WithArchive(sessArchive),
-			// DELETE /v1/sessions only where the API is this machine's alone: a laptop install
-			// binds loopback-only, and its one user owns the history. See sessionapi.handleClear.
+			// DELETE /v1/sessions and DELETE /v1/sessions/{id} only where the API is this
+			// machine's alone: a laptop install binds loopback-only, and its one user owns the
+			// history. See sessionapi.clearRefusal.
 			sessionapi.WithClearAllowed(cfg.Listener.BindLoopbackOnly),
 		)
 		sessionLn := listeners.take("session-api")

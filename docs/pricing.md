@@ -20,7 +20,7 @@ Neither owns the cost model. One owner of rates means `tool-prune`,
 | The published record | `core/cost/event` | this page ([Cost records](#cost-records)) |
 | Durable per-minute ledger (`cost_ledger:`) | `core/cost/ledger` | [`laptop-service.md`](laptop-service.md) for the config; [`framework-architecture.md`](framework-architecture.md) for why it is not hot-reloadable |
 | Windowed aggregation, `/v1/usage` | `core/cost/usage` | this page ([Reading usage over HTTP](#reading-usage-over-http)) |
-| Daily caps, drift check | `core/plugins/litellm_budgettrack` | [`litellm-budgettrack-plugin.md`](litellm-budgettrack-plugin.md) |
+| Daily caps, drift check | `core/plugins/litellm_budgettrack` | [`litellm-budget-track-plugin.md`](litellm-budget-track-plugin.md) |
 
 > **Terminology.** *Rate* — money per token for one tier of one model at one endpoint.
 > *Tier* — which kind of token: uncached input, cache write, cache read, output.
@@ -30,10 +30,11 @@ Neither owns the cost model. One owner of rates means `tool-prune`,
 
 | Your setup | What to do |
 |---|---|
-| Talking straight to `api.anthropic.com` | **Nothing.** Bundled rates are vendor list, which is what you are billed. |
+| Talking straight to `api.anthropic.com` or `api.openai.com` | **Nothing.** Bundled rates are vendor list, which is what you are billed. |
 | A gateway matching a shipped discount rule (see below) | **Nothing.** The discount is applied for you. |
 | Any other gateway that bills below list | Set one `multiplier` — [Discounts](#discounts). |
-| Using non-Anthropic models (OpenAI, Gemini, Bedrock, Vertex) | Add rates — nothing ships for them. [Getting the numbers](#getting-the-numbers). |
+| Using a model on Gemini, Bedrock or Vertex | Add rates — nothing ships for the resellers. [Getting the numbers](#getting-the-numbers). |
+| A model that reports *priceable but unpriced* anyway | A handful are, deliberately — see [What is bundled](#only-first-party-anthropic-and-openai-rates-are-bundled). Add rates for it. |
 | A gateway billing in something other than dollars | Set its `unit` — [Billing units](#billing-units). Rates still have to be configured. |
 
 Cortex warns once at startup if you have pinned nothing at all:
@@ -65,7 +66,8 @@ and `--json` carries it as `listFetchedAt`. `bundled: false` turns the download 
 rest of the shipped table. Sidecars in a cluster make no such call and keep the compiled-in
 table.
 
-**33 entries: 28 exact model ids plus 5 family globs.** The globs matter most, because
+**172 entries: 167 exact model ids plus 5 family globs.** The exact rows split 28
+Anthropic to 139 OpenAI. The globs are Anthropic-only and matter most there, because
 they are what catches a model released after the pinned commit:
 
 | Model pattern | input | cache-write | cache-read | output |
@@ -77,25 +79,54 @@ they are what catches a model released after the pinned commit:
 | `*claude-*mythos-*` | 10 | 12.5 | 0.25 | 50 |
 
 USD per million tokens, at host scope `*` (any endpoint). Run `agentop pricing` for the
-full list including the 28 exact pins — that command is the source of truth, and this
+full list including all 167 exact pins — that command is the source of truth, and this
 table is deliberately only the stable part.
 
-Four Sonnet-4 entries also carry a **long-context tier** for prompts above 200,000
-tokens: input, cache-write and cache-read double, and output rises by half
-(3 -> 6 input, 15 -> 22.5 output). 200,000 is the only breakpoint Cortex models; LiteLLM's `_above_272k` and
-`_above_512k` variants and its `_above_1hr` cache-write premium are out of scope and are
-ignored rather than flattened.
+Some entries also carry a **long-context tier**, and the breakpoint depends on the
+vendor. Four Sonnet-4 entries price above **200,000** prompt tokens: input, cache-write
+and cache-read double, and output rises by half (3 -> 6 input, 15 -> 22.5 output).
+Eleven OpenAI entries price above **272,000** on the same shape (gpt-5.5: 5 -> 10
+input, 30 -> 45 output), which a long session reaches easily — those models accept
+922k to 1.05M tokens. Both apply **strictly above** the breakpoint, so a prompt of
+exactly 200,000 or 272,000 pays list, and a 250,000-token prompt pays list on an OpenAI
+model while paying the premium on a Sonnet-4 one.
 
-### Only first-party Anthropic rates are bundled
+Those two are the only breakpoints Cortex models. LiteLLM's `_above_512k` variants, its
+`_above_1hr` cache-write premium, and its per-service-tier suffixes (`_flex`,
+`_priority`, `_batches`, `_decisions`) are out of scope and are ignored rather than
+flattened into the tier they resemble.
 
-The generator keeps `litellm_provider == "anthropic"` and nothing else, because only the
-first-party endpoint's rates are vendor list — the `vertex_ai/` and `bedrock/` mirrors
-carry their own, and mixing them under one `*` host scope would make the table depend on
-map iteration order.
+### Only first-party Anthropic and OpenAI rates are bundled
 
-So there are **no bundled rates for OpenAI, Gemini, Bedrock or Vertex models.** Traffic
-to them reports as *unpriced* until you add rates. This is by design: Cortex reports
-unpriced rather than under-priced.
+The generator keeps `litellm_provider == "anthropic"` and `== "openai"` and nothing else,
+because only the first-party endpoints' rates are vendor list — the `vertex_ai/`,
+`bedrock/` and `azure/` mirrors carry their own, and mixing more than one provider for a
+model under one `*` host scope would make the table depend on map iteration order. The
+filter reads that provider field rather than the key prefix: every model appears once per
+reseller at *different* rates, and the field is the row's own statement of whose price it
+is, where prefix-matching would be guessing at a naming convention.
+
+So there are **no bundled rates for Gemini, Bedrock or Vertex models.** Traffic to them
+reports as *priceable but unpriced* until you add rates. This is by design: Cortex
+reports unpriced rather than under-priced.
+
+**Thirteen first-party models are deliberately left unpriced too**, and the reason is a
+bound rather than an omission. A bundled rate ships to everyone, so it has to be one the
+cost pipeline will still accept after the largest `multiplier` configuration allows (10x)
+— past that it would refuse a legitimate bill on a machine whose owner never chose the
+rate. Ten rows exceed it on their list rate (`o1-pro` at $600/Mtok, and the
+`gpt-5{,.2,.4,.5}-pro` tiers, plus their dated keys); three more exceed it only on their
+above-272k output rate, at $112.50/Mtok (`daybreak-red-latest`, `gpt-5.6-cyber`,
+`gpt-daybreak-red-latest`), and those are dropped whole rather than shipped at a list
+rate that would under-price exactly the long requests the tier exists for. All thirteen
+report as *priceable but unpriced* and take a `pricing:` entry of your own. Nothing about
+this is vendor-specific: it is written on the rate, so the first Anthropic model past the
+bound goes the same way.
+
+A further 77 first-party rows carry no per-token rate at all — the image, audio and
+realtime-transcription models, billed per image or per second — so there is nothing for
+this table to hold. They are not a gap this page can close, and a `pricing:` entry cannot
+express those units either.
 
 ### Free models ship at zero
 
@@ -213,7 +244,7 @@ only — `agentop cost` does not print it.
 
 ## Reading usage over HTTP
 
-`GET /v1/usage` on the session API (`:9094` in Kubernetes, `:47601` for the laptop
+`GET /v1/usage` on the [session API](session-api.md) (`:9094` in Kubernetes, `:47601` for the laptop
 install) is the aggregate behind `agentop cost`. Query parameters:
 
 | Parameter | Values | Notes |
@@ -501,7 +532,9 @@ rates in that block; tiers you omit keep their base value.
               output_cost_per_million: 22.50
 ```
 
-`agentop pricing` renders these as an indented `above 200,000 tok:` line beneath the model.
+`agentop pricing` renders these as an indented `above 200,000 tok:` line beneath the model
+— or `above 272,000 tok:` on an OpenAI one, since the breakpoint is the vendor's. Its
+footnote names every breakpoint in the table it just printed.
 
 ## Discounts
 
@@ -665,7 +698,7 @@ eventually sums two fields that must never be summed.
 
 - [`plugin-catalog.md`](plugin-catalog.md) — the plugins that consume these rates:
   `inference-parser`, `litellm-budget-track`, `tool-prune`.
-- [`litellm-budgettrack-plugin.md`](litellm-budgettrack-plugin.md) — daily caps, and the
+- [`litellm-budget-track-plugin.md`](litellm-budget-track-plugin.md) — daily caps, and the
   drift check that compares the rate table against what the gateway charged.
 - [`superpowers/specs/2026-09-09-pricing-consolidation-design.md`](superpowers/specs/2026-09-09-pricing-consolidation-design.md)
   — why rates live in one place, kept for the reasoning rather than as current docs.

@@ -244,7 +244,7 @@ func TestAgentsPane_EnterScopesAfterTheColumnsChange(t *testing.T) {
 		},
 		"rows after sessions": func(m *model) {
 			m.sessions = sessionsFixture()
-			m.Update(agentRowsLoadedMsg{rows: rows, open: agentsOpenNever})
+			m.Update(agentRowsLoadedMsg{rows: rows, open: agentsOpenNever, window: usage.WindowToday})
 		},
 		"resize": func(m *model) {
 			m.sessions = sessionsFixture()

@@ -968,3 +968,29 @@ func TestBill_SettledZeroRollsTheLedgerDate(t *testing.T) {
 		t.Errorf("same-day total = %+v, want 1.25", ev2)
 	}
 }
+
+// TestConfigErrorNamesExistingDoc pins that the docs/ path Configure's
+// unknown-field error points at exists. The path is part of the error an
+// operator reads; docs/litellm-budgettrack-plugin.md was renamed and the
+// error kept naming the deleted file (PR #1423 review).
+func TestConfigErrorNamesExistingDoc(t *testing.T) {
+	err := New().Configure(json.RawMessage(`{"spend_file": "/tmp/x.json", "input_cost_per_token": 1}`))
+	if err == nil {
+		t.Fatal("Configure with a removed rate field = nil, want error")
+	}
+	// repo root: core/plugins/litellm_budgettrack -> three levels up
+	root := filepath.Join("..", "..", "..")
+	var named string
+	for _, m := range strings.Split(err.Error(), " ") {
+		if strings.HasPrefix(m, "docs/") {
+			named = strings.TrimSuffix(m, ")")
+			break
+		}
+	}
+	if named == "" {
+		t.Fatalf("error names no docs/ path:\n%v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, named)); statErr != nil {
+		t.Errorf("error points at %s, which does not exist:\n%v", named, err)
+	}
+}

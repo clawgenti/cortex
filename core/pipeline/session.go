@@ -240,6 +240,17 @@ type SessionEvent struct {
 	// listing — none of which the timeline hinted at.
 	TunnelReason TunnelReason
 
+	// UpgradeStripped names the protocol a client asked to switch to on a request
+	// whose Upgrade header the forward proxy removed — see
+	// pipeline.Context.UpgradeStripped for why that is both correct and
+	// confusing. Empty on every other request.
+	//
+	// On the REQUEST row; pair it with the response row's StatusCode by RequestID.
+	// A 405 next to this is the origin rejecting the un-upgraded request, which is
+	// the sequence worth being able to read off the timeline rather than out of an
+	// agent's stderr.
+	UpgradeStripped string
+
 	// HTTPMethod and HTTPPath are the request's HTTP verb and its
 	// query-stripped path, copied from the pipeline context at record
 	// time.
@@ -494,6 +505,9 @@ type sessionEventWire struct {
 	// predates these fields sees "" and renders what it renders today.
 	HTTPMethod string `json:"httpMethod,omitempty"`
 	HTTPPath   string `json:"httpPath,omitempty"`
+	// omitempty: absent on every request that asked for no upgrade, which is
+	// almost all of them, so this costs nothing on the common row.
+	UpgradeStripped string `json:"upgradeStripped,omitempty"`
 	// omitempty, and a POINTER, so both skew directions are safe and absence stays
 	// absence: an old agentop ignores a key it does not know, an event recorded before
 	// this field existed decodes to nil rather than to an empty struct, and a
@@ -504,31 +518,32 @@ type sessionEventWire struct {
 
 func (e SessionEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sessionEventWire{
-		SessionID:     e.SessionID,
-		Seq:           e.Seq,
-		At:            e.At,
-		Direction:     e.Direction,
-		Phase:         e.Phase,
-		RequestID:     e.RequestID,
-		A2A:           e.A2A,
-		MCP:           e.MCP,
-		Inference:     e.Inference,
-		Invocations:   e.Invocations,
-		Plugins:       e.Plugins,
-		Identity:      e.Identity,
-		StatusCode:    e.StatusCode,
-		Error:         e.Error,
-		Host:          e.Host,
-		RequestedHost: e.RequestedHost,
-		DurationMs:    e.Duration.Milliseconds(),
-		TLS:           e.TLS,
-		Tunnel:        e.Tunnel,
-		TunnelReason:  e.TunnelReason,
-		BytesUp:       e.BytesUp,
-		BytesDown:     e.BytesDown,
-		HTTPMethod:    e.HTTPMethod,
-		HTTPPath:      e.HTTPPath,
-		Client:        e.Client,
+		SessionID:       e.SessionID,
+		Seq:             e.Seq,
+		At:              e.At,
+		Direction:       e.Direction,
+		Phase:           e.Phase,
+		RequestID:       e.RequestID,
+		A2A:             e.A2A,
+		MCP:             e.MCP,
+		Inference:       e.Inference,
+		Invocations:     e.Invocations,
+		Plugins:         e.Plugins,
+		Identity:        e.Identity,
+		StatusCode:      e.StatusCode,
+		Error:           e.Error,
+		Host:            e.Host,
+		RequestedHost:   e.RequestedHost,
+		DurationMs:      e.Duration.Milliseconds(),
+		TLS:             e.TLS,
+		Tunnel:          e.Tunnel,
+		TunnelReason:    e.TunnelReason,
+		BytesUp:         e.BytesUp,
+		BytesDown:       e.BytesDown,
+		HTTPMethod:      e.HTTPMethod,
+		HTTPPath:        e.HTTPPath,
+		UpgradeStripped: e.UpgradeStripped,
+		Client:          e.Client,
 	})
 }
 
@@ -541,31 +556,32 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*e = SessionEvent{
-		SessionID:     w.SessionID,
-		Seq:           w.Seq,
-		At:            w.At,
-		Direction:     w.Direction,
-		Phase:         w.Phase,
-		RequestID:     w.RequestID,
-		A2A:           w.A2A,
-		MCP:           w.MCP,
-		Inference:     w.Inference,
-		Invocations:   w.Invocations,
-		Plugins:       w.Plugins,
-		Identity:      w.Identity,
-		StatusCode:    w.StatusCode,
-		Error:         w.Error,
-		Host:          w.Host,
-		RequestedHost: w.RequestedHost,
-		Duration:      time.Duration(w.DurationMs) * time.Millisecond,
-		TLS:           w.TLS,
-		Tunnel:        w.Tunnel,
-		TunnelReason:  w.TunnelReason,
-		BytesUp:       w.BytesUp,
-		BytesDown:     w.BytesDown,
-		HTTPMethod:    w.HTTPMethod,
-		HTTPPath:      w.HTTPPath,
-		Client:        w.Client,
+		SessionID:       w.SessionID,
+		Seq:             w.Seq,
+		At:              w.At,
+		Direction:       w.Direction,
+		Phase:           w.Phase,
+		RequestID:       w.RequestID,
+		A2A:             w.A2A,
+		MCP:             w.MCP,
+		Inference:       w.Inference,
+		Invocations:     w.Invocations,
+		Plugins:         w.Plugins,
+		Identity:        w.Identity,
+		StatusCode:      w.StatusCode,
+		Error:           w.Error,
+		Host:            w.Host,
+		RequestedHost:   w.RequestedHost,
+		Duration:        time.Duration(w.DurationMs) * time.Millisecond,
+		TLS:             w.TLS,
+		Tunnel:          w.Tunnel,
+		TunnelReason:    w.TunnelReason,
+		BytesUp:         w.BytesUp,
+		BytesDown:       w.BytesDown,
+		HTTPMethod:      w.HTTPMethod,
+		HTTPPath:        w.HTTPPath,
+		UpgradeStripped: w.UpgradeStripped,
+		Client:          w.Client,
 	}
 	return nil
 }

@@ -53,7 +53,7 @@ func runCost(args []string, stdout, stderr io.Writer) int {
 		"session API URL of the proxy (default: the Cortex installed on this machine)")
 	agent := fs.String("agent", "",
 		"report only this `agent`, spelled as the AGENTS pane in \"agentop observe\" shows it "+
-			"(e.g. bob-shell); omit for every agent together")
+			"(e.g. bob); omit for every agent together")
 	by := fs.String("by", "",
 		"break the total down by this `axis` and print a row each — "+costByAxes+
 			"; omit for a single total")
@@ -67,7 +67,7 @@ Usage:
   agentop cost --window 1h         a rolling hour, from the in-memory ring
   agentop cost --json              the totals as JSON, for a script
   agentop cost --endpoint URL      ask a specific proxy rather than the local one
-  agentop cost --agent NAME        only this coding agent, e.g. bob-shell
+  agentop cost --agent NAME        only this coding agent, e.g. bob
   agentop cost --by agent          a row per agent, costliest first
 
 --by breaks the total into a row per label. A row nothing could price shows "—" and

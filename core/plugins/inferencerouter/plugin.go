@@ -110,6 +110,18 @@
 // substitute it was given, so a conversation never changes model part-way when a
 // refusal lapses or a newer model is listed. A request already sent with a
 // substitute is never sent again: a refused substitute reaches the agent.
+//
+// A model the router sends to can have a smaller output limit or context window than
+// the one the agent was built for. A refusal that states the limit — Bedrock's,
+// Anthropic's and vLLM's wording, behind LiteLLM — is learned for the server and model,
+// kept in the durable store for 30 days, and the request is fitted and sent again
+// before the agent sees the refusal. Later requests are fitted before they are sent:
+// the output field is lowered, never raised, nor to or below the body's
+// thinking.budget_tokens; and once an Anthropic messages or OpenAI chat-completions
+// request passes 85% of the window its oldest turns after the first user message are
+// dropped to under 60%, with a note saying how many. A responses-format request only
+// has its output field lowered, as does one with a single turn larger than the window. Only requests the router switched — to another host or another model — are fitted, and each kind of
+// refusal is resent at most once per request.
 package inferencerouter
 
 import (
@@ -158,6 +170,7 @@ const (
 	pinNew      = "new"      // this request pinned the session
 	pinExisting = "existing" // the session was already pinned
 	pinNone     = "none"     // nothing was pinned: no session, a synthetic one, no store, a failed redirect, another agent's pin, a side request, or an unparsed request
+	pinMoved    = "moved"    // a sessions: override moved the session with this request
 )
 
 // The turn detail on a not-routed record, where the request's own turn decided an
@@ -185,8 +198,11 @@ func (r route) target() *url.URL {
 // Router is the plugin. Built by Configure; the zero value routes nothing.
 type Router struct {
 	servers map[string]route  // by server name
-	byHost  map[string]string // every server's Endpoint.Hostname, to its name
+	byHost  map[string]string // every server's Endpoint.Key, to its name
 	agents  map[string]string // agent name to server name
+	// sessions is the config's sessions: map, a session id to the server the user
+	// moved it to ("" to stop routing it). It beats the pin and every unpinned rule.
+	sessions map[string]string
 
 	// store is the process's durable store (storage.StoreConsumer), where pins are
 	// kept when there is one; nil keeps them in pctx.Shared.
@@ -206,6 +222,9 @@ type Router struct {
 	// noStore makes the "pins are off" warning once per instance rather than once
 	// per request.
 	noStore sync.Once
+	// reasoningMu serializes a moved session's reasoning record: two of its requests
+	// in flight read, change and save the same record.
+	reasoningMu sync.Mutex
 }
 
 // New constructs an unconfigured plugin.
@@ -228,7 +247,7 @@ func (p *Router) Name() string { return Name }
 func (p *Router) Capabilities() pipeline.PluginCapabilities {
 	return pipeline.PluginCapabilities{
 		WritesDestination: true,
-		WritesRequestBody: true, // SetRequestModel, for a server with models of its own
+		WritesRequestBody: true, // SetRequestModel, and SetBody to drop another server's reasoning
 		Requires:          []string{"inference-parser"},
 		Description:       "Sends each agent's new sessions to its chosen server, wherever addressed.",
 	}
@@ -261,9 +280,15 @@ func (p *Router) Configure(raw json.RawMessage) error {
 				"server", name, "url", ep.URL())
 		}
 		servers[name] = route{endpoint: ep, key: s.Key, main: s.Main, helper: s.Helper}
-		byHost[ep.Hostname] = name
+		byHost[ep.Key()] = name
 	}
-	p.servers, p.byHost, p.agents = servers, byHost, c.Agents
+	// p.agents is keyed by CANONICAL agent name, folded from whatever spelling the
+	// config named: pipeline.CanonicalAgent maps retired spellings ("bob-shell",
+	// "ibm-bob") to the name requests now report ("bob"), so a config written before a
+	// rename keeps routing instead of silently matching nothing. pipeline.FoldAgentNames
+	// is the one implementation of that fold, shared with agentop's own reads and
+	// writes of the same agents: map so the two cannot disagree.
+	p.servers, p.byHost, p.agents, p.sessions = servers, byHost, pipeline.FoldAgentNames(c.Agents), c.Sessions
 	return nil
 }
 
@@ -283,10 +308,16 @@ func (p *Router) OnRequest(_ context.Context, pctx *pipeline.Context) pipeline.A
 	// to any other host is captured when it is a routed agent's inference request,
 	// and sent to the server's path for its API format.
 	captured := ""
-	addressed := p.byHost[routerconfig.Hostname(pctx.Host)] // the server the request named, "" for none
-	if _, ok := p.byHost[routerconfig.Hostname(pctx.Host)]; !ok {
+	addressed := p.byHost[routerconfig.Key(pctx.Host)] // the server the request named, "" for none
+	if _, ok := p.byHost[routerconfig.Key(pctx.Host)]; !ok {
 		path, ok := capture(pctx)
-		if !ok || (p.agents[agentOf(pctx)] == "" && !p.pinnedToServer(pctx)) {
+		// A sessions: override admits the capture too: the move is the user's
+		// instruction, and it must reach a session whose agent is not routed and
+		// holds no pin, which no other rule would route.
+		if !ok || (p.agents[agentOf(pctx)] == "" && !p.pinnedToServer(pctx) && !p.overrideRoutes(pctx)) {
+			if ok {
+				p.keepOwnReasoning(pctx, "", false, "")
+			}
 			pctx.Skip("not_an_inference_server")
 			return cont
 		}
@@ -295,8 +326,17 @@ func (p *Router) OnRequest(_ context.Context, pctx *pipeline.Context) pipeline.A
 
 	name, pin := p.serverFor(pctx, captured != "")
 	if name == "" {
-		// Not routed: the request, its key included, stays exactly as the client sent it.
-		pin.settle("")
+		// Not routed: the request, its key included, goes where the client sent it.
+		// An own ("") override that cannot take effect — the router is observing, so
+		// nothing it does applies — moves no pin: the pin the move would replace
+		// stands until enforce is back. This branch returns before any redirect, so
+		// it reads the policy itself.
+		if pin.state == pinMoved && pctx.Observing() {
+			pin.forgo()
+		} else {
+			pin.settle("")
+		}
+		p.keepOwnReasoning(pctx, addressed, pin.moving(), pin.movedFrom(addressed))
 		details := map[string]string{"pin": pin.state}
 		if pin.turn != "" {
 			details["turn"] = pin.turn
@@ -333,8 +373,14 @@ func (p *Router) OnRequest(_ context.Context, pctx *pipeline.Context) pipeline.A
 	// redirect: a pipeline admits one WritesDestination plugin.
 	if !pctx.Redirected() {
 		// The request stayed put, so that is what a first request pins: a session that
-		// started under observe stays put once enforce is on.
-		pin.settle("")
+		// started under observe stays put once enforce is on. A session an override
+		// would have moved keeps its pin instead: nothing moved — this is observe —
+		// and the pin is the state the move, once enforce is on, will replace.
+		if pin.state == pinMoved {
+			pin.forgo()
+		} else {
+			pin.settle("")
+		}
 		pctx.Record(pipeline.Invocation{Action: pipeline.ActionObserve, Reason: "would_route", Details: details()})
 		return cont
 	}
@@ -350,6 +396,9 @@ func (p *Router) OnRequest(_ context.Context, pctx *pipeline.Context) pipeline.A
 	// The model is chosen only once the request has moved, so an observed router
 	// changes nothing.
 	p.chooseModel(pctx, name)
+	// Before applyLimits, so limits are fitted to the body as sent.
+	p.keepOwnReasoning(pctx, name, pin.moving(), pin.movedFrom(addressed))
+	p.applyLimits(pctx, name, true)
 	pin.settle(name)
 	if addressed != name {
 		dropProviderCredentials(pctx.Headers)
@@ -374,6 +423,16 @@ type pin struct {
 	server string
 }
 
+// belongsTo reports whether this pin is agent's. The stored spelling is folded
+// through pipeline.CanonicalAgent, so a pin recorded under a retired agent name —
+// "bob-shell", before that name converged into "bob" — still matches the requests it
+// was pinning. Without the fold, a rename reads every existing pin as another
+// agent's, unpins the session, and re-decides it mid-conversation: the exact
+// mid-conversation switch the pin exists to prevent.
+func (pn pin) belongsTo(agent string) bool {
+	return pipeline.CanonicalAgent(pn.agent) == agent
+}
+
 // pinning is one request's session pin: how it was decided, and for a
 // session's first request where to store the outcome once OnRequest knows it.
 type pinning struct {
@@ -384,13 +443,32 @@ type pinning struct {
 	// turn is turnContinuation or turnAside when the request's own turn left an
 	// unpinned session unrouted, "" otherwise.
 	turn string
+	// override is whether a sessions: entry decided the server, and from the
+	// server the session's pin named before it, "" for none or not routed.
+	override bool
+	from     string
+}
+
+// moving reports whether this request is the one an override moves its session
+// with: from another pin (pinMoved), or from none (pinNew).
+func (pn pinning) moving() bool {
+	return pn.state == pinMoved || pn.state == pinNew && pn.override
+}
+
+// movedFrom is where the session ran before this request moved it: its pin's
+// server, or, unrouted, wherever its requests are addressed.
+func (pn pinning) movedFrom(addressed string) string {
+	if pn.from != "" {
+		return pn.from
+	}
+	return addressed
 }
 
 // settle pins a session on its first request to where that request went: server
 // when it was redirected there, "" when it stayed where the client sent it. A
 // session already pinned keeps its pin, which serverFor renewed.
 func (pn *pinning) settle(server string) {
-	if pn.state == pinNew {
+	if pn.state == pinNew || pn.state == pinMoved {
 		pn.store.save(pn.key, pin{agent: pn.agent, server: server})
 	}
 }
@@ -398,7 +476,7 @@ func (pn *pinning) settle(server string) {
 // forgo leaves a session unpinned after a first request that went nowhere, so its
 // next request decides again. A session already pinned keeps its pin.
 func (pn *pinning) forgo() {
-	if pn.state == pinNew {
+	if pn.state == pinNew || pn.state == pinMoved {
 		pn.state = pinNone
 	}
 }
@@ -434,12 +512,29 @@ func (p *Router) serverFor(pctx *pipeline.Context, captured bool) (string, pinni
 		return choice, pinning{state: pinNone}
 	}
 	key := pinPrefix + pctx.Session.ID
+	// A sessions: override is the user's explicit move: it beats the pin and every
+	// unpinned rule, and the pin follows it, so removing the entry later does not
+	// move the session back. pinMoved tells the record this request moved a session
+	// that already held a pin; pinNew is a session that held none.
+	if over, ok := p.overrideFor(pctx); ok {
+		state, from := pinNew, ""
+		if pn, had := store.load(key); had && pn.belongsTo(agent) {
+			switch {
+			case pn.server == over:
+				state = pinExisting
+				p.keepPin(pctx, store, key, pn)
+			case pn.server != over:
+				state, from = pinMoved, pn.server
+			}
+		}
+		return over, pinning{state: state, store: store, key: key, agent: agent, override: true, from: from}
+	}
 	if pn, ok := store.load(key); ok {
-		if pn.agent != agent {
+		if !pn.belongsTo(agent) {
 			server, _, _ := p.unpinned(pctx, agent, choice, captured)
 			return server, pinning{state: pinNone}
 		}
-		store.keep(key, pn)
+		p.keepPin(pctx, store, key, pn)
 		return pn.server, pinning{state: pinExisting}
 	}
 	server, turn, decides := p.unpinned(pctx, agent, choice, captured)
@@ -447,6 +542,33 @@ func (p *Router) serverFor(pctx *pipeline.Context, captured bool) (string, pinni
 		return server, pinning{state: pinNone, turn: turn}
 	}
 	return server, pinning{state: pinNew, store: store, key: key, agent: agent, turn: turn}
+}
+
+// keepPin renews the session's pin and, with it, its reasoning record, which must
+// not expire under a pin its session keeps alive.
+func (p *Router) keepPin(pctx *pipeline.Context, store pins, key string, pn pin) {
+	if store.keep(key, pn) {
+		p.renewReasoning(pctx)
+	}
+}
+
+// overrideFor is the sessions: entry for pctx's session, when one names it. A
+// synthetic session is never overridden, whatever a hand-fed config says: its id
+// holds many conversations, not one to move.
+func (p *Router) overrideFor(pctx *pipeline.Context) (string, bool) {
+	if pctx.Session == nil || pctx.Session.ID == "" || synthetic(pctx.Session.ID) {
+		return "", false
+	}
+	over, ok := p.sessions[pctx.Session.ID]
+	return over, ok
+}
+
+// overrideRoutes reports whether a sessions: entry moves pctx's session to a
+// server. An entry to "" stops routing the session, which no capture needs: the
+// request is already going where the client sent it.
+func (p *Router) overrideRoutes(pctx *pipeline.Context) bool {
+	over, ok := p.overrideFor(pctx)
+	return ok && over != ""
 }
 
 // pinnedToServer reports whether pctx's session holds its agent's pin to a server.
@@ -459,7 +581,7 @@ func (p *Router) pinnedToServer(pctx *pipeline.Context) bool {
 		return false
 	}
 	pn, ok := store.load(pinPrefix + pctx.Session.ID)
-	return ok && pn.agent == agentOf(pctx) && pn.server != ""
+	return ok && pn.belongsTo(agentOf(pctx)) && pn.server != ""
 }
 
 // unpinned is the server for a request in a session its agent holds no pin on, and
@@ -585,7 +707,7 @@ func (p *Router) serverOf(e *pipeline.SessionEvent, agent string) (server string
 		turnOf(e.Inference) == turnAside || pipeline.AgentName(e.Client.Label()) != agent {
 		return "", false
 	}
-	if server, ok = p.byHost[routerconfig.Hostname(e.Host)]; ok {
+	if server, ok = p.byHost[routerconfig.Key(e.Host)]; ok {
 		return server, true
 	}
 	// A request the router captures from a routed agent is recorded under its

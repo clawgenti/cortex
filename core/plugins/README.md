@@ -9,16 +9,29 @@ Built-in plugins and the open plugin registry. Plugin authoring docs live under
 
 ## Built-in plugins
 
+All seventeen, with config and behavior, in
+[`docs/plugin-catalog.md`](../../docs/plugin-catalog.md); each plugin also
+has a dedicated reference doc there (`docs/<name>-plugin.md`).
+
 | Name | Purpose |
 |---|---|
 | `jwt-validation` | Inbound JWT signature / issuer / audience verification |
 | `token-exchange` | Outbound RFC 8693 token exchange with per-host routes |
 | `a2a-parser` | Parse Agent-to-Agent JSON-RPC traffic into `Extensions.A2A` |
 | `mcp-parser` | Parse Model Context Protocol traffic into `Extensions.MCP` |
-| `inference-parser` | Parse OpenAI-style / Ollama inference traffic into `Extensions.Inference` |
-| [`inference-router`](../../docs/plugin-catalog.md#inference-router) | Send each coding agent's new sessions to the inference server chosen for it; a session stays on the server it started on |
-| [`ibac`](../../docs/ibac-plugin.md) | Outbound Intent-Based Access Control: LLM judge denies outbound HTTP that doesn't align with the user's most recent intent. Catches prompt-injection / data-exfiltration attempts |
+| `inference-parser` | Parse OpenAI chat completions, Anthropic Messages and OpenAI Responses inference traffic into `Extensions.Inference`, and price the finished response |
+| `inference-router` | Send each coding agent's new sessions to the inference server chosen for it; a session stays on the server it started on |
+| `ibac` | Outbound Intent-Based Access Control: LLM judge denies outbound HTTP that doesn't align with the user's most recent intent. Catches prompt-injection / data-exfiltration attempts |
 | `opa` | OPA policy evaluation on inbound and outbound requests via bundle download |
+| `tool-prune` | Remove unused tool definitions from the outbound inference manifest |
+| `litellm-budget-track` | Daily spend ledger and budget cap, accumulated from the cost record `inference-parser` settles |
+| `static-inject` | Swap a placeholder credential for a real static one on outbound requests |
+| `token-broker` | Acquire tokens from an external broker service per host-based routes |
+| `lineage-telemetry` | Emit facts-only OTel lineage spans per HTTP exchange |
+| `sparc` | Pre-tool reflection against a SPARC reflection service |
+| `session-budget` | Per-session token / call / duration budgets via Redis |
+| `context-guru` | Compact the outbound LLM request context |
+| `cpex` | Bridge hooks to the CPEX policy framework (separate `cortex-cpex` binary) |
 
 ## Reusable building blocks for plugin authors
 

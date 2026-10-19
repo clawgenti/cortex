@@ -246,3 +246,92 @@ func TestBundled_LongContextThresholdIsCarried(t *testing.T) {
 		t.Errorf("long-context input rate %v is not above the base rate %v", hi, lo)
 	}
 }
+
+// TestBundled_OpenAILongContextThresholdIsCarriedAt272k pins the OTHER breakpoint.
+//
+// OpenAI prices its long-context tier above 272k prompt tokens, not Anthropic's
+// 200k, and gpt-5.5 accepts 1.05M — so a long session crosses it routinely. While
+// the generator read only the _above_200k fields, these rows were emitted with
+// their base rates alone: every request past 272k priced at half the input rate it
+// owed and two-thirds the output, and still labelled `bundled`, which is the
+// "unpriced, never under-priced" promise broken silently.
+//
+// The 250k case is the half worth having. It is past Anthropic's breakpoint and
+// short of OpenAI's, so it fails if the two ever get folded onto one number —
+// which an "it already has a threshold field, reuse it" change would do, and
+// which asserting only above-and-below could not see.
+func TestBundled_OpenAILongContextThresholdIsCarriedAt272k(t *testing.T) {
+	tab, err := pricing.NewTable(pricing.Bundled())
+	if err != nil {
+		t.Fatalf("NewTable: %v", err)
+	}
+	for _, tc := range []struct {
+		prompt int
+		input  float64
+		output float64
+		why    string
+	}{
+		{100_000, 5e-06, 3e-05, "short prompt pays list"},
+		{250_000, 5e-06, 3e-05, "past Anthropic's 200k but short of OpenAI's 272k, so still list"},
+		{300_000, 1e-05, 4.5e-05, "past 272k: input doubles, output rises by half"},
+	} {
+		rates, prov := tab.Resolve("api.openai.com", "gpt-5.5", tc.prompt)
+		if prov != pricing.ProvBundled {
+			t.Errorf("%d-token prompt resolved as %s, want bundled (%s)", tc.prompt, prov, tc.why)
+			continue
+		}
+		in, ok := rates.For(pricing.TierInput)
+		if !ok {
+			t.Errorf("%d-token prompt has no input rate (%s)", tc.prompt, tc.why)
+			continue
+		}
+		out, ok := rates.For(pricing.TierOutput)
+		if !ok {
+			t.Errorf("%d-token prompt has no output rate (%s)", tc.prompt, tc.why)
+			continue
+		}
+		if in != tc.input || out != tc.output {
+			t.Errorf("%d-token prompt priced at input %v / output %v, want %v / %v (%s)",
+				tc.prompt, in, out, tc.input, tc.output, tc.why)
+		}
+	}
+}
+
+// TestBundled_ARowIsDroppedForAnUnbundleableLongContextRate covers the cost of
+// reading the 272k tier, which is not free: a row can now fail
+// pricing.BundleableRate on a threshold rate while its base rates pass.
+//
+// gpt-5.6-cyber is the case. Its list output is $75/Mtok — inside the bound — but
+// above 272k it is $112.50/Mtok, which at the 10x markup `validate` accepts
+// resolves past maxPlausibleMicrosPerToken, so the cost pipeline would refuse the
+// very request the rate exists to price. The whole row goes rather than the
+// threshold alone: keeping the base would price a long request too low, which is
+// the defect the 272k work exists to close, so the model is reported
+// priceable-but-unpriced instead and an operator who needs it pins a `pricing:`
+// entry.
+//
+// Asserted by NAME and with the reason, because the golden test sees this only as
+// three fewer rows. A regeneration that silently restored them — a bound raised, a
+// threshold rate no longer read — would be a table shipping a figure its own
+// pipeline rejects, and nothing else in the suite says so.
+func TestBundled_ARowIsDroppedForAnUnbundleableLongContextRate(t *testing.T) {
+	// $112.50/Mtok above 272k, against a $75/Mtok list rate that is fine.
+	const above272kOutput = 1.125e-04
+	if pricing.BundleableRate(above272kOutput) {
+		t.Fatalf("BundleableRate(%v) is true, so this test no longer describes the bound it guards", above272kOutput)
+	}
+	have := map[string]bool{}
+	for _, e := range pricing.Bundled() {
+		have[e.Model] = true
+	}
+	for _, m := range []string{"daybreak-red-latest", "gpt-5.6-cyber", "gpt-daybreak-red-latest"} {
+		if have[m] {
+			t.Errorf("%s is bundled, but its above-272k output rate is one the cost pipeline would refuse", m)
+		}
+	}
+	// The sibling that shares the naming and not the rate still prices, so the drop
+	// is the rate's doing rather than a name filter.
+	if !have["gpt-5.6"] {
+		t.Error("gpt-5.6 is not bundled; the drop above is meant to be about rates, not about a family")
+	}
+}

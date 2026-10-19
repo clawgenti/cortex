@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -89,8 +90,8 @@ func TestParseUserAgent_BobShellIsIdentifiedByItsTrailingProductToken(t *testing
 			if got == nil {
 				t.Fatalf("ParseUserAgent(%q) = nil, want a client", tc.ua)
 			}
-			if got.Name != "bob-shell" {
-				t.Errorf("Name = %q, want %q", got.Name, "bob-shell")
+			if got.Name != "bob" {
+				t.Errorf("Name = %q, want %q", got.Name, "bob")
 			}
 			if got.Version != "2.0.5" {
 				t.Errorf("Version = %q, want %q", got.Version, "2.0.5")
@@ -98,7 +99,7 @@ func TestParseUserAgent_BobShellIsIdentifiedByItsTrailingProductToken(t *testing
 			// Label is the assertion that matters downstream: it is what the usage
 			// aggregator keys its series on and what ledger.Row.Agent stores, so this is
 			// the field that decides whether three User-Agents are one row or three.
-			if want := "bob-shell/2.0.5"; got.Label() != want {
+			if want := "bob/2.0.5"; got.Label() != want {
 				t.Errorf("Label() = %q, want %q — this is the series key, so a mismatch here IS the fragmentation", got.Label(), want)
 			}
 		})
@@ -121,7 +122,7 @@ func TestParseUserAgent_AKnownFirstTokenIsNotReResolvedByALaterToken(t *testing.
 		name, ua, wantName, wantVer string
 	}{
 		{"claude first, bob last", "claude-cli/2.1.270 bob-shell/2.0.5", "claude-code", "2.1.270"},
-		{"bob first, claude last", "bob-shell/2.0.5 claude-cli/2.1.270", "bob-shell", "2.0.5"},
+		{"bob first, claude last", "bob-shell/2.0.5 claude-cli/2.1.270", "bob", "2.0.5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := ParseUserAgent(tc.ua)
@@ -157,8 +158,8 @@ func TestParseUserAgent_TheTrailingScanReadsLastToFirst(t *testing.T) {
 	if got == nil {
 		t.Fatalf("ParseUserAgent(%q) = nil, want a client", ua)
 	}
-	if got.Name != "bob-shell" {
-		t.Errorf("Name = %q, want %q — the scan must read backwards, so the LAST known token wins once the first token is unknown", got.Name, "bob-shell")
+	if got.Name != "bob" {
+		t.Errorf("Name = %q, want %q — the scan must read backwards, so the LAST known token wins once the first token is unknown", got.Name, "bob")
 	}
 	if got.Version != "2.0.5" {
 		t.Errorf("Version = %q, want %q — the version must come from the token that matched", got.Version, "2.0.5")
@@ -186,13 +187,13 @@ func TestParseUserAgent_IBMBobIDEIsOneAgent(t *testing.T) {
 			if got == nil {
 				t.Fatalf("ParseUserAgent(%q) = nil, want a client", tc.ua)
 			}
-			if got.Name != "ibm-bob" || got.Version != "2.2.1" {
-				t.Errorf("Name, Version = %q, %q, want %q, %q", got.Name, got.Version, "ibm-bob", "2.2.1")
+			if got.Name != "bob" || got.Version != "2.2.1" {
+				t.Errorf("Name, Version = %q, %q, want %q, %q", got.Name, got.Version, "bob", "2.2.1")
 			}
-			if got.AffinityName() != "ibm-bob" {
-				t.Errorf("AffinityName() = %q, want ibm-bob — without it the session is no agent's", got.AffinityName())
+			if got.AffinityName() != "bob" {
+				t.Errorf("AffinityName() = %q, want bob — without it the session is no agent's", got.AffinityName())
 			}
-			if want := "ibm-bob"; AgentName(got.Label()) != want {
+			if want := "bob"; AgentName(got.Label()) != want {
 				t.Errorf("AgentName(Label()) = %q, want %q — this is the AGENTS row", AgentName(got.Label()), want)
 			}
 		})
@@ -212,6 +213,140 @@ func TestParseUserAgent_IBMBobIDEShellIsNotClaimed(t *testing.T) {
 	}
 }
 
+// Codex's two product tokens both fold to one canonical name, and its telemetry exporter
+// stays unrecognised. All four strings captured live from Codex 0.160.1 on macOS.
+//
+// The two codex_exec forms differ only by a trailing "(codex_exec; <version>)" comment, so
+// this pins that the comment changes nothing: the token is first in both, which is the
+// parser's first rule, and the version comes off that token rather than out of the comment.
+func TestParseUserAgent_Codex(t *testing.T) {
+	for _, tc := range []struct{ ua, name, version string }{
+		{"codex_exec/0.160.1 (Mac OS 26.3.0; arm64) unknown (codex_exec; 0.160.1)", "codex", "0.160.1"},
+		{"codex_exec/0.160.1 (Mac OS 26.3.0; arm64) unknown", "codex", "0.160.1"},
+		// Codex's MCP client: a different token, the same agent, so the same row.
+		{"codex-mcp-client/0.160.1", "codex", "0.160.1"},
+		// The interactive TUI, and the default originator for anything Codex sends
+		// before its app-server initialize completes. Both are what `configure codex
+		// enable` actually sends people to, so both must fold to the same row as exec.
+		// Captured from a real TUI session driven through the proxy over a pty — the
+		// TUI's own inference requests to /backend-api/codex/responses carry the first
+		// of these. Note the third field is the TERM value, "unknown" under `codex
+		// exec` and the terminal's name here, which is why the parse must key on the
+		// product token alone.
+		{"codex-tui/0.160.1 (Mac OS 26.3.0; arm64) xterm-256color (codex-tui; 0.160.1)", "codex", "0.160.1"},
+		{"codex_cli_rs/0.160.1 (Mac OS 26.3.0; arm64) xterm-256color", "codex", "0.160.1"},
+		// The same capture also carried 0.162.1, mid-auto-update, which is the only
+		// evidence in this suite that the UA SHAPE is stable across Codex releases
+		// rather than pinned to the one build everything else here was read from.
+		{"codex-tui/0.162.1 (Mac OS 26.3.0; arm64) xterm-256color (codex-tui; 0.162.1)", "codex", "0.162.1"},
+		{"codex_cli_rs/0.162.1 (Mac OS 26.3.0; arm64) xterm-256color", "codex", "0.162.1"},
+		// Originator names the same binary carries but that nothing has tied to live
+		// Codex traffic. Deliberately unclaimed; see knownClients.
+		{"codex_vscode/0.160.1", "", ""},
+		{"codex_desktop/0.160.1", "", ""},
+		// Its telemetry exporter names the generic Rust OTLP crate, not Codex. Claiming it
+		// would file every Rust program using that crate under Codex's name.
+		{"OTel-OTLP-Exporter-Rust/0.31.0", "", ""},
+	} {
+		got := ParseUserAgent(tc.ua)
+		if got == nil {
+			t.Fatalf("ParseUserAgent(%q) = nil, want a client", tc.ua)
+		}
+		if got.Name != tc.name || got.Version != tc.version {
+			t.Errorf("ParseUserAgent(%q) = {Name: %q, Version: %q}, want {%q, %q}",
+				tc.ua, got.Name, got.Version, tc.name, tc.version)
+		}
+	}
+}
+
+// Claude Code's three live User-Agents, and which of them is claimed.
+//
+// THE REFERENCE INTEGRATION, which is why the gap here was the expensive one: claude-code was
+// a VALUE in knownClients and never a KEY, so the second shape below went unrecognised and
+// pooled into agentop's catch-all Other row with its spend, while IsKnownAgent said false for
+// it wherever that gates (#1363). The same class of bug as Codex's above — one agent, more
+// than one product token, a lookup table covering only some of them — so the two tests sit
+// together deliberately.
+//
+// All three captured 2026-10-13 from Claude Code 2.1.233, verbatim, with the measured split
+// 469 / 70 / 12 events. Version is asserted on both claimed shapes because a labeling fix
+// that got the version wrong would still fragment the series.
+func TestParseUserAgent_ClaudeCodeSendsTwoClaimedProductTokens(t *testing.T) {
+	for _, tc := range []struct{ name, ua string }{
+		// The CLI binary. Matched before the fix, and here as the control: without it a
+		// map-entry-only implementation looks fully covered by the row below.
+		{"cli", "claude-cli/2.1.233 (external, claude-vscode, agent-sdk/0.3.233)"},
+		// The Agent-SDK-shaped UA. This is the row the fix adds; both name claude-vscode
+		// and agent-sdk, so they read as different components of one install rather than
+		// interactive-vs-headless.
+		{"agent sdk", "claude-code/2.1.233 (claude-vscode, agent-sdk/0.3.233)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseUserAgent(tc.ua)
+			if got == nil {
+				t.Fatalf("ParseUserAgent(%q) = nil, want a client", tc.ua)
+			}
+			if got.Name != "claude-code" {
+				t.Errorf("Name = %q, want %q", got.Name, "claude-code")
+			}
+			if got.Version != "2.1.233" {
+				t.Errorf("Version = %q, want %q", got.Version, "2.1.233")
+			}
+			// The assertion that decides whether these two are one row or two: Label is
+			// the usage aggregator's series key and what ledger.Row.Agent stores.
+			if want := "claude-code/2.1.233"; got.Label() != want {
+				t.Errorf("Label() = %q, want %q — this is the series key, so a mismatch here IS the fragmentation", got.Label(), want)
+			}
+			// IsKnownAgent gates core/cost/usage, so an unrecognised shape is excluded
+			// from spend as well as mislabeled.
+			if !IsKnownAgent(got.Name) {
+				t.Errorf("IsKnownAgent(%q) = false, want true", got.Name)
+			}
+		})
+	}
+}
+
+// Claude Code's WebFetch User-Agent stays UNRECOGNISED, and that is deliberate rather than the
+// remainder of #1363.
+//
+// Reading an agent's name out of a COMMENT into Name would move these rows to a different
+// agent in the ledger and the AGENTS pane than the history beside them — AffinityName's doc
+// comment is where that reasoning lives. The fix for the Agent-SDK token must not widen to
+// this one, and nothing about adding a "claude-code" KEY does: the first token here is
+// "Claude-User", and the trailing scan cuts on "/" without trimming punctuation, so the later
+// token reads as "(claude-code" and misses. That is incidental to the parser's shape rather
+// than a rule it states, which is exactly why it is pinned here.
+//
+// Attribution is unaffected and is asserted below: AffinityName scans comments against
+// canonical NAMES, so a header-less WebFetch call still joins Claude Code's session.
+func TestParseUserAgent_ClaudeUserIsNotClaimed(t *testing.T) {
+	const ua = "Claude-User (claude-code/2.1.233; +https://support.anthropic.com/)"
+	got := ParseUserAgent(ua)
+	if got == nil {
+		t.Fatalf("ParseUserAgent(%q) = nil, want a client", ua)
+	}
+	if got.Name != "" {
+		t.Errorf("Name = %q, want unrecognised — naming a row from a comment is the behaviour this pins against", got.Name)
+	}
+	if got.Version != "" {
+		t.Errorf("Version = %q, want empty", got.Version)
+	}
+	// Unaffected by the labeling fix: session grouping reads comments on purpose.
+	if affinity := got.AffinityName(); affinity != "claude-code" {
+		t.Errorf("AffinityName() = %q, want claude-code — attribution must still join Claude Code's session", affinity)
+	}
+}
+
+// Session attribution follows the recognised name rather than the comment scan for Codex:
+// AffinityName short-circuits on Name, so the "(codex_exec; 0.160.1)" comment — whose token
+// is the map KEY and not the canonical name — never has to match for this to work.
+func TestAffinityName_CodexUsesTheRecognisedName(t *testing.T) {
+	c := ParseUserAgent("codex_exec/0.160.1 (Mac OS 26.3.0; arm64) unknown (codex_exec; 0.160.1)")
+	if got := c.AffinityName(); got != "codex" {
+		t.Errorf("AffinityName() = %q, want codex", got)
+	}
+}
+
 // IsKnownAgent answers for canonical names only: what AgentName folds a recognised Label to.
 func TestIsKnownAgent(t *testing.T) {
 	for _, tc := range []struct {
@@ -219,12 +354,18 @@ func TestIsKnownAgent(t *testing.T) {
 		want bool
 	}{
 		{"claude-code", true},
-		{"bob-shell", true},
-		{"ibm-bob", true},
+		{"bob", true},
 		{"opencode", true},
+		{"codex", true},
 		// A product token is not a canonical name: claude-cli is how Claude Code is RECOGNISED.
 		{"claude-cli", false},
-		{"bob", false},
+		// Retired spellings are not canonical names either — but AgentName folds them to
+		// one before any consumer asks, so IsKnownAgent(AgentName(label)) stays true for
+		// a label recorded under the old name. Pinned by TestAgentName below.
+		{"bob-shell", false},
+		{"ibm-bob", false},
+		{"codex_exec", false},
+		{"codex-mcp-client", false},
 		// Versioned labels have to be folded first; the godoc says so.
 		{"claude-code/2.1.285", false},
 		{"curl", false},
@@ -694,8 +835,8 @@ func TestAffinityName(t *testing.T) {
 	}{
 		{"claude-cli/2.1.284 (external, cli)", "claude-code"},
 		{"Claude-User (claude-code/2.1.284; +https://support.anthropic.com/)", "claude-code"},
-		{"ai-sdk/5.0.1 openai-compatible/3.0.36 bob-shell/2.0.5", "bob-shell"},
-		{"bob-shell/2.0.5", "bob-shell"},
+		{"ai-sdk/5.0.1 openai-compatible/3.0.36 bob-shell/2.0.5", "bob"},
+		{"bob-shell/2.0.5", "bob"},
 		{"Go-http-client/1.1", ""},
 		{"python-httpx/0.27.0", ""},
 		{"axios/1.15.2", ""},
@@ -732,8 +873,14 @@ func TestAffinityName_LeavesTheLabelAlone(t *testing.T) {
 func TestAgentName(t *testing.T) {
 	cases := []struct{ label, want string }{
 		{"claude-code/2.1.285", "claude-code"},
-		{"bob-shell/2.0.5", "bob-shell"},
+		{"bob-shell/2.0.5", "bob"},
 		{"claude-code", "claude-code"},
+		// Retired spellings fold to their replacement, versioned or bare, so a label
+		// recorded before a rename joins the row its agent writes today. This is the
+		// fold that keeps a rename from splitting one agent's history in two.
+		{"ibm-bob/2.2.1", "bob"},
+		{"bob-shell", "bob"},
+		{"ibm-bob", "bob"},
 		{"curl/8.4.0", "curl"},
 		{UnknownClientLabel, UnknownClientLabel},
 		{"Claude-User (claude-code/2.1.284; +https://support.anthropic.com/)",
@@ -749,5 +896,32 @@ func TestAgentName(t *testing.T) {
 		if got := AgentName(tc.label); got != tc.want {
 			t.Errorf("AgentName(%q) = %q, want %q", tc.label, got, tc.want)
 		}
+	}
+}
+
+// FoldAgentNames is the one map-level fold both the router and agentop key their
+// views of an agents: config with, so its collision rule is worth pinning directly:
+// a config naming both a retired spelling and its replacement resolves to ONE key,
+// deterministically, whichever way the map iterates.
+func TestFoldAgentNames(t *testing.T) {
+	folded := FoldAgentNames(map[string]string{
+		"bob-shell":   "glm",
+		"ibm-bob":     "ete",
+		"claude-code": "glm",
+		"opencode":    "ete",
+	})
+	want := map[string]string{"bob": "glm", "claude-code": "glm", "opencode": "ete"}
+	if !maps.Equal(folded, want) {
+		t.Errorf("FoldAgentNames = %v, want %v", folded, want)
+	}
+	// Both of Bob's retired spellings fold to the one key; the value is whichever
+	// spelling sorts first ("bob-shell" before "ibm-bob"), the same rule the router
+	// applied before the fold was extracted.
+	if got := FoldAgentNames(map[string]string{"ibm-bob": "ete", "bob-shell": "glm"}); !maps.Equal(got, map[string]string{"bob": "glm"}) {
+		t.Errorf("collision = %v, want the sorted-first spelling's server", got)
+	}
+	// An empty or nil map folds to an empty one, so a reset can empty the map.
+	if got := FoldAgentNames(nil); len(got) != 0 {
+		t.Errorf("FoldAgentNames(nil) = %v, want empty", got)
 	}
 }

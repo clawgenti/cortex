@@ -38,9 +38,8 @@ const anthropicTurn = "event: message_start\n" +
 //	event:-first + BOM     2 frames, prompt tally present, LastEvent ""
 //
 // So the frame and its payload survive on real traffic, and what goes missing is the first frame's
-// TYPE. That is not cosmetic: a re-framing proxy reproduces the upstream "event:" line from
-// LastEvent (see the field's doc, and forwardproxy's write-SSE test), and clients like the Anthropic
-// SDK type each event from that field rather than from the payload. Losing it relays event #1
+// TYPE. That is not cosmetic: plugins and clients like the Anthropic SDK type each event from
+// that field rather than from the payload. Losing it relays event #1
 // untyped, which parses to zero typed events downstream.
 //
 // The data:-only rows stay because that shape is legal SSE and the loss there IS the whole event —
@@ -98,7 +97,7 @@ func TestReadFrame_LeadingBOM_CostsTheFirstEventItsType(t *testing.T) {
 				t.Errorf("first event = %q, want one containing %q: the wrong event survived", events[0], tc.wantFirst)
 			}
 			if types[0] != tc.wantFirstType {
-				t.Errorf("first event's type = %q, want %q — a re-framing proxy reproduces the upstream \"event:\" line from this, and a client that types events from it sees an untyped one",
+				t.Errorf("first event's type = %q, want %q — the first event's type is lost to the parser",
 					types[0], tc.wantFirstType)
 			}
 		})

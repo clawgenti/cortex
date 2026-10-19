@@ -1113,19 +1113,53 @@ func TestExecEnv_OmitsReplacingVarsWhenTheBundleIsMissing(t *testing.T) {
 }
 
 // The note must say what the user actually gets, and the command must still run.
+//
+// THE AMBIENT ENVIRONMENT IS PINNED FIRST, and that is not incidental. The child
+// inherits os.Environ(), so asserting its value is EMPTY conflates two different
+// claims: "runExec did not set this" and "nothing else had set it". They come
+// apart on any machine where these four names are already exported — which is
+// every machine that has run `agentop configure claude-code enable` or sat inside
+// an `agentop exec`, i.e. any real user of this tool. This test failed there and
+// passed in CI, where they are unset, so the one environment it was never
+// exercised in was a developer's own.
+//
+// Setting a sentinel instead makes the assertion ambient-proof AND stronger: it
+// pins the property the note on stderr actually promises, which is that a value
+// the user set themselves SURVIVES rather than being replaced by a bundle path
+// that does not exist. Derived from bundleKeys so a fifth replacing variable is
+// covered the day it is added.
 func TestRunExec_BeforeFirstStartRunsAndSaysWhatIsLost(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses /bin/sh")
 	}
+	const sentinel = "/sentinel/the-users-own-bundle.crt"
+	for _, k := range bundleKeys {
+		t.Setenv(k, sentinel)
+	}
+
+	var script strings.Builder
+	for _, k := range bundleKeys {
+		// printf rather than echo: a value with a backslash must survive verbatim.
+		script.WriteString("printf '" + k + "=[%s]\\n' \"$" + k + "\"\n")
+	}
+	script.WriteString("echo ran\n")
+
 	cfgPath, _ := execCfgNoBundle(t)
 	var stdout, stderr bytes.Buffer
 	code := runExec([]string{"--cortex-stats-url", execStats(t, cfgPath), "--",
-		"/bin/sh", "-c", `printf 'SSL_CERT_FILE=[%s]\n' "$SSL_CERT_FILE"; echo ran`}, &stdout, &stderr)
+		"/bin/sh", "-c", script.String()}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "SSL_CERT_FILE=[]") {
-		t.Errorf("the child inherited a bundle path that does not exist:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "ran") {
+		t.Fatalf("the child did not run:\n%s", stdout.String())
+	}
+	for _, k := range bundleKeys {
+		if want := k + "=[" + sentinel + "]"; !strings.Contains(stdout.String(), want) {
+			t.Errorf("%s was not left as the user had it (want %q), so runExec pointed it at a\n"+
+				"bundle that does not exist, stripping the child's trust entirely:\n%s",
+				k, want, stdout.String())
+		}
 	}
 	if !strings.Contains(stderr.String(), "keeps its own trusted roots") {
 		t.Errorf("the note should say what the child keeps:\n%s", stderr.String())

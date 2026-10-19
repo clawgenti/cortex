@@ -83,7 +83,7 @@ func (f *Fetcher) Cached() (*pricing.List, error) {
 		return nil, fmt.Errorf("pricelist: %s: %w", f.CacheFile, err)
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("pricelist: %s has no %s row with a rate", f.CacheFile, pricegen.AnthropicProvider)
+		return nil, fmt.Errorf("pricelist: %s has no %s row with a rate", f.CacheFile, pricegen.BundledProviders())
 	}
 	f.etag = c.ETag
 	return &pricing.List{Entries: entries, FetchedAt: c.FetchedAt}, nil
@@ -139,7 +139,7 @@ func (f *Fetcher) Fetch(ctx context.Context) (*pricing.List, error) {
 		return nil, err
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("pricelist: %s has no %s row with a rate", url, pricegen.AnthropicProvider)
+		return nil, fmt.Errorf("pricelist: %s has no %s row with a rate", url, pricegen.BundledProviders())
 	}
 	now := time.Now
 	if f.Now != nil {

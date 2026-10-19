@@ -27,7 +27,7 @@ goes there and not into a shell profile. `enable` sets nine variables in that bl
 with one `opencode service set env NAME VALUE` call per variable that differs, the CA
 variables before the proxy. agentop never edits the file itself. These are the nine
 variables `agentop exec` sets, chosen for the reasons
-[its section](../../cmd/agentop/README.md#running-one-command-through-cortex-agentop-exec)
+[any-agent.md](any-agent.md)
 gives. The addresses come from `~/.cortex/config.yaml`:
 
 | Variable | Value |
@@ -248,6 +248,11 @@ at a rate:
 - **Claude models**, Zen's included, are priced at the bundled Anthropic list rates.
   For the model checked, Claude Sonnet 4.6 at $3 in and $15 out per million tokens, that
   is what Zen charges.
+- **GPT models** now also resolve to a bundled rate, because the shipped table carries
+  first-party OpenAI list prices as well. ⚠️ Unlike the Claude row above, that was **not**
+  checked against what Zen charges — Zen resells, and a reseller's price is its own. Treat
+  a GPT figure on `opencode.ai` as OpenAI list until you have verified it, and pin the
+  model if it disagrees.
 - **Any other model** is reported unpriced until you add a `pricing:` entry for it.
   [Finding traffic that is not priced](../pricing.md#finding-traffic-that-is-not-priced)
   shows how to find the endpoint and model to add. Name the model rather than writing
@@ -284,7 +289,17 @@ server's key in the `X-Api-Key` or `Authorization` header OpenCode sent, and add
 `Authorization: Bearer <key>` when it sent neither. Zen's paid models are only
 offered by OpenCode once it has a Zen key: any value in `OPENCODE_API_KEY` will
 do, since the router replaces it. A session already running on Zen when OpenCode
-is routed stays on Zen.
+is routed stays on Zen. A local model server such as Ollama works the same
+way, and [Run an agent on a local model](../laptop-local-model.md) walks
+setting one up.
+
+If the server's model has a smaller output limit or context window than the model
+the agent asked for, the router lowers the request's output limit (unless that would
+not leave it above an extended-thinking budget) and, near the window, drops the oldest
+turns, keeping the task and the recent turns. Turns are dropped from Anthropic messages
+and OpenAI chat-completions requests only; a responses-format request has only its
+output limit lowered. The agent's own view of the conversation is not changed. See the inference-router's Limits rule in
+`docs/plugin-catalog.md`.
 
 ## Verified depth
 

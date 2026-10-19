@@ -8,9 +8,11 @@
 //
 // This is a deliberately narrow subset of the SSE spec
 // (https://html.spec.whatwg.org/multipage/server-sent-events.html):
-// we surface only the data payload of each event. Comment lines
-// (starting with ":"), event-type lines ("event:"), id, and retry
-// fields are skipped. The framing this code cares about is:
+// ReadFrame surfaces only the data payload of each event; comment lines,
+// "event:", "id:" and "retry:" fields are parsed past. ReadBlock also
+// returns each block's exact wire bytes, so a proxy can forward the
+// stream unchanged while plugins read the payload. The framing this code
+// cares about is:
 //
 //	data: { ... json-rpc message ... }\n
 //	\n
@@ -49,16 +51,17 @@ type Reader struct {
 	// Reused across ReadFrame calls to avoid per-frame allocation in
 	// the common steady-state case.
 	scratch []byte
+	// raw holds the in-progress block's exact wire bytes, terminators and a
+	// leading BOM included. Reused across calls like scratch.
+	raw []byte
 	// bomChecked records that the one-time byte-order-mark check has run. The BOM is a
 	// property of the STREAM's first bytes, not of each frame, so this must not be reset
 	// between frames — see ReadFrame.
 	bomChecked bool
-	// lastEvent holds the "event:" field value of the frame most
-	// recently returned by ReadFrame (empty if the frame named no
-	// event type). Reused across calls; valid until the next ReadFrame.
-	// Preserved so a proxy re-framing the stream can reproduce the
-	// upstream's SSE event type — clients like the Anthropic SDK type
-	// each event from the "event:" line, not the data payload.
+	// lastEvent holds the "event:" field value of the block most
+	// recently returned (empty if it named none). Reused across calls;
+	// valid until the next read. No proxy needs it — they forward
+	// Block.Raw — but it is how the BOM tests observe the first event's type.
 	lastEvent []byte
 }
 
@@ -84,25 +87,39 @@ func NewReader(r io.Reader, maxSize int) *Reader {
 // under; read the calling listener's maxBodySize for that.
 const DefaultMaxFrameSize = 1 << 20
 
-// ReadFrame reads from the underlying reader until a complete SSE
-// event arrives (i.e. a blank line terminator after one or more
-// "data:" lines), then returns the concatenated data payload.
-// Empty events (no "data:" lines, or only comment/event-type lines)
-// are skipped silently — the returned slice is always non-empty
-// unless the stream ends.
-//
-// At end-of-stream the function returns (nil, io.EOF). If the stream
-// ends after a partial event with data already accumulated, that
-// trailing event is delivered before EOF (per the spec, an SSE
-// stream may end without a final blank-line terminator).
-//
-// The returned slice is owned by the Reader and reused on the next
-// call; callers that need to retain bytes across ReadFrame calls
-// must copy.
-func (r *Reader) ReadFrame() ([]byte, error) {
+// Block is one SSE block as it crossed the wire: every line up to and
+// including the blank line that ends it, or up to EOF for a final block
+// the upstream never terminated.
+type Block struct {
+	// Raw is the block's exact upstream bytes — field lines, comments,
+	// CR/LF/CRLF terminators and, on the first block, a leading BOM.
+	// Writing every block's Raw in order reproduces the upstream body.
+	Raw []byte
+	// Data is the block's data lines folded with "\n" — what ReadFrame
+	// returns for it.
+	Data []byte
+	// HasData reports whether the block carried a data line. Blocks of
+	// only comments, event:, id: or retry: lines have none, and plugins
+	// are not shown them.
+	HasData bool
+}
+
+// ReadBlock reads the next SSE block. It returns (block, nil) for every
+// block with at least one byte, (Block{}, io.EOF) once the stream is
+// exhausted, and (Block{}, err) on ErrFrameTooLarge or a read error — no
+// partial block, so a relay never forwards half of one. Raw and Data are
+// owned by the Reader and valid until the next ReadBlock or ReadFrame.
+func (r *Reader) ReadBlock() (Block, error) {
 	r.scratch = r.scratch[:0]
+	r.raw = r.raw[:0]
 	r.lastEvent = r.lastEvent[:0]
 	hasData := false
+	// nonData counts the bytes of this block's non-data lines. They never
+	// reach scratch, so the data cap does not bound them; this does, at the
+	// same size. Raw itself is not capped: its data lines are already bounded
+	// by the data cap, and capping Raw would refuse an event of many short
+	// data lines that the data cap admits ("data: a\n" is 8 bytes for 1).
+	nonData := 0
 
 	// ONE LEADING BYTE-ORDER MARK IS REMOVED, and the spec requires it: "If the stream begins
 	// with a U+FEFF BYTE ORDER MARK character, then remove it."
@@ -117,9 +134,8 @@ func (r *Reader) ReadFrame() ([]byte, error) {
 	//	                                   goes with it
 	//
 	// The first row is the one that matters, because it is what this repo's traffic and every other
-	// SSE fixture in it look like. An empty LastEvent is not cosmetic: a re-framing proxy
-	// reproduces the upstream "event:" line from it, and clients like the Anthropic SDK type each
-	// event from that field rather than from the payload, so event #1 arrives untyped.
+	// SSE fixture in it look like: plugins key the first event by its type. The BOM itself is kept
+	// in Block.Raw, so a relay still forwards the stream as sent.
 	//
 	// HERE RATHER THAN IN THE PARSERS, because this reader is what every PER-FRAME path uses —
 	// ext_proc's buffered re-parse and both proxies' streaming paths. inferenceparser's
@@ -133,36 +149,43 @@ func (r *Reader) ReadFrame() ([]byte, error) {
 		r.bomChecked = true
 		if first, err := r.br.Peek(len(utf8BOM)); err == nil && bytes.Equal(first, utf8BOM) {
 			_, _ = r.br.Discard(len(utf8BOM))
+			// Stripped for parsing, kept for the wire: the client is owed
+			// the stream as the upstream sent it.
+			r.raw = append(r.raw, utf8BOM...)
 		}
 	}
 
 	for {
 		line, err := r.readLine()
 		if err == io.EOF {
-			// Stream ended. If we accumulated data without a final
-			// blank-line terminator, deliver it before EOF — per spec
-			// "if the user agent has reached the end of the file, then
-			// dispatch the event."
-			if hasData {
-				return r.scratch, nil
+			// Stream ended. A final block the upstream never terminated is
+			// still a block: its data is dispatched — per spec "if the user
+			// agent has reached the end of the file, then dispatch the
+			// event" — and its bytes forwarded without a blank line the
+			// upstream did not send.
+			if len(r.raw) > 0 {
+				return r.block(hasData), nil
 			}
-			return nil, io.EOF
+			return Block{}, io.EOF
 		}
 		if err != nil {
-			return nil, err
+			return Block{}, err
 		}
 
-		// Blank line — event terminator. Dispatch what we have, or
-		// keep scanning if this event was empty (comment-only event).
+		// Blank line — the block ends here, data or not, so a heartbeat
+		// reaches the client now rather than with the next event.
 		if len(line) == 0 {
-			if hasData {
-				return r.scratch, nil
-			}
-			continue
+			return r.block(hasData), nil
 		}
 
 		// Comment line — silently skipped per spec ("If the line
 		// starts with a U+003A COLON character, ignore the line").
+		if field, _ := splitField(line); field != "data" {
+			nonData += len(line)
+			if nonData > r.maxSize {
+				return Block{}, ErrFrameTooLarge
+			}
+		}
 		if line[0] == ':' {
 			continue
 		}
@@ -173,8 +196,7 @@ func (r *Reader) ReadFrame() ([]byte, error) {
 		// value, which we don't care about either way.
 		field, value := splitField(line)
 		if field == "event" {
-			// Capture the event type so a re-framing proxy can reproduce
-			// the upstream "event:" line. Copied because value points into
+			// Capture the event type (see LastEvent). Copied because value points into
 			// readLine's buffer, which is reused on the next line read.
 			r.lastEvent = append(r.lastEvent[:0], value...)
 			continue
@@ -193,12 +215,43 @@ func (r *Reader) ReadFrame() ([]byte, error) {
 		// LF, and trailing LF is stripped at dispatch).
 		if hasData {
 			if err := r.appendByte('\n'); err != nil {
-				return nil, err
+				return Block{}, err
 			}
 		}
 		hasData = true
 		if err := r.appendBytes(value); err != nil {
+			return Block{}, err
+		}
+	}
+}
+
+func (r *Reader) block(hasData bool) Block {
+	return Block{Raw: r.raw, Data: r.scratch, HasData: hasData}
+}
+
+// ReadFrame reads from the underlying reader until a complete SSE
+// event arrives (i.e. a blank line terminator after one or more
+// "data:" lines), then returns the concatenated data payload.
+// Empty events (no "data:" lines, or only comment/event-type lines)
+// are skipped silently — the returned slice is always non-empty
+// unless the stream ends.
+//
+// At end-of-stream the function returns (nil, io.EOF). If the stream
+// ends after a partial event with data already accumulated, that
+// trailing event is delivered before EOF (per the spec, an SSE
+// stream may end without a final blank-line terminator).
+//
+// The returned slice is owned by the Reader and reused on the next
+// call; callers that need to retain bytes across ReadFrame calls
+// must copy.
+func (r *Reader) ReadFrame() ([]byte, error) {
+	for {
+		b, err := r.ReadBlock()
+		if err != nil {
 			return nil, err
+		}
+		if b.HasData {
+			return b.Data, nil
 		}
 	}
 }
@@ -206,9 +259,8 @@ func (r *Reader) ReadFrame() ([]byte, error) {
 // LastEvent returns the "event:" field value of the frame most recently
 // returned by ReadFrame, or an empty slice if that frame named no event
 // type. The returned slice is owned by the Reader and reused on the next
-// ReadFrame call; copy to retain. A re-framing proxy uses this to emit an
-// "event: <type>" line so downstream SSE consumers that type events from
-// the event field (e.g. the Anthropic SDK) see the upstream's framing.
+// ReadFrame call; copy to retain. Proxies do not use it — they forward
+// Block.Raw unchanged.
 func (r *Reader) LastEvent() []byte { return r.lastEvent }
 
 // readLine reads one logical SSE line off the underlying buffered
@@ -216,7 +268,8 @@ func (r *Reader) LastEvent() []byte { return r.lastEvent }
 // any of the three ends a line. The returned slice excludes the
 // terminator and is valid only until the next call. EOF without a
 // final newline is reported as io.EOF only when the line is empty;
-// otherwise the unterminated tail is returned.
+// otherwise the unterminated tail is returned. Every byte it consumes,
+// terminators included, is appended to r.raw.
 //
 // Per-line bytes are bounded by r.maxSize so a pathological non-data
 // line (huge comment, malformed unknown field) cannot grow memory
@@ -231,6 +284,7 @@ func (r *Reader) readLine() ([]byte, error) {
 			}
 			return nil, err
 		}
+		r.raw = append(r.raw, b)
 		switch b {
 		case '\n':
 			return line, nil
@@ -240,6 +294,7 @@ func (r *Reader) readLine() ([]byte, error) {
 			// itself a valid line terminator.
 			if next, perr := r.br.Peek(1); perr == nil && len(next) == 1 && next[0] == '\n' {
 				_, _ = r.br.ReadByte()
+				r.raw = append(r.raw, '\n')
 			}
 			return line, nil
 		default:

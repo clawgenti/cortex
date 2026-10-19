@@ -100,3 +100,20 @@ func TestDecodeLine_DropsNonSGREscapes(t *testing.T) {
 		t.Errorf("escape leaked into text: %q", got)
 	}
 }
+
+// install.sh draws its bar in a 256-colour index, the one shape lipgloss never
+// emits here, so it is tested by hand: an unmapped index would draw the bar in the
+// default foreground.
+func TestDecodeLine_IndexedColors(t *testing.T) {
+	for _, c := range []struct {
+		in, want string
+	}{
+		{"\x1b[38;5;167m━\x1b[0m", "#d75f5f"}, // the cube: install.sh's accent
+		{"\x1b[38;5;1m━\x1b[0m", "#ff7b72"},   // a legacy colour, as SGR 31 draws it
+		{"\x1b[38;5;244m━\x1b[0m", "#808080"}, // the grey ramp
+	} {
+		if runs := DecodeLine(c.in); len(runs) != 1 || runs[0].FG != c.want {
+			t.Errorf("%q: got %+v, want FG %s", c.in, runs, c.want)
+		}
+	}
+}

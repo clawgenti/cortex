@@ -165,15 +165,17 @@ type InferenceExtension struct {
 	// Set only by SetRequestModel, never by a parser.
 	RequestedModel string `json:"requestedModel,omitempty"`
 
-	// ToolResults are the tool_result blocks of an Anthropic request — what each earlier tool
-	// call returned, as the client sent it back. Message Content keeps only text blocks, so
-	// without this a tool result left nothing behind but its size in ContentBytes.
+	// ToolResults are the tool_result blocks of an Anthropic request and the
+	// function_call_output items of a Responses API request — what each earlier tool
+	// call returned, as the client sent it back. Message Content keeps only text blocks,
+	// so without this a tool result left nothing behind but its size in ContentBytes.
 	//
 	// KEPT OUT OF MESSAGES ON PURPOSE. Plugins read Messages — IBAC as the user's intent,
 	// OPA/SPARC/CPEX as policy input, lineage as an exported span — and tool output reaches
 	// none of them unless a plugin opts in to this field. It is for the session store and its
-	// readers. OpenAI-format clients already carry tool output as role "tool" messages, so
-	// their requests leave this empty.
+	// readers. OpenAI Chat Completions clients already carry tool output as role "tool"
+	// messages, so their requests leave this empty; the wire format puts it in Content
+	// where this parser cannot keep it out.
 	ToolResults []InferenceToolResult `json:"toolResults,omitempty"`
 
 	// MessageCount and ToolCount are how many Messages and Tools this event HAD, for readers of
@@ -255,16 +257,11 @@ type InferenceExtension struct {
 	FinishReason string `json:"finishReason,omitempty"`
 
 	// ToolCalls are the tool invocations the model requested. Populated on
-	// three of the four response paths — both non-streaming dialects and
-	// Anthropic streaming. An OpenAI *stream* leaves it empty: that dialect
-	// splits each call across `choices[].delta.tool_calls[]` fragments keyed
-	// by their own index, a shape the streaming chunk decoder does not read.
-	//
-	// So empty means "the model requested no tools" only for a non-streaming
-	// response or an Anthropic stream. A consumer that spans dialects — cost
-	// accounting, per-tool attribution — must not read absence as a negative
-	// on a streamed OpenAI turn, where it is indistinguishable from a turn
-	// whose calls were never captured.
+	// every response path this parser reads: both non-streaming dialects,
+	// Anthropic streaming (assembled from content_block_start plus
+	// input_json_delta fragments), and OpenAI Chat Completions streaming
+	// (assembled from index-keyed delta.tool_calls fragments). Empty on a
+	// parsed response means the model requested no tools.
 	ToolCalls []InferenceToolCall `json:"toolCalls,omitempty"`
 
 	// Legacy aggregates, derived from the split fields below via

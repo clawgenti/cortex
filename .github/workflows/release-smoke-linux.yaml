@@ -8,11 +8,19 @@
 # that guarantees the release assets this pulls from already exist, rather
 # than racing the upload.
 #
-# arm64: out of scope here. No real arm64 GitHub-hosted runner exists in this
-# org, and no arm64-execution pattern exists anywhere in this repo's CI today
-# (build.yaml's QEMU usage builds container images for arm64 but never runs
-# one) — extending that to install.sh/agentop would be new infrastructure, not
-# a small addition to this workflow.
+# Runs on both amd64 and arm64 via a matrix: install.sh already does its own
+# `uname -m` arch detection and release-binaries.yaml already publishes
+# linux/arm64 tarballs, so no script needed changing. GitHub's ubuntu-24.04-arm
+# label (standard, GA, free for public repos) supplied the runner.
+#
+# THIS JOB IS COUNTED, so changing how many jobs it has is not a local decision.
+# Every leg fresh-installs the current stable release the way a person does, and
+# docs/install-stats/ subtracts those installs to estimate real ones. It reads
+# the count off this workflow's run list, per run — so going from one job to two
+# doubled what each run installs. scripts/collect-install-stats.sh therefore
+# records each run's successful-JOB count rather than assuming one, and the page
+# subtracts that. Add or remove a leg here and the arithmetic follows on its
+# own; hardcode a number over there and it will not.
 #
 # Deliberately not covered: driving a real request through the proxy and
 # asserting a parsed event with a non-zero token count (#957's third
@@ -33,13 +41,33 @@ permissions:
 
 jobs:
   linux-smoke-test:
-    name: Linux install/upgrade/uninstall smoke test
+    name: Linux install/upgrade/uninstall smoke test (${{ matrix.arch }})
     # event == 'push' excludes Release binaries' workflow_dispatch dry runs,
     # which build but never publish — nothing would exist yet to install.
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push'
-    runs-on: ubuntu-latest
+    strategy:
+      # fail-fast: false — each arch is an independently meaningful result,
+      # not a retry of the other; one arch failing shouldn't cancel the
+      # other's signal.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            # BOTH legs pin the same Ubuntu release, so a difference between
+            # them is the architecture rather than the OS. ubuntu-latest would
+            # not do that for long: GitHub moves it from 24.04 to 26.04 over
+            # Oct 19 - Nov 19 2026 (actions/runner-images#14748), and there is
+            # no "-latest" arm alias to follow it, so the amd64 leg would drift
+            # to a newer release on its own and an OS difference would read as
+            # an architecture result. It is not a cosmetic difference either:
+            # that image moves systemd 255 -> 259, and the systemd user
+            # install/upgrade path is most of what this test asserts.
+            runs-on: ubuntu-24.04
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 15
     steps:
       # Pinned to the release's own commit, so the script asserts on output

@@ -13,7 +13,7 @@ the `lite` profile's tags), not a separate binary.
 
 | Directory | Mode | Listeners | Plugins | Image (CI) |
 |---|---|---|---|---|
-| [`cortex/`](cortex/) | `proxy-sidecar` (default) | HTTP forward + reverse proxies | full (jwt-validation, token-exchange, a2a-parser, mcp-parser, inference-parser) | `ghcr.io/rossoctl/cortex/authbridge` |
+| [`cortex/`](cortex/) | `proxy-sidecar` (default) | HTTP forward + reverse proxies | full, incl. parsers (see [`../scripts/profile-tags`](../scripts/profile-tags)) | `ghcr.io/rossoctl/cortex/authbridge` |
 | [`cortex-envoy/`](cortex-envoy/) | `envoy-sidecar` | gRPC ext_proc on `:9090` (hooked into Envoy) | full | `ghcr.io/rossoctl/cortex/authbridge-envoy` |
 | `authbridge-lite` _(build variant of `cortex`)_ | `proxy-sidecar` | HTTP forward + reverse proxies | lite — `cortex` built with the `lite` profile, a sidecar minimum (see [`../scripts/profile-tags`](../scripts/profile-tags)) | `ghcr.io/rossoctl/cortex/authbridge-lite` |
 | [`cortex-cpex/`](cortex-cpex/) | `proxy-sidecar` | HTTP forward + reverse proxies | full + `cpex` (needs cgo; links `libcpex_ffi.a`) | `ghcr.io/rossoctl/cortex/authbridge-cpex` |
@@ -59,7 +59,7 @@ inbound mechanism, and the preset fills only that one's address.
 All of these are overridable, which matters for running two proxies on one host:
 a second instance on the default ports dies on a bind conflict. They are not all
 under the same config key — everything above is a `listener.*` address except
-`9093`, which is `stats.stats_address`. The defaults bind every interface, which
+`9093`, which is `stats.address`. The defaults bind every interface, which
 is what Kubernetes probes and sidecar traffic need but not what a laptop wants;
 local single-host setups typically pin them all to `127.0.0.1`. `cortex
 --local` ships exactly such a config — see
@@ -68,6 +68,31 @@ local single-host setups typically pin them all to `127.0.0.1`. `cortex
 `8082` and `8083` are the iptables REDIRECT targets installed by
 [`proxy-init`](../deploy/proxy-init/) and must match its `TRANSPARENT_PORT` /
 `INBOUND_TRANSPARENT_PORT`. A mismatch redirects traffic to a dead port.
+
+### Listener roles and interception (proxy-sidecar)
+
+- `listener.roles` — which proxies run in proxy-sidecar mode. Empty (the
+  default) runs **both** the reverse proxy (inbound) and the forward proxy
+  (outbound). Set a subset to run a single shape: `roles: [forward]` is
+  egress-only (the laptop TLS-bridge shape), `roles: [reverse]` is
+  inbound-only JWT validation. `reverse_proxy_backend` is required only when
+  the reverse role is active. Ignored outside proxy-sidecar mode.
+- `listener.inbound_interception` — how inbound traffic reaches the reverse
+  proxy's pipeline, with the reverse role active:
+  - `reverse-proxy` (default) — the operator binds the sidecar on the agent's
+    original port and relocates the agent to a free one ("port stealing"), so
+    the Service needs no patching. Forwards to `reverse_proxy_backend`.
+  - `transparent` — proxy-init PREROUTING-REDIRECTs inbound TCP to
+    `listener.transparent_inbound_addr` (`:8083` by default); the listener
+    recovers the port the client actually addressed via `SO_ORIGINAL_DST` and
+    forwards there over loopback. The agent keeps its own port and every port
+    it listens on is covered — not just the first declared one. Requires
+    proxy-init (`NET_ADMIN`) and is Linux-only.
+- `listener.transparent_proxy_addr` — the outbound transparent listener
+  (`:8082` by default in the proxy-sidecar / lite presets) that
+  enforce-redirect mode REDIRECTs the agent's bypass egress to. Binding it is
+  harmless when nothing is redirected to it — cooperative HTTP_PROXY
+  deployments simply never receive connections on it.
 
 **Envoy-sidecar (`cortex-envoy`):**
 

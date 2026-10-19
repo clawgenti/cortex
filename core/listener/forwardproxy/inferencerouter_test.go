@@ -219,3 +219,166 @@ func TestForwardProxy_ASessionRunningBeforeRoutingWasConfiguredStaysOnItsServer(
 		t.Errorf("glm saw %q, want only the new session's %q", got, want)
 	}
 }
+
+// moveOriginSrv is an origin that records each request's body, so a test can
+// assert on what the destination received.
+type moveOriginSrv struct {
+	srv    *httptest.Server
+	mu     sync.Mutex
+	bodies []string
+}
+
+func moveOrigin(t *testing.T, name string) *moveOriginSrv {
+	t.Helper()
+	o := &moveOriginSrv{}
+	o.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		o.mu.Lock()
+		o.bodies = append(o.bodies, string(b))
+		o.mu.Unlock()
+		_, _ = w.Write([]byte(name))
+	}))
+	t.Cleanup(o.srv.Close)
+	return o
+}
+
+func (o *moveOriginSrv) count() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.bodies)
+}
+
+func (o *moveOriginSrv) lastBody() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.bodies) == 0 {
+		return ""
+	}
+	return o.bodies[len(o.bodies)-1]
+}
+
+// A session moved by a sessions: override lands on the new server with the new
+// server's key, the old server's thinking dropped and the new server's kept, one
+// request per turn, and stays there once the override is gone — the pin the move
+// settled. A move to its own provider gets back the thinking that provider wrote.
+func TestForwardProxy_ASessionsOverrideMovesARunningSession(t *testing.T) {
+	ete := moveOrigin(t, "FROM-ETE")
+	glm := moveOrigin(t, "FROM-GLM")
+	eteURL := ete.srv.URL
+	glmURL := strings.Replace(glm.srv.URL, "127.0.0.1", "localhost", 1)
+
+	router := inferencerouter.New()
+	parserOnly, err := pipeline.New([]pipeline.Plugin{inferenceparser.NewInferenceParser()})
+	if err != nil {
+		t.Fatalf("pipeline.New: %v", err)
+	}
+	holder := pipeline.NewHolder(parserOnly)
+	store := session.New(5*time.Minute, 100, 0)
+	defer store.Close()
+	shared := memstore.New()
+	defer shared.Close()
+	srv := &Server{
+		OutboundPipeline: holder,
+		Sessions:         store,
+		Shared:           shared,
+		SessionIDHeaders: []string{session.ClaudeCodeSessionHeader},
+		Client:           http.DefaultClient,
+	}
+	proxy := httptest.NewServer(srv.Handler())
+	defer proxy.Close()
+
+	// Each turn's body is the conversation so far: the client appends every
+	// answer, its thinking block included, and re-sends the whole history.
+	var turns []string
+	turn := func(sessionID, answerSig string) string {
+		t.Helper()
+		msgs := []string{`{"role":"user","content":"hi"}`}
+		for _, sig := range turns {
+			msgs = append(msgs, `{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"`+sig+`"},{"type":"text","text":"hello"}]}`,
+				`{"role":"user","content":"again"}`)
+		}
+		body := `{"model":"claude-opus-5-5","max_tokens":8,"messages":[` + strings.Join(msgs, ",") + `]}`
+		req, err := http.NewRequest(http.MethodPost, eteURL+"/v1/messages", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "claude-cli/2.1.286 (external, cli)")
+		req.Header.Set("Authorization", "Bearer client-key")
+		req.Header.Set(session.ClaudeCodeSessionHeader, sessionID)
+		resp, err := proxyClient(proxy, nil).Do(req)
+		if err != nil {
+			t.Fatalf("request through the proxy: %v", err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		turns = append(turns, answerSig)
+		return string(b)
+	}
+	configure := func(sessions string) {
+		t.Helper()
+		if err := router.Configure(json.RawMessage(`{
+			"servers": {"ete": {"url": "` + eteURL + `", "key": "ete-key", "main": "opus", "helper": "haiku"},
+				"glm": {"url": "` + glmURL + `", "key": "glm-key", "main": "glm", "helper": "nemotron"}},
+			"agents": {"claude-code": "ete"},
+			"sessions": {` + sessions + `}
+		}`)); err != nil {
+			t.Fatalf("Configure: %v", err)
+		}
+	}
+	signatures := func(body string) []string {
+		var out []string
+		for _, part := range strings.Split(body, `"signature":"`)[1:] {
+			out = append(out, part[:strings.Index(part, `"`)])
+		}
+		return out
+	}
+
+	// The session runs on ete for two turns, and ete gets its own thinking back.
+	configure(``)
+	routed, err := pipeline.New([]pipeline.Plugin{inferenceparser.NewInferenceParser(), router})
+	if err != nil {
+		t.Fatalf("pipeline.New: %v", err)
+	}
+	holder.Store(routed)
+	turn("running", "e1")
+	if got := turn("running", "e2"); got != "FROM-ETE" {
+		t.Fatalf("turn reached %q, want ete", got)
+	}
+	if got := signatures(ete.lastBody()); !slices.Equal(got, []string{"e1"}) {
+		t.Errorf("ete received %v, want its own e1", got)
+	}
+
+	// agentop server move to glm: one request, ete's thinking dropped before it is
+	// sent — only ete can read it — and the assistant text kept.
+	configure(`"running": "glm"`)
+	if got := turn("running", "g1"); got != "FROM-GLM" {
+		t.Fatalf("moved turn reached %q, want glm", got)
+	}
+	if body := glm.lastBody(); len(signatures(body)) != 0 || !strings.Contains(body, `"hello"`) {
+		t.Errorf("glm received %s, want ete's thinking gone and the text kept", body)
+	}
+
+	// The override gone, the session stays on glm, and glm keeps its own thinking.
+	configure(``)
+	if got := turn("running", "g2"); got != "FROM-GLM" {
+		t.Fatalf("post-override turn reached %q, want glm: the pin must follow the move", got)
+	}
+	if got := signatures(glm.lastBody()); !slices.Equal(got, []string{"g1"}) {
+		t.Errorf("glm received %v, want only its own g1", got)
+	}
+	if n := glm.count(); n != 2 {
+		t.Errorf("glm received %d requests, want one per turn", n)
+	}
+
+	// own: the entry STAYS as "" — removing it would let the pin route the session
+	// right back — and the request goes where the client sent it, ete, which gets
+	// back the thinking it wrote and none of glm's.
+	configure(`"running": ""`)
+	if got := turn("running", "o1"); got != "FROM-ETE" {
+		t.Fatalf("own turn reached %q, want ete: the empty entry must stop the routing", got)
+	}
+	if got := signatures(ete.lastBody()); !slices.Equal(got, []string{"e1", "e2"}) {
+		t.Errorf("ete's own turn received %v, want its own e1 and e2", got)
+	}
+}

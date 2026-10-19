@@ -112,13 +112,7 @@ func (a *Archive) clearAll(p *pendingClear) {
 	a.idxMu.Unlock()
 	a.bytes.Store(0)
 	a.paused.Store(false) // whatever filled the disk is in the trash
-	a.mu.Lock()
-	for id, n := range p.seqs {
-		if a.lastSeq[id] == n {
-			delete(a.lastSeq, id)
-		}
-	}
-	a.mu.Unlock()
+	a.forgetSeqs(p.seqs)
 
 	var err error
 	if mkErr := os.MkdirAll(a.data, dirMode); mkErr != nil {
@@ -132,6 +126,19 @@ func (a *Archive) clearAll(p *pendingClear) {
 			"dir", trash, "error", rmErr)
 	}
 	p.finish(res, err)
+}
+
+// forgetSeqs drops the numbering of every id in seqs that recorded nothing since seqs was taken,
+// so a session started under it later numbers from 1. An id that did record keeps its numbering:
+// those events are already numbered on from it.
+func (a *Archive) forgetSeqs(seqs map[string]uint64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for id, n := range seqs {
+		if a.lastSeq[id] == n {
+			delete(a.lastSeq, id)
+		}
+	}
 }
 
 // removeTrash deletes what a clear moved aside and a crash kept it from deleting. Nothing reads

@@ -34,6 +34,31 @@ import (
 // -ldflags "-X main.version=<tag>". Defaults to "dev" for local builds.
 var version = "dev"
 
+// revision is the commit a local build was made from, "+dirty" appended when its tree had
+// uncommitted changes. Set by `make agentop` via -ldflags "-X main.revision=...", from git run
+// in the tree being built; empty for any other build.
+//
+// Not read from runtime/debug's VCS settings: Go recognises only a .git directory, so a build
+// in a .worktrees/ checkout, whose .git is a file, is stamped with the enclosing checkout's
+// HEAD and dirty state.
+var revision string
+
+// displayVersion is version as the TUI's title bar shows it: the release tag, or for a
+// local build the commit it was built from, since "dev" alone cannot tell two of those apart.
+//
+// Not a replacement for version itself, which the service unit records and compares
+// against: a revision there would make every rebuild look like a different install.
+func displayVersion() string {
+	return displayVersionOf(version, revision)
+}
+
+func displayVersionOf(version, revision string) string {
+	if version != "dev" || revision == "" {
+		return version
+	}
+	return "dev-" + revision
+}
+
 // dispatchableSubcommands are the documented names main routes on, in the order
 // the usage block lists them.
 //
@@ -66,8 +91,8 @@ Usage:
   agentop uninstall            remove Cortex from this machine (--help)
   agentop service <action>     run Cortex as a service: install, uninstall,
                                status, stop, start, restart
-  agentop configure <agent>    point a coding agent (claude-code, bob, bobshell,
-                               codex, opencode) at Cortex: enable, disable, status
+  agentop configure <agent>    point a coding agent (claude-code, bob, codex,
+                               opencode) at Cortex: enable, disable, status
   agentop exec -- CMD [ARG...] run CMD with Cortex's proxy and CA in its
                                environment, for tools with no settings file
   agentop server [<action>]    the inference server each agent's new sessions
@@ -522,7 +547,7 @@ func runObserve(args []string) int {
 	// address would point [l] at it and take away the in-cluster default, so a
 	// working `kubectl port-forward` on 9094 could not be reached with the one key
 	// that exists for exactly that.
-	opts := tui.RunOptions{Endpoint: *endpoint}
+	opts := tui.RunOptions{Endpoint: *endpoint, Version: displayVersion()}
 	opts.Harvest = observeHarvester(f, os.Stderr)
 	if prefsPath != "" {
 		opts.Save = func(s tui.UserSettings) error { return saveUserConfig(prefsPath, s) }

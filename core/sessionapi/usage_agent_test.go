@@ -45,7 +45,9 @@ func TestHandleUsage_AgentNarrowsLedgerAndRingWindows(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &snap); err != nil {
 			t.Fatalf("%s: decode: %v (%s)", window, err, body)
 		}
-		if snap.Agent != "bob-shell" || snap.Totals.CostMicros != 10_000 {
+		// The query is the pre-convergence label "bob-shell/2.0.5"; the handler folds
+		// it through AgentName, so it narrows to today's "bob" and echoes that.
+		if snap.Agent != "bob" || snap.Totals.CostMicros != 10_000 {
 			t.Errorf("window=%s agent=bob: Agent=%q CostMicros=%d, want the echo and Bob's 10000 alone",
 				window, snap.Agent, snap.Totals.CostMicros)
 		}

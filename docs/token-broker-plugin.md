@@ -118,14 +118,18 @@ pre-configured OAuth endpoints.
 
 ### Pipeline Composition
 
-Token Broker can be composed with other plugins in the outbound pipeline:
+Token Broker can be composed with other plugins in the outbound pipeline. It is
+an alternative to `token-exchange`, not a complement — a given outbound chain
+uses one or the other, since both replace the outbound Authorization header:
 
 ```yaml
 pipeline:
   outbound:
     plugins:
-      - name: token-exchange   # Handles exchange routes (service-to-service)
-      - name: token-broker     # Handles broker routes (user-delegated)
+      # EITHER token-exchange (service-to-service exchange routes)
+      - name: token-exchange
+      # OR token-broker (user-delegated broker routes) — not both:
+      # - name: token-broker
 ```
 
 ## Broker Protocol
@@ -244,8 +248,7 @@ level=ERROR msg="token-broker: broker request failed" error="token broker reques
 
 | Path | Description |
 |------|-------------|
-| `core/plugins/tokenbroker.go` | Plugin implementation |
-| `core/tokenbroker/client.go` | HTTP client for broker service |
-| `core/tokenbroker/error.go` | Structured error type |
-| `core/plugins/tokenbroker_test.go` | Plugin tests |
-| `core/tokenbroker/client_test.go` | Client tests |
+| `core/plugins/tokenbroker/plugin.go` | Plugin implementation |
+| `core/plugins/tokenbroker/client/` | HTTP client for the broker service |
+| `core/plugins/tokenbroker/plugin_*_test.go` | Plugin tests (configure, request, routing, edge cases) |
+| `core/plugins/tokenbroker/router_guard_test.go` | Router guard tests |

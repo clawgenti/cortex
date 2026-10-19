@@ -227,7 +227,7 @@ func TestAgentsPane_ARowsRefreshAlsoRefetchesThePipeline(t *testing.T) {
 	if err := os.WriteFile(f.path, []byte(routed), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, cmd := m.Update(agentRowsLoadedMsg{rows: m.agents, open: agentsOpenNever})
+	_, cmd := m.Update(agentRowsLoadedMsg{rows: m.agents, open: agentsOpenNever, window: usage.WindowToday})
 	if cmd == nil {
 		t.Fatal("the rows' reply fetched no pipeline")
 	}
@@ -386,7 +386,7 @@ func TestActiveRouter_AConfigItCannotReadIsNotOn(t *testing.T) {
 func TestAgentsPane_ARowsReplyDoesNotStackAPipelineFetch(t *testing.T) {
 	m := serverModel(t, newFakeProxy(t, false))
 	m.pipelineFetching = true
-	if _, cmd := m.Update(agentRowsLoadedMsg{rows: m.agents, open: agentsOpenNever}); cmd != nil {
+	if _, cmd := m.Update(agentRowsLoadedMsg{rows: m.agents, open: agentsOpenNever, window: usage.WindowToday}); cmd != nil {
 		t.Error("a rows reply started a pipeline fetch while one was in flight")
 	}
 	if !m.pipelineFetching {

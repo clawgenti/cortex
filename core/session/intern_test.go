@@ -596,3 +596,50 @@ func TestIntern_TableKeysAreTheStringsTheEventsReference(t *testing.T) {
 		}
 	}
 }
+
+// The claim: a client re-sends every earlier tool result on every request, so the
+// ToolUseID repeats exactly as the content does — but it is ~20 bytes, under
+// InternMinLen, so interning it is a deliberate exception to the threshold rather
+// than a consequence of it.
+func TestAppend_SharesRepeatedToolUseID(t *testing.T) {
+	s := New(0, 0, 100)
+	defer s.Close()
+
+	// toolResults builds the results one turn re-sends: every earlier result plus one
+	// new one, rebuilt from scratch per call, as a parser does.
+	toolResults := func(turn int) []pipeline.InferenceToolResult {
+		out := make([]pipeline.InferenceToolResult, 0, turn)
+		for i := 0; i < turn; i++ {
+			out = append(out, pipeline.InferenceToolResult{
+				ToolUseID: fmt.Sprintf("toolu_%03d", i),
+				Content:   fmt.Sprintf("result %03d: %s", i, strings.Repeat("output text ", 20)),
+			})
+		}
+		return out
+	}
+
+	const turns = 25
+	for i := 1; i <= turns; i++ {
+		s.Append("s1", pipeline.SessionEvent{
+			Phase:     pipeline.SessionRequest,
+			Inference: &pipeline.InferenceExtension{Model: "m", ToolResults: toolResults(i)},
+		})
+	}
+
+	v := s.View("s1")
+	if len(v.Events) != turns {
+		t.Fatalf("stored %d events, want %d", len(v.Events), turns)
+	}
+
+	// Result 0's id appears in all 25 events; every occurrence must be the same bytes.
+	first := backing(v.Events[0].Inference.ToolResults[0].ToolUseID)
+	for i := range v.Events {
+		if got := backing(v.Events[i].Inference.ToolResults[0].ToolUseID); got != first {
+			t.Errorf("event %d holds its own copy of tool result 0's id", i)
+		}
+	}
+	// And the id still reads correctly — sharing must not have crossed any wires.
+	if got := v.Events[turns-1].Inference.ToolResults[0].ToolUseID; got != "toolu_000" {
+		t.Errorf("tool result 0 id changed: %q", got)
+	}
+}

@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/rossoctl/cortex/cmd/agentop/apiclient"
+	"github.com/rossoctl/cortex/cmd/agentop/tui/table"
 	"github.com/rossoctl/cortex/core/cost/pricing"
 	"github.com/rossoctl/cortex/core/cost/usage"
 )
@@ -203,8 +206,8 @@ func TestSpendState_ZeroValueRequestsTheLiveHour(t *testing.T) {
 		t.Errorf("axis() = %q on a zero-value state, want %q", got, usage.GroupModel)
 	}
 	// A ring span asks for a single bucket; a symbolic one omits the resolution entirely.
-	if got := s.windowResolution(); got != spendResolution {
-		t.Errorf("windowResolution() = %v for the hour, want %v", got, spendResolution)
+	if got := spanResolution(s.windowSpan()); got != spendResolution {
+		t.Errorf("spanResolution() = %v for the hour, want %v", got, spendResolution)
 	}
 }
 
@@ -897,7 +900,7 @@ func TestSpendDrawerHost_CoversEveryPane(t *testing.T) {
 		paneNamespaces:   false, // nothing connected yet
 		panePods:         false, // likewise
 		paneUsage:        false, // already a breakdown, and it owns w/b/m
-		paneAgents:       false, // likewise a breakdown
+		paneAgents:       true,  // its rows scope the drawer; see spendDrawerHostPane
 		paneSessions:     true,
 		paneEvents:       true,
 		paneDetail:       true,
@@ -930,6 +933,27 @@ func TestSpendDrawerHost_CoversEveryPane(t *testing.T) {
 func m0() *model { return &model{width: 200, height: 60} }
 
 func (m *model) withPane(p paneID) *model { m.pane = p; return m }
+
+// `$` OPENS ON THE AGENTS PANE, and the refusal that used to answer it is gone.
+//
+// The pane refused the drawer on the argument that its rows were already the per-agent
+// breakdown — true of the drawer's AGENT axis and nothing else, and written eight days
+// before the SERVER column landed (03161ee7) and turned the pane into a routing console.
+// From then on the pane paired each agent's COST — a total across every server the agent
+// actually used — with a SERVER label saying where new sessions will go, and the one
+// surface that could reconcile the two (the drawer's ENDPOINT axis, agent-scoped) was
+// refused at the door. This test pins the open; the scope it opens under is
+// TestFetchSpendDrawer_AgentsPaneScopesToTheHighlightedRow's.
+func TestSpendDrawer_OpensOnTheAgentsPane(t *testing.T) {
+	m := m0().withPane(paneAgents)
+	cmd := m.toggleSpendDrawer()
+	if !m.spend.expanded {
+		t.Fatal("`$` on the agents pane left the drawer closed; the pane still refuses to host it")
+	}
+	if cmd == nil {
+		t.Fatal("opening the drawer returned no command; its poll chain never started")
+	}
+}
 
 // AN UNPRICED TAIL MUST STILL APPEAR. foldTailSeries appends its "(other)" to the kept list only
 // when the tail's METRIC total is positive, and this drawer's metric is COST — so a tail of models
@@ -1078,6 +1102,116 @@ func tierSnap() *usage.Snapshot {
 	return s
 }
 
+// The header NAMES THE AGENT the drawer is scoped to. On the agents pane the drawer holds
+// the row under the cursor while the band above it holds the committed scope, and the two
+// can name different agents on one screen; the caption is the reader's reconciliation
+// between them, so it comes from the SNAPSHOT (what was actually fetched, snap.Agent) rather
+// than from what was asked — a reply still in the air must not caption rows it does not
+// carry. Sanitised for the same reason drawerLabels sanitises snap.Group: the field is
+// server-supplied JSON that reaches the terminal verbatim.
+func TestRenderSpendDrawer_HeadersNameTheScopedAgent(t *testing.T) {
+	scoped := drawerSnap()
+	scoped.Agent = "claude-code"
+	header := func(lines []string) string {
+		for _, l := range lines {
+			if strings.Contains(l, "BY ENDPOINT") {
+				return l
+			}
+		}
+		t.Fatalf("no header line in %q", strings.Join(lines, "\n"))
+		return ""
+	}
+	got := header(renderSpendDrawerAxes(scoped, nil, usage.GroupEndpoint,
+		usage.GroupEndpoint, spendDrawerAxes, "today", 100))
+	if !strings.Contains(got, "BY ENDPOINT · claude-code") {
+		t.Errorf("header %q does not name the scoped agent; a reader cannot tell the "+
+			"cursor's breakdown from the band's scope above it", got)
+	}
+	if plain := header(renderSpendDrawer(drawerSnap(), nil, usage.GroupEndpoint, "1h", 100)); strings.Contains(plain, "·") {
+		t.Errorf("unscoped header %q carries a scope separator; an unscoped drawer has no agent to name", plain)
+	}
+	dirty := drawerSnap()
+	dirty.Agent = "claude-code\x1b[2J"
+	if got := header(renderSpendDrawerAxes(dirty, nil, usage.GroupEndpoint,
+		usage.GroupEndpoint, spendDrawerAxes, "today", 100)); strings.ContainsAny(got, "\x1b") {
+		t.Errorf("header %q carries an unsanitised escape from the agent label", got)
+	}
+}
+
+// THE DRAWER FOLLOWS THE CURSOR, and only the cursor. Driven end to end through Update, in
+// three phases on one request-recording server:
+//
+//   - a cursor move refetches under the NEW row — the drawer asked for bob-shell's
+//     breakdown the moment the highlight left claude-code's row;
+//   - a key that moves NOTHING fetches nothing — the cursor is clamped at the last row, and
+//     a per-keypress refetch would walk the ledger for nobody. This is the phase that needs
+//     the drawer to remember what it last asked for;
+//   - leaving the pane returns the drawer to the COMMITTED scope, so a breakdown picked up
+//     on the agents pane does not follow the reader back to Sessions under a title naming a
+//     different agent.
+//
+// All through Update rather than handleKey, because the sync is pane-blind by design: there
+// is no setPane choke point to hook (the pane is assigned in twenty-odd places), so the one
+// place every keypress passes through is the only sound one.
+func TestSpendDrawer_FollowsTheAgentsCursor(t *testing.T) {
+	var mu sync.Mutex
+	var asked []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		agent := r.URL.Query().Get("agent")
+		// The drawer's requests only — they are the grouped ones. The band follows the
+		// cursor too and restarts with it; TestSpendBand_FollowsTheAgentsCursor covers it.
+		if r.URL.Query().Get("group") != "" {
+			mu.Lock()
+			asked = append(asked, agent)
+			mu.Unlock()
+		}
+		// The agent is ECHOED, as the real server does, so fetchUsageScoped does not take
+		// its old-server fallback and re-ask unscoped — see the fetch-scope test.
+		_, _ = w.Write([]byte(`{"window":"1h","group":"model","agent":"` + agent + `","buckets":[],"totals":{}}`))
+	}))
+	defer ts.Close()
+
+	m := &model{
+		pane:       paneAgents,
+		client:     apiclient.New(ts.URL),
+		agentScope: "claude-code/2.1.270",
+		agents:     navRows(),
+		agentsTbl:  newAgentsTable(),
+	}
+	m.agentsTbl.SetRows([]table.Row{
+		{"All agents"}, {"claude-code/2.1.270"}, {"bob-shell/2.0.5"},
+	})
+	setCursorVisible(&m.agentsTbl, 1)
+	m.spend.expanded = true
+	press := func(key tea.KeyMsg) {
+		_, cmd := m.Update(key)
+		runCmds(cmd)
+	}
+	requests := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(asked)
+	}
+
+	press(tea.KeyMsg{Type: tea.KeyDown})
+	seen := requests()
+	if len(seen) != 1 || seen[0] != "bob-shell/2.0.5" {
+		t.Errorf("after the cursor moved, requests = %v; want exactly one, for bob-shell/2.0.5", seen)
+	}
+
+	press(tea.KeyMsg{Type: tea.KeyDown})
+	seen = requests()
+	if len(seen) != 1 {
+		t.Errorf("a clamped cursor move refetched: requests = %v; a key that moves nothing must fetch nothing", seen)
+	}
+
+	press(tea.KeyMsg{Type: tea.KeyEsc})
+	seen = requests()
+	if len(seen) != 2 || seen[1] != "claude-code/2.1.270" {
+		t.Errorf("after leaving the pane, requests = %v; want a refetch under the committed scope claude-code/2.1.270", seen)
+	}
+}
+
 // Two columns, headed, tiers left and series right.
 func TestRenderSpendDrawer_ShowsBothColumnsWithHeaders(t *testing.T) {
 	lines := renderSpendDrawer(tierSnap(), nil, usage.GroupModel, "1h", 100)
@@ -1199,7 +1333,7 @@ func TestSpendDrawer_PollsAtTheCadenceOfTheSpanItShows(t *testing.T) {
 	m := &model{}
 	for i := range spendDrawerWindows {
 		want := spendSpanDefs[spendDrawerSpans[i]].pollInterval()
-		if got := m.spend.pollInterval(); got != want {
+		if got := m.spendDrawerPollInterval(); got != want {
 			t.Errorf("step %d (%s): cadence %v, want its span's %v",
 				i, m.spend.window(), got, want)
 		}

@@ -199,3 +199,23 @@ func TestRenewRequestID_GivesANewID(t *testing.T) {
 		t.Errorf("RequestID after RenewRequestID = %q, want a new id other than %q", second, first)
 	}
 }
+
+func TestResendReasons_KeepEveryReasonNamedForTheRequest(t *testing.T) {
+	c := &Context{}
+	if got := c.ResendReasons(); len(got) != 0 {
+		t.Fatalf("ResendReasons() = %v before any resend, want none", got)
+	}
+	c.MarkResend("model")
+	c.MarkResend("limit")
+	got := c.ResendReasons()
+	if len(got) != 2 || got[0] != "model" || got[1] != "limit" {
+		t.Fatalf("ResendReasons() = %v, want [model limit]", got)
+	}
+	got[0] = "changed"
+	if c.ResendReasons()[0] != "model" {
+		t.Error("ResendReasons() returned the context's own slice; a caller could rewrite it")
+	}
+	if MaxResends != 2 {
+		t.Errorf("MaxResends = %d, want 2", MaxResends)
+	}
+}

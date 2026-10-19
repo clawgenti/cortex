@@ -24,6 +24,14 @@ type Step struct {
 	// would be a type error and 2500 would be two and a half microseconds.
 	SlowStr []string        `yaml:"slow"`
 	Slow    []time.Duration `yaml:"-"`
+	// ANSI says Out is what the program writes to a terminal, SGR escapes and all
+	// (YAML spells ESC "\e"). Each line is decoded as the agentop screens are, and
+	// outputColor's guesses for plain output do not apply.
+	ANSI bool `yaml:"ansi"`
+	// Bar is the index in Out of a progress bar redrawn in place: its run of ━ fills
+	// left to right over that line's delay, and the rest of the line appears once it
+	// is full. nil for no bar.
+	Bar *int `yaml:"bar"`
 }
 
 // WindowSpec is one mini-terminal in the stacked act.

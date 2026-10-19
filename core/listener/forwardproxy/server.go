@@ -9,7 +9,6 @@ import (
 	"context"
 	cryptotls "crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -456,6 +455,14 @@ func (s *Server) serveOutbound(w http.ResponseWriter, r *http.Request, tl *tunne
 		}
 	}
 
+	// Before the request row is recorded, 20-odd lines below, and NOT down beside
+	// stripForUpstream where the strip itself happens — the row is appended first,
+	// so a field set after it is set on nothing. (It was, and three unit tests
+	// driving this method directly all passed while the feature recorded nothing
+	// end to end.) Reading it here is equivalent: the strip is unconditional, so an
+	// Upgrade present on the inbound request is one that will be removed.
+	pctx.RecordStrippedUpgrade(r.Header)
+
 	if !skipped && s.Sessions != nil {
 		sid := s.recordingSessionID(sessionID, r.Header, chain)
 		// Pin this session so the paired response event records into the
@@ -540,13 +547,13 @@ func (s *Server) serveOutbound(w http.ResponseWriter, r *http.Request, tl *tunne
 	pctx.ResponseHeaders = resp.Header.Clone()
 
 	// BytesDown for the response row (#1309), counted HERE and nowhere else. Every
-	// arm below reads this one body — buffered whole, re-framed as SSE, relayed
+	// arm below reads this one body — buffered whole, relayed SSE block by block, relayed
 	// chunk by chunk, or copied straight through at the bottom of this function —
 	// so one wrapper covers all of them, and the arms that go on to replace
 	// resp.Body with a bytes.Reader over what they already read cannot
-	// double-count. Counted at the wire and not per arm because the SSE arm's
-	// frames have their `data: ` framing stripped by then, which is 32 bytes short
-	// of what extproc reports for the same response: see bodycount.
+	// double-count. Counted at the wire and not per arm so that every arm agrees
+	// with what extproc reports for the same response without each having to
+	// count: see bodycount.
 	//
 	// What the wrapper does NOT reach is the final io.Copy at the bottom of this
 	// function — the arm a response takes when nothing buffered it and it was not
@@ -589,15 +596,16 @@ func (s *Server) serveOutbound(w http.ResponseWriter, r *http.Request, tl *tunne
 					slog.Info("forward-proxy: text/event-stream responses will use the buffered path — a WritesResponseBody plugin is in the chain", "host", r.Host)
 				})
 			} else if s.OutboundPipeline.HasStreamingResponders() {
-				// Streaming-aware plugins (inference-parser, a2a-parser) parse
-				// each SSE frame; handleStreamingResponse re-frames via sseframe.
+				// Streaming-aware plugins (inference-parser, a2a-parser) read each
+				// SSE event's payload; handleStreamingResponse forwards the
+				// upstream bytes unchanged.
 				s.handleStreamingResponse(w, r, resp, pctx)
 				return
 			} else {
 				// No streaming responder: relay the SSE stream byte-for-byte
-				// with per-write flushing. Re-framing (handleStreamingResponse)
-				// would drop the event:/id:/retry: lines that generic SSE
-				// clients (e.g. an MCP Streamable HTTP client) depend on. Fixes #642.
+				// with per-write flushing. Both arms forward the upstream bytes
+				// unchanged; this one is chosen when no plugin needs per-event
+				// dispatch. Fixes #642.
 				//
 				// A plugin that declares ReadsBody (but not WritesRequestBody, and is
 				// not a StreamingResponder) also lands here, and its OnResponse
@@ -1043,13 +1051,13 @@ func stripForUpstream(r *http.Request, ownEncoding bool) {
 	// net/http auto-decompresses a gzip response ONLY when the transport added
 	// Accept-Encoding itself. Forwarding the caller's header suppresses that:
 	// resp.Body then yields raw compressed bytes. Every body-reading plugin
-	// sees binary — the SSE re-framer finds no "data:" lines and reports a
+	// sees binary — the SSE parser finds no "data:" lines and reports a
 	// clean EOF on its first ReadFrame, so a gzipped text/event-stream relayed
 	// zero frames downstream and finalized aggregating plugins on empty state.
 	// The symptom is silent in both directions: the client sees a stream that
 	// opens and dies, and token telemetry reads as absent rather than wrong.
 	//
-	// This proxy re-frames and inspects bodies, so it cannot be encoding-blind.
+	// This proxy parses and inspects bodies, so it cannot be encoding-blind.
 	// Taking ownership of the negotiation means the transport hands us
 	// plaintext and strips Content-Encoding from resp.Header, keeping the
 	// bytes we relay consistent with the headers we forward.
@@ -1075,49 +1083,55 @@ func setBody(r *http.Request, body []byte) {
 	r.Header.Del("Content-Encoding")
 }
 
-// resendIfAsked gives the outbound pipeline's Resenders the one look at a refused
-// answer that pipeline.Resender promises, and sends the request again when one asks.
-// It returns the answer to relay: resp itself, or the second send's.
+// resendIfAsked gives the outbound pipeline's Resenders a look at each refused answer,
+// at most pipeline.MaxResends times, and sends the request again when one asks. It
+// returns the answer to relay: resp itself, or the last send's.
 //
 // Only a request whose body the pipeline buffered can be sent again, and only a
 // Resender's request could need it, so nothing is read from an answer unless a
 // Resender is in the chain. A refused answer that is sent again is recorded on its own
-// response row, and the second send on a request row of its own under a new request
+// response row, and each further send on a request row of its own under a new request
 // id, so the timeline shows both attempts and each pairs with its own answer. A
 // refused answer that is not sent again goes to the client byte for byte, the bytes
 // read for the Resender included.
 func (s *Server) resendIfAsked(r *http.Request, pctx *pipeline.Context, client *http.Client, resp *http.Response, tl *tunnelLog, ownEncoding bool) (*http.Response, error) {
-	if resp.StatusCode/100 == 2 || !s.OutboundPipeline.HasResenders() || !s.OutboundPipeline.NeedsRequestBody() {
+	if !s.OutboundPipeline.HasResenders() || !s.OutboundPipeline.NeedsRequestBody() {
 		return resp, nil
 	}
-	head, _ := io.ReadAll(io.LimitReader(resp.Body, pipeline.ResendPeekLimit))
-	// The parse as the refused attempt was sent: a Resender may rewrite the model,
-	// and the refused attempt's row must name the one the upstream refused.
-	sent := pipeline.SnapshotInference(pctx.Extensions.Inference)
-	if !s.OutboundPipeline.Resend(r.Context(), pctx, resp.StatusCode, head) {
-		resp.Body = struct {
-			io.Reader
-			io.Closer
-		}{io.MultiReader(bytes.NewReader(head), resp.Body), resp.Body}
-		return resp, nil
+	for round := 0; round < pipeline.MaxResends && resp.StatusCode/100 != 2; round++ {
+		head, _ := io.ReadAll(io.LimitReader(resp.Body, pipeline.ResendPeekLimit))
+		// The parse as the refused attempt was sent: a Resender may rewrite the model,
+		// and the refused attempt's row must name the one the upstream refused.
+		sent := pipeline.SnapshotInference(pctx.Extensions.Inference)
+		if !s.OutboundPipeline.Resend(r.Context(), pctx, resp.StatusCode, head) {
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(head), resp.Body), resp.Body}
+			return resp, nil
+		}
+		_ = resp.Body.Close()
+		if s.Sessions != nil {
+			// The refused answer's row: its status and error, from the bytes read. Put
+			// back at once, because the status of the answer the client gets is the
+			// one OutcomeFromContext must read.
+			resent := pctx.Extensions.Inference
+			pctx.StatusCode, pctx.ResponseBody, pctx.Extensions.Inference = resp.StatusCode, head, sent
+			s.recordOutboundResponseEvent(pctx, resp.StatusCode, nil)
+			pctx.StatusCode, pctx.ResponseBody, pctx.Extensions.Inference = 0, nil, resent
+			pctx.RenewRequestID()
+			s.recordOutboundRequestEvent(tl, pctx, pctx.OutboundSessionID)
+		}
+		again := r.Clone(r.Context())
+		syncHeaders(again, pctx.Headers)
+		setBody(again, pctx.Body)
+		stripForUpstream(again, ownEncoding)
+		var err error
+		if resp, err = client.Do(again); err != nil {
+			return nil, err
+		}
 	}
-	_ = resp.Body.Close()
-	if s.Sessions != nil {
-		// The refused answer's row: its status and error, from the bytes read. Put back
-		// at once, because the status of the answer the client gets is the one
-		// OutcomeFromContext must read.
-		resent := pctx.Extensions.Inference
-		pctx.StatusCode, pctx.ResponseBody, pctx.Extensions.Inference = resp.StatusCode, head, sent
-		s.recordOutboundResponseEvent(pctx, resp.StatusCode, nil)
-		pctx.StatusCode, pctx.ResponseBody, pctx.Extensions.Inference = 0, nil, resent
-		pctx.RenewRequestID()
-		s.recordOutboundRequestEvent(tl, pctx, pctx.OutboundSessionID)
-	}
-	again := r.Clone(r.Context())
-	syncHeaders(again, pctx.Headers)
-	setBody(again, pctx.Body)
-	stripForUpstream(again, ownEncoding)
-	return client.Do(again)
+	return resp, nil
 }
 
 func (s *Server) recordOutboundRequestEvent(tl *tunnelLog, pctx *pipeline.Context, sid string) {
@@ -1126,21 +1140,22 @@ func (s *Server) recordOutboundRequestEvent(tl *tunnelLog, pctx *pipeline.Contex
 	// struct (e.g. token counts assigned in OnResponse).
 	plugins := pipeline.SnapshotPlugins(pctx.Extensions.Custom)
 	ev := pipeline.SessionEvent{
-		At:            time.Now(),
-		Direction:     pipeline.Outbound,
-		Phase:         pipeline.SessionRequest,
-		RequestID:     pctx.RequestID(),
-		BytesUp:       int64(len(pctx.Body)),
-		MCP:           pipeline.SnapshotMCP(pctx.Extensions.MCP),
-		Inference:     pipeline.SnapshotInference(pctx.Extensions.Inference),
-		Invocations:   pipeline.SnapshotInvocations(pctx.Extensions.Invocations, pipeline.InvocationPhaseRequest),
-		Plugins:       plugins,
-		Identity:      pipeline.SnapshotIdentity(pctx),
-		Host:          pctx.Host,
-		RequestedHost: pctx.RequestedHost(),
-		HTTPMethod:    pctx.Method,
-		HTTPPath:      pctx.Path,
-		Client:        pctx.ClientInfo(),
+		At:              time.Now(),
+		Direction:       pipeline.Outbound,
+		Phase:           pipeline.SessionRequest,
+		RequestID:       pctx.RequestID(),
+		BytesUp:         int64(len(pctx.Body)),
+		MCP:             pipeline.SnapshotMCP(pctx.Extensions.MCP),
+		Inference:       pipeline.SnapshotInference(pctx.Extensions.Inference),
+		Invocations:     pipeline.SnapshotInvocations(pctx.Extensions.Invocations, pipeline.InvocationPhaseRequest),
+		Plugins:         plugins,
+		Identity:        pipeline.SnapshotIdentity(pctx),
+		Host:            pctx.Host,
+		RequestedHost:   pctx.RequestedHost(),
+		HTTPMethod:      pctx.Method,
+		HTTPPath:        pctx.Path,
+		UpgradeStripped: pctx.UpgradeStripped,
+		Client:          pctx.ClientInfo(),
 	}
 	s.appendOutbound(tl, sid, ev)
 }
@@ -1460,9 +1475,10 @@ func isKnownMislabeledSSE(host, path string) bool {
 }
 
 // handleStreamingResponse forwards a text/event-stream response to the
-// downstream client frame-by-frame. Each parsed SSE event is delivered
-// to the pipeline's StreamingResponder plugins (recording-only today)
-// and then written + flushed to the client immediately. End-of-stream
+// downstream client block by block. Each SSE block carrying data is
+// delivered to the pipeline's StreamingResponder plugins (recording-only
+// today), and then every block — data or not — is written exactly as the
+// upstream sent it and flushed. End-of-stream
 // is signaled to plugins with one final last=true call so aggregating
 // plugins (inference-parser, a2a-parser) can finalize their running
 // state. RunResponse is intentionally NOT invoked on this path —
@@ -1525,7 +1541,7 @@ func (s *Server) handleStreamingResponse(w http.ResponseWriter, r *http.Request,
 
 	reader := sseframe.NewReader(idleReader(resp.Body, streamReadIdleTimeout), maxBodySize)
 	for {
-		frame, err := reader.ReadFrame()
+		block, err := reader.ReadBlock()
 		if err == io.EOF {
 			break
 		}
@@ -1542,29 +1558,30 @@ func (s *Server) handleStreamingResponse(w http.ResponseWriter, r *http.Request,
 			break
 		}
 
-		// Record-only dispatch: invoke plugins then write+flush.
-		// A future enforcement-aware version can inspect-before-forward;
-		// see StreamingResponder doc.
-		respAction := s.OutboundPipeline.RunResponseFrame(r.Context(), pctx, frame, false)
-		if respAction.Type == pipeline.Reject {
-			// Headers + earlier frames already on the wire — log and
-			// stop forwarding. The downstream client sees a truncated
-			// stream, which is the best we can do without inspect-
-			// before-forward semantics.
-			slog.Warn("forward-proxy: streaming response rejected mid-stream by plugin",
-				"host", r.Host, "violation", respAction.Violation)
-			break
+		// Plugins see the payload BEFORE the block's bytes are written, so a
+		// Reject still keeps the rejected block off the wire. Blocks with no
+		// data line — heartbeats, a lone retry: — are not shown to plugins,
+		// exactly as ReadFrame never returned them.
+		if block.HasData {
+			respAction := s.OutboundPipeline.RunResponseFrame(r.Context(), pctx, block.Data, false)
+			if respAction.Type == pipeline.Reject {
+				// Headers + earlier frames already on the wire — log and
+				// stop forwarding. The downstream client sees a truncated
+				// stream, which is the best we can do without inspect-
+				// before-forward semantics.
+				slog.Warn("forward-proxy: streaming response rejected mid-stream by plugin",
+					"host", r.Host, "violation", respAction.Violation)
+				break
+			}
 		}
 
-		// Write the frame back as one or more SSE data lines. The
-		// sseframe reader folds multi-line `data:` events with `\n`
-		// separators per the spec; re-split here so each original line
-		// gets its own `data: ` prefix and the downstream parser sees
-		// the same event boundaries the upstream produced. For the
-		// single-line JSON-RPC payloads this targets, this loop is
-		// equivalent to writing `data: <frame>\n\n` once.
-		if !writeSSEFrame(w, frame) {
-			slog.Debug("forward-proxy: streaming write error", "host", r.Host)
+		// The block exactly as the upstream sent it. Nothing here needs a
+		// rebuilt frame: StreamingResponders only read, and a response-body
+		// writer forces the buffered path before this one is chosen. A rebuild
+		// used to drop event:, id:, retry: and comment lines, which clients
+		// type, resume and keep alive by.
+		if _, err := w.Write(block.Raw); err != nil {
+			slog.Debug("forward-proxy: streaming write error", "host", r.Host, "error", err)
 			break
 		}
 		flusher.Flush()
@@ -1573,11 +1590,9 @@ func (s *Server) handleStreamingResponse(w http.ResponseWriter, r *http.Request,
 
 // streamPassthrough forwards a text/event-stream response to the downstream
 // client byte-for-byte with per-write flushing. It is the streaming path when
-// no StreamingResponder plugin is configured (a plain proxy pipeline). Unlike
-// handleStreamingResponse it does NOT parse or re-frame the stream through
-// sseframe — it relays the exact upstream bytes so that event:, id:, retry:,
-// and comment lines survive, which generic SSE consumers such as an MCP
-// Streamable HTTP client require. Without this path such a response fell
+// no StreamingResponder plugin is configured (a plain proxy pipeline). It
+// relays the exact upstream bytes, as handleStreamingResponse does; the two
+// differ only in whether StreamingResponders are dispatched. Without this path such a response fell
 // through to an unflushed io.Copy and never reached the client until the
 // upstream closed the connection (issue #642).
 //
@@ -1974,95 +1989,6 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Bidirectional copy until either side closes.
 	sent, received := tunnel(clientConn, upstream)
 	tl.close(http.StatusOK, nil, sent, received)
-}
-
-// writeSSEFrame writes one SSE event built from a sseframe-decoded
-// frame back to w. The decoder folds multi-line `data:` events with
-// `\n` separators; this helper splits on those `\n`s and emits one
-// `data: <line>\n` per original line followed by the blank-line
-// terminator, so a downstream SSE parser sees the same event
-// boundaries the upstream produced. Returns true when every byte
-// was written; false on any write error so the caller can stop
-// forwarding without re-checking each Write.
-//
-// The sseframe reader drops the SSE `event:` field (it surfaces only
-// data payloads), which is correct for data-only streams (MCP/A2A
-// JSON-RPC, OpenAI chat chunks). But Anthropic's Messages streaming
-// REQUIRES a typed `event:` line before each `data:` — without it the
-// Anthropic client can't finalize the stream and falls back to a
-// non-streaming retry, doubling the upstream call. Reconstruct the
-// `event:` line from the payload's top-level "type" (which, for an
-// Anthropic stream event, is exactly the SSE event name). Frames
-// without a top-level string "type" get no event line, preserving the
-// data-only shape the other protocols expect.
-func writeSSEFrame(w io.Writer, frame []byte) bool {
-	if ev := sseEventName(frame); ev != "" {
-		if _, err := io.WriteString(w, "event: "+ev+"\n"); err != nil {
-			return false
-		}
-	}
-	for len(frame) > 0 {
-		nl := bytes.IndexByte(frame, '\n')
-		var line []byte
-		if nl < 0 {
-			line = frame
-			frame = nil
-		} else {
-			line = frame[:nl]
-			frame = frame[nl+1:]
-		}
-		if _, err := w.Write([]byte("data: ")); err != nil {
-			return false
-		}
-		if _, err := w.Write(line); err != nil {
-			return false
-		}
-		if _, err := w.Write([]byte("\n")); err != nil {
-			return false
-		}
-	}
-	if _, err := w.Write([]byte("\n")); err != nil {
-		return false
-	}
-	return true
-}
-
-// sseEventName returns the SSE `event:` name to emit for an SSE data
-// payload, or "" when none should be emitted. It maps a frame to one of
-// the known Anthropic Messages stream events via the payload's top-level
-// JSON "type"; reconstructing that `event:` line keeps the relayed stream
-// byte-faithful Anthropic SSE (the sseframe reader drops it).
-//
-// Two deliberate constraints:
-//   - Fast path: skip the JSON parse entirely for frames that cannot carry
-//     a top-level "type" (data-only JSON-RPC / OpenAI chat chunks with
-//     "object" / "[DONE]"), so high-rate token streams stay allocation-free
-//     on the proxy's hot data path.
-//   - Allowlist: emit only the fixed set of Anthropic stream event names.
-//     The "type" comes from an upstream the bridge does not trust, so
-//     echoing it verbatim would let a crafted value inject SSE fields (a
-//     CRLF in "type") or steer the client's event dispatch with an
-//     arbitrary name. Exact-matching a constant set makes both impossible
-//     and scopes reconstruction to Anthropic — a future data-only protocol
-//     that happens to carry a top-level "type" (e.g. the OpenAI Responses
-//     API) is left untouched.
-func sseEventName(frame []byte) string {
-	if !bytes.Contains(frame, []byte(`"type"`)) {
-		return ""
-	}
-	var probe struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(frame, &probe); err != nil {
-		return ""
-	}
-	switch probe.Type {
-	case "message_start", "content_block_start", "content_block_delta",
-		"content_block_stop", "message_delta", "message_stop", "ping", "error":
-		return probe.Type
-	default:
-		return ""
-	}
 }
 
 // idleReader wraps r so each Read enforces an idle deadline. The

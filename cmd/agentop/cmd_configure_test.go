@@ -47,45 +47,6 @@ func TestClaudeCodeUnknownAction_StillErrors(t *testing.T) {
 	}
 }
 
-// The agents Cortex can run but cannot yet configure persistently.
-//
-// Each case asserts the message names ITS OWN agent, in both the opening clause and
-// the exec command. That is the point of the table: the change request that introduced
-// these messages carried a copy-paste slip in two of the three ("Persistent Bob
-// configuration" under codex, "run Codex" under opencode), and a per-agent assertion
-// is what catches that class of error. Bob and OpenCode have since grown real
-// implementations and left this table — see TestConfigure_BobShellReachesTheSameLogic
-// and TestConfigure_OpenCodeReachesRunOpenCode.
-func TestConfigure_ComingSoonAgents(t *testing.T) {
-	for _, tc := range []struct{ agent, display, product string }{
-		{"codex", "Codex", "Codex"},
-	} {
-		t.Run(tc.agent, func(t *testing.T) {
-			var out, errb bytes.Buffer
-			// Exit 0: printing the guidance is the whole job, and it succeeded.
-			if code := runConfigure([]string{tc.agent}, &out, &errb); code != 0 {
-				t.Errorf("exit = %d, want 0", code)
-			}
-			got := out.String()
-			if want := "Persistent " + tc.display + " configuration coming soon."; !strings.Contains(got, want) {
-				t.Errorf("missing %q:\n%s", want, got)
-			}
-			// Backticks included: they are part of the message, and losing them is the
-			// silent half of a rewrite.
-			if want := "`agentop exec -- " + tc.agent + "`"; !strings.Contains(got, want) {
-				t.Errorf("missing %q:\n%s", want, got)
-			}
-			if want := "to run " + tc.product + " under Cortex."; !strings.Contains(got, want) {
-				t.Errorf("missing %q:\n%s", want, got)
-			}
-			// An answer on stderr cannot be piped.
-			if errb.Len() != 0 {
-				t.Errorf("stderr not empty: %q", errb.String())
-			}
-		})
-	}
-}
-
 // `configure claude-code` must be an alternate spelling, not a reimplementation.
 //
 // Asserted as equality against the old spelling rather than against a hardcoded
@@ -161,54 +122,21 @@ func TestConfigure_UsageErrors(t *testing.T) {
 			t.Errorf("stderr does not quote the input: %q", got)
 		}
 		// Naming the valid set is the difference between a refusal and a dead end.
-		//
-		// "bobshell" is spelled in full because the shorter name is a substring of
-		// it, so an assertion on "bob" alone cannot tell the two apart.
-		//
-		// Which makes the "bob" entry below VACUOUS, and it is listed anyway only so
-		// the set matches the message: drop "bob" from the error text and this loop
-		// stays green, because "bobshell" still contains it. Do not read a passing
-		// run here as evidence that the message names the editor agent. What pins
-		// that arm is TestConfigure_BobReachesTheSameLogic and
-		// TestConfigure_BobAndBobShellAreDifferentAgents.
-		for _, agent := range []string{"claude-code", "bob", "bobshell", "codex", "opencode"} {
+		// "bobshell" is asserted to be ABSENT below, so a passing loop here is
+		// evidence the message names the editor agent and not merely a substring
+		// of the retired spelling.
+		for _, agent := range []string{"claude-code", "bob", "codex", "opencode"} {
 			if !strings.Contains(got, agent) {
 				t.Errorf("stderr omits %q: %q", agent, got)
 			}
 		}
+		if strings.Contains(got, "bobshell") {
+			t.Errorf("stderr still offers the retired \"bobshell\" spelling: %q", got)
+		}
 	})
 }
 
-// `configure bobshell` must be a dispatch arm, not a reimplementation.
-//
-// Asserted as equality against runBobShell rather than against a hardcoded string, the
-// same shape as TestConfigure_ClaudeCodeReachesTheSameLogic: this keeps passing when
-// the wording changes and fails only if the two paths actually diverge, which is the
-// property being claimed.
-//
-// `status` is the action to test because it is the only one of the three that touches
-// no file.
-func TestConfigure_BobShellReachesTheSameLogic(t *testing.T) {
-	t.Setenv(bobShellEnvVar, "1")
-
-	var viaConfigure, configureErr bytes.Buffer
-	configureCode := runConfigure([]string{"bobshell", "status"}, &viaConfigure, &configureErr)
-
-	var direct, directErr bytes.Buffer
-	directCode := runBobShell([]string{"status"}, &direct, &directErr)
-
-	if configureCode != directCode {
-		t.Errorf("exit codes differ: configure = %d, bobshell = %d", configureCode, directCode)
-	}
-	if viaConfigure.String() != direct.String() {
-		t.Errorf("stdout differs:\nconfigure:\n%s\nbobshell:\n%s", viaConfigure.String(), direct.String())
-	}
-	if configureErr.String() != directErr.String() {
-		t.Errorf("stderr differs: %q vs %q", configureErr.String(), directErr.String())
-	}
-}
-
-// `configure bob` must be a dispatch arm too, on the same terms as bobshell above.
+// `configure bob` must be a dispatch arm, not a reimplementation.
 //
 // This replaces TestConfigure_BobIsNoLongerAnAgent, whose premise — that `bob` is not
 // an agent — this change reverses. #1133 removed the name reasoning that IBM Bob needs
@@ -238,59 +166,20 @@ func TestConfigure_BobReachesTheSameLogic(t *testing.T) {
 	}
 }
 
-// Two agents, both spelled with "bob", and the shorter name is a prefix of the longer.
-// So the thing worth pinning is that they are NOT aliases of each other: `bob`
-// configures the editor's settings.json, `bobshell` writes a shell function, and a
-// dispatch that prefix-matched would silently collapse them into one.
-func TestConfigure_BobAndBobShellAreDifferentAgents(t *testing.T) {
-	settings := filepath.Join(t.TempDir(), "settings.json")
-
-	var bobOut, bobErr bytes.Buffer
-	runConfigure([]string{"bob", "status", "--settings", settings}, &bobOut, &bobErr)
-
-	t.Setenv(bobShellEnvVar, "1")
-	var shellOut, shellErr bytes.Buffer
-	runConfigure([]string{"bobshell", "status"}, &shellOut, &shellErr)
-
-	if bobOut.String() == shellOut.String() {
-		t.Errorf("the two agents report identically, so one is aliasing the other:\n%s", bobOut.String())
+// `configure bobshell` is a RETIRED spelling, and the break is clean: the name is
+// not an alias, not a hidden arm, and not an error that hands back the block to paste
+// by hand. It answers as any unknown agent does, so a user following an old write-up
+// learns the current namespace in one step. This is the same convention the
+// abctl → agentop rename used.
+func TestConfigure_BobShellIsRetiredNotAnAlias(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runConfigure([]string{"bobshell", "status"}, &out, &errb); code != 2 {
+		t.Errorf("exit = %d, want 2 — the retired spelling is an unknown agent", code)
 	}
-
-	// The other direction of the same claim: bobshell has no --settings, so an
-	// aliasing dispatch would make this succeed instead of failing as a usage error.
-	var aliasOut, aliasErr bytes.Buffer
-	if code := runConfigure([]string{"bobshell", "status", "--settings", settings}, &aliasOut, &aliasErr); code != 2 {
-		t.Errorf("bobshell accepted bob's --settings: exit = %d, want 2", code)
+	if !strings.Contains(errb.String(), "unknown agent \"bobshell\"") {
+		t.Errorf("stderr does not name the spelling as unknown: %q", errb.String())
 	}
-}
-
-// comingSoon's two parameters land in three distinct places.
-//
-// The table above cannot show this: the agent left in it passes a display name that
-// matches its binary but for case, so a body that dropped one and reused the other
-// would satisfy every assertion there. Two deliberately dissimilar values
-// here, so each slot is pinned by a string that can only have come from its own
-// parameter.
-//
-// display is asserted TWICE because it fills two slots — the opening sentence and
-// the closing clause. That second assertion is what the removed third parameter
-// used to cover: with both callers passing the same value twice, the parameter was
-// transposable without any test noticing, so it was dropped and the clause it fed
-// now reads display directly. Losing either occurrence still fails here.
-func TestComingSoonPlacesEachNameInItsOwnSlot(t *testing.T) {
-	got := comingSoon("DisplayName", "binaryname")
-
-	for _, want := range []string{
-		// display, in the opening sentence.
-		"Persistent DisplayName configuration coming soon.",
-		// binary: what the user types, in backticks. The backticks are asserted
-		// because losing them is the silent half of a rewrite.
-		"`agentop exec -- binaryname`",
-		// display again, in the closing clause.
-		"to run DisplayName under Cortex.",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q:\n%s", want, got)
-		}
+	if !strings.Contains(errb.String(), "(claude-code, bob, codex, opencode)") {
+		t.Errorf("stderr does not list the current agents: %q", errb.String())
 	}
 }

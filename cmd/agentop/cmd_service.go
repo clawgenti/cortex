@@ -427,7 +427,7 @@ func runServiceInstall(p servicePaths, adopt int, forceRestart, announceUnit boo
 	// running ones — a rebuild that happens to be reproducible would otherwise silently
 	// skip the restart, making the target's effect depend on whether the compiler was
 	// deterministic that day.
-	if installCanSkip(configChanged, forceRestart, func() bool { return serviceIsCurrent(p) }) {
+	if installCanSkip(configChanged, forceRestart, func() bool { return serviceIsCurrent(runtime.GOOS, p) }) {
 		fmt.Fprintf(stdout, "Already current: %s is running under %s and healthy.\n"+
 			"  Nothing to change. Use `agentop service restart` to restart it anyway.\n",
 			filepath.Base(p.binary), supervisorName(runtime.GOOS))
@@ -520,7 +520,7 @@ func runServiceInstall(p servicePaths, adopt int, forceRestart, announceUnit boo
 
 	if p.healthURL != "" {
 		if waitHealthy(p.healthURL, serviceReadyTimeout) {
-			reportInstallSuccess(true, stdout)
+			reportInstallSuccess(runtime.GOOS, true, stdout)
 			reportHistoryCleared(wasServing, wasArchiving, stdout)
 			return installResult{healthy: true, replaced: true}
 		}
@@ -529,7 +529,7 @@ func runServiceInstall(p servicePaths, adopt int, forceRestart, announceUnit boo
 			"  agentop service status shows the current state.\n", p.healthURL, serviceReadyTimeout, p.logFile)
 		return installResult{exit: 1, replaced: true}
 	}
-	reportInstallSuccess(false, stdout)
+	reportInstallSuccess(runtime.GOOS, false, stdout)
 	reportHistoryCleared(wasServing, wasArchiving, stdout)
 	return installResult{replaced: true}
 }
@@ -549,13 +549,20 @@ const crashRecoveryNote = "A supervisor process handles crashes (launchd will no
 // — so the note appeared only when the install could verify least, never on a normal
 // healthy install. A test could have caught that; not being able to express it is
 // better. There is now no "which path prints what" to get wrong.
-func reportInstallSuccess(healthy bool, stdout io.Writer) {
+//
+// goos is a parameter for the reason loadService/controlService/supervisorRunning/
+// unloadService take one (#1080): the darwin-only crash-recovery note and the two
+// supervisor names are the whole output, and read off runtime.GOOS they can only
+// ever be asserted on the host the test happens to run on — so one of the two
+// platforms' output was always unverified, and the note's absence from the healthy
+// branch was exactly the kind of bug that hid there. Callers pass runtime.GOOS.
+func reportInstallSuccess(goos string, healthy bool, stdout io.Writer) {
 	if healthy {
-		fmt.Fprintf(stdout, "Running as a %s, healthy.\n", supervisorName(runtime.GOOS))
+		fmt.Fprintf(stdout, "Running as a %s, healthy.\n", supervisorName(goos))
 	} else {
-		fmt.Fprintf(stdout, "Running as a %s.\n", supervisorName(runtime.GOOS))
+		fmt.Fprintf(stdout, "Running as a %s.\n", supervisorName(goos))
 	}
-	if runtime.GOOS == "darwin" {
+	if goos == "darwin" {
 		fmt.Fprintln(stdout, crashRecoveryNote)
 	}
 }
@@ -697,7 +704,7 @@ func serviceStatus(p servicePaths, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "Cortex is healthy according to %s\n", p.healthURL)
 		return 0
 	}
-	reportNotAnswering(p.healthURL, p.logFile, stdout)
+	reportNotAnswering(p, stdout)
 	return 1
 }
 
@@ -740,12 +747,53 @@ func proxyServing(p servicePaths) bool {
 
 // reportNotAnswering names the state worth naming loudly: installed but not serving,
 // so a configured Claude Code or OpenCode is pointed at a proxy that is not answering.
-func reportNotAnswering(where, logFile string, stdout io.Writer) {
-	fmt.Fprintf(stdout, "Cortex is NOT answering %s\n", where)
+// When something else holds the forward port, that is named first — it is the one
+// cause of this silence that no amount of restarting fixes (#1122).
+func reportNotAnswering(p servicePaths, stdout io.Writer) {
+	fmt.Fprintf(stdout, "Cortex is NOT answering %s\n", p.healthURL)
+	for _, line := range foreignHolderLines(p) {
+		fmt.Fprintf(stdout, "  %s\n", line)
+	}
 	fmt.Fprintf(stdout, "  Claude Code and OpenCode will fail while this is true. Last log lines:\n")
-	for _, line := range lastLines(logFile, 5) {
+	for _, line := range lastLines(p.logFile, 5) {
 		fmt.Fprintf(stdout, "    %s\n", line)
 	}
+}
+
+// foreignHolderLines names a process that holds the forward port and is not this
+// install's proxy, in the sentence setup's own preflight uses — it is the same
+// condition met at a different time, and `service install` cannot catch it because the
+// other install may be started long afterwards. The proxy's log says it too, on every
+// restart attempt, but the log tail below is five lines of a supervisor's output and
+// the one line that explains them should not have to be found in it.
+//
+// Empty when the port is free, when our own proxy holds it (the pidfile is stale, or
+// it is starting), or when the holder cannot be named: "something holds it" would add
+// noise rather than an answer.
+func foreignHolderLines(p servicePaths) []string {
+	if p.forwardAddr == "" {
+		return nil
+	}
+	pid, exe, ok := portHolder(portOfAddr(p.forwardAddr))
+	if !ok || ourProxy(filepath.Dir(p.binary), p.pidFile, pid, exe) {
+		return nil
+	}
+	lines := []string{fmt.Sprintf("%s is held by %s (pid %d), not this Cortex", p.forwardAddr, tildePath(p.home, exe), pid)}
+	// A foreign Cortex also explains the OTHER symptom, which does not look related:
+	// requests do reach the port, and are bridged with that install's CA, so agents
+	// report a self-signed certificate rather than a connection failure.
+	if b := filepath.Base(exe); b == "cortex" || b == "authbridge-proxy" {
+		lines = append(lines, "That is another Cortex, so requests reaching it are bridged with ITS CA — which is the self-signed-certificate error agents report.")
+	}
+	switch job := holderJob(runtime.GOOS, pid); {
+	case job != "": // a kill would only have its supervisor start it again
+		lines = append(lines, "Stop the job that runs it: "+job)
+	case runtime.GOOS == "darwin":
+		lines = append(lines, fmt.Sprintf("Stop it:  kill %d  — or, if it is an older Cortex service:  %s", pid, launchdBootout(launchdLabel)))
+	default:
+		lines = append(lines, fmt.Sprintf("Stop it:  kill %d  — or, if it is an older Cortex service:  systemctl --user disable --now %s", pid, systemdUnit))
+	}
+	return lines
 }
 
 // serviceControl is the whole reason users never need launchctl or systemctl: a
@@ -1055,7 +1103,12 @@ func proxyArchives(p servicePaths) bool {
 // a different binary or config is stale; a job the supervisor does not report running is
 // the installed-but-dead state; and "loaded" is not "serving", which is where a bad
 // config hides.
-func serviceIsCurrent(p servicePaths) bool {
+//
+// goos is a parameter for the reason the four functions #1080 refactored take one: the
+// --supervise clause below is darwin-only, and read off runtime.GOOS it could be
+// exercised on a Mac and nowhere else — so on Linux nothing proved that clause stays
+// out of the way, and on Linux CI nothing proved it fires. Callers pass runtime.GOOS.
+func serviceIsCurrent(goos string, p servicePaths) bool {
 	if !serviceInstalled(p) {
 		return false
 	}
@@ -1075,10 +1128,10 @@ func serviceIsCurrent(p servicePaths) bool {
 	}
 	// On macOS the proxy must be supervised; a unit that lost --supervise would leave
 	// crashes unrecovered, which is the whole point of the feature.
-	if runtime.GOOS == "darwin" && !strings.Contains(body, "--supervise") {
+	if goos == "darwin" && !strings.Contains(body, "--supervise") {
 		return false
 	}
-	if running, _ := supervisorRunning(runtime.GOOS, p); !running {
+	if running, _ := supervisorRunning(goos, p); !running {
 		return false
 	}
 	if p.healthURL == "" {

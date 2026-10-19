@@ -44,7 +44,7 @@ func withSpan(s spendSummary, span spendSpan, mutate func(*spanReading)) spendSu
 // to hold: the defect it replaces had CACHE HIT and TOKENS read off the rolling-hour snapshot
 // while sitting in a row that opened with TODAY, so an hour's figures read as a day's.
 func TestRenderSpendBand_EverySpanIsLabelledWithItsPeriod(t *testing.T) {
-	lines := renderSpendBand(bandSummary(), 200)
+	lines := renderSpendBand(bandSummary(), 200, false)
 	if len(lines) != spendBandLines {
 		t.Fatalf("%d lines, want %d", len(lines), spendBandLines)
 	}
@@ -67,7 +67,7 @@ func TestRenderSpendBand_EverySpanIsLabelledWithItsPeriod(t *testing.T) {
 // ASCENDING SPAN, LEFT TO RIGHT, because that is how a reader zooms out from "right now" — and
 // because the drop order depends on it being the visual order and nothing else.
 func TestRenderSpendBand_ReadsOutwardsFromTheLiveHour(t *testing.T) {
-	lines := renderSpendBand(bandSummary(), 200)
+	lines := renderSpendBand(bandSummary(), 200, false)
 	at := -1
 	for span := spendSpan(0); span < numSpendSpans; span++ {
 		label := spendSpanDefs[span].label
@@ -103,7 +103,7 @@ func TestRenderSpendBand_ReadsOutwardsFromTheLiveHour(t *testing.T) {
 // rather than scanned top to bottom, and because the row it gives back goes to the sessions
 // table — see spendBandLines.
 func TestRenderSpendBand_EveryLabelSitsBesideItsOwnFigure(t *testing.T) {
-	line := renderSpendBand(bandSummary(), 200)[0]
+	line := renderSpendBand(bandSummary(), 200, false)[0]
 	at := -1
 	for span := spendSpan(0); span < numSpendSpans; span++ {
 		pair := spendSpanDefs[span].label + " " + formatUSDTotal(bandSummary().Spans[span].USD)
@@ -135,11 +135,11 @@ func TestRenderSpendBand_EveryLabelSitsBesideItsOwnFigure(t *testing.T) {
 // This is what makes "THIS MONTH" affordable: five columns longer than "MONTH" and it lands on one
 // cell instead of four.
 func TestRenderSpendBand_AWideCellDoesNotWidenTheOthers(t *testing.T) {
-	base := renderSpendBand(bandSummary(), 200)[0]
+	base := renderSpendBand(bandSummary(), 200, false)[0]
 	// A month two orders of magnitude larger, nothing else touched.
 	fat := renderSpendBand(withSpan(bandSummary(), spanMonth, func(r *spanReading) {
 		r.USD = 70318.42
-	}), 200)[0]
+	}), 200, false)[0]
 
 	// Everything up to the month's own cell is byte-identical.
 	cut := strings.Index(base, spendSpanDefs[spanMonth].label)
@@ -182,7 +182,7 @@ func TestRenderSpendBand_CarriesTheFigureMarkers(t *testing.T) {
 			// cell appears, its disclosure appears with it. Never a silent figure.
 			drawn := 0
 			for width := 1; width <= 200; width++ {
-				joined := strings.Join(renderSpendBand(s, width), "\n")
+				joined := strings.Join(renderSpendBand(s, width, false), "\n")
 				if !strings.Contains(joined, spendSpanDefs[spanToday].label) {
 					continue
 				}
@@ -210,7 +210,7 @@ func TestRenderSpendBand_AnUnanswerableSpanIsNotANumber(t *testing.T) {
 		r.Unanswerable = true
 		r.USD, r.Priced = 703.18, true // the figure is there and must NOT be drawn
 	})
-	lines := renderSpendBand(s, 200)
+	lines := renderSpendBand(s, 200, false)
 	if !strings.Contains(lines[0], "MONTH") {
 		t.Errorf("band %q dropped MONTH; silence about a span is worse than saying it is "+
 			"unavailable:\n%s", lines[0], strings.Join(lines, "\n"))
@@ -234,7 +234,7 @@ func TestRenderSpendBand_OneChainsFailureLeavesTheOthers(t *testing.T) {
 	s := withSpan(bandSummary(), span7d, func(r *spanReading) {
 		r.Failed, r.Priced = true, false
 	})
-	lines := renderSpendBand(s, 200)
+	lines := renderSpendBand(s, 200, false)
 	if !strings.Contains(lines[0], emptyCell) {
 		t.Errorf("band %q has no %q for the failed span", lines[0], emptyCell)
 	}
@@ -257,7 +257,7 @@ func TestRenderSpendBand_AStaleSpanIsDated(t *testing.T) {
 	s := withSpan(bandSummary(), spanToday, func(r *spanReading) {
 		r.Stale, r.Age = true, 7*time.Minute
 	})
-	lines := renderSpendBand(s, 200)
+	lines := renderSpendBand(s, 200, false)
 	if !strings.Contains(lines[0], "TODAY "+formatSpendAge(7*time.Minute)) {
 		t.Errorf("band %q does not date the stale span; a wedged chain is indistinguishable "+
 			"from a current reading without it:\n%s", lines[0], strings.Join(lines, "\n"))
@@ -267,7 +267,7 @@ func TestRenderSpendBand_AStaleSpanIsDated(t *testing.T) {
 		t.Errorf("band %q dropped a figure that was merely stale", lines[0])
 	}
 	// And a fresh band carries no timestamp at all — a permanent one is noise.
-	fresh := strings.Join(renderSpendBand(bandSummary(), 200), "\n")
+	fresh := strings.Join(renderSpendBand(bandSummary(), 200, false), "\n")
 	if strings.Contains(fresh, "ago") || strings.Contains(fresh, formatSpendAge(7*time.Minute)) {
 		t.Errorf("a healthy band carries an age:\n%s", fresh)
 	}
@@ -276,7 +276,7 @@ func TestRenderSpendBand_AStaleSpanIsDated(t *testing.T) {
 // Height is constant, nothing is ever clipped, and no line exceeds the terminal.
 func TestRenderSpendBand_HeightIsConstantAndFiguresDropWhole(t *testing.T) {
 	for _, w := range []int{200, 120, 78, 60, 40, 34, 30, 20, 8, 1} {
-		lines := renderSpendBand(bandSummary(), w)
+		lines := renderSpendBand(bandSummary(), w, false)
 		if len(lines) != spendBandLines {
 			t.Fatalf("width %d: %d lines, want %d", w, len(lines), spendBandLines)
 		}
@@ -339,7 +339,7 @@ func TestRenderSpendBand_HeightIsConstantAndFiguresDropWhole(t *testing.T) {
 // operator reads, and deriving the expectation from the formatter would let a formatter change
 // take both sides with it. That is the vacuity TestClipsFigure_CanActuallyFail documents.
 func TestRenderSpendBand_UnpricedZeroAndSubCentAreThreeDifferentCells(t *testing.T) {
-	cell := func(s spendSummary) string { return renderSpendBand(s, 200)[0] }
+	cell := func(s spendSummary) string { return renderSpendBand(s, 200, false)[0] }
 
 	unpriced := cell(withSpan(bandSummary(), spanHour, func(r *spanReading) {
 		r.USD, r.Priced = 0, false
@@ -405,7 +405,7 @@ func TestRenderSpendBand_TodayAndMonthSurviveLongest(t *testing.T) {
 		// 13 where the old stacked cell was 7), so the 60 this scanned before the fold could not
 		// reach the four-cell rung at all and that rung silently asserted nothing.
 		for w := 120; w >= 1; w-- {
-			line := renderSpendBand(bandSummary(), w)[0]
+			line := renderSpendBand(bandSummary(), w, false)[0]
 			n := 0
 			for span := spendSpan(0); span < numSpendSpans; span++ {
 				if strings.Contains(line, spendSpanDefs[span].label) {
@@ -441,7 +441,7 @@ func TestRenderSpendBand_TodayAndMonthSurviveLongest(t *testing.T) {
 // An empty summary still fills its reserved height, because layout() has already held the rows
 // back — see spendBandLines. Blank lines, never zero lines.
 func TestRenderSpendBand_EmptySummaryStillFillsItsHeight(t *testing.T) {
-	lines := renderSpendBand(spendSummary{}, 200)
+	lines := renderSpendBand(spendSummary{}, 200, false)
 	if len(lines) != spendBandLines {
 		t.Fatalf("%d lines, want %d", len(lines), spendBandLines)
 	}
@@ -640,7 +640,7 @@ func TestRenderSpendBand_HealthySlowSpansDoNotWidenTheBand(t *testing.T) {
 	for span := spendSpan(0); span < numSpendSpans; span++ {
 		clean.Spans[span].Stale, clean.Spans[span].Age = false, 0
 	}
-	wide, plain := renderSpendBand(spendSummary{Spans: spans}, 200), renderSpendBand(clean, 200)
+	wide, plain := renderSpendBand(spendSummary{Spans: spans}, 200, false), renderSpendBand(clean, 200, false)
 	if got, want := lipgloss.Width(wide[0]), lipgloss.Width(plain[0]); got != want {
 		t.Errorf("a band whose chains all answered on schedule is %d columns against %d with the "+
 			"staleness explicitly cleared — a healthy chain is paying for an age it should not "+
@@ -794,36 +794,56 @@ func TestBandCell_MeasuresInDisplayColumns(t *testing.T) {
 // bandCell above pins one cell; this pins the line, which is what app.go actually measures against
 // the terminal. A separator or an extra pad applied on only one of the two paths would be invisible
 // to the per-cell test and would overflow the reservation here.
+//
+// BOTH SCOPES, because the marker is a second thing the two paths have to agree about. The scoped
+// form prepends allSessionsMarker and a separator, and the styled one mutes the marker — so a mute
+// that cost a column, or a separator applied on one path only, would overflow a reservation
+// measured on the other. Looping the width sweep over `scoped` is cheap and it is the only thing
+// asserting the claim on the path this change adds.
 func TestRenderSpendBand_StylingCostsNoColumns(t *testing.T) {
 	restore := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(restore) })
 
-	for w := 1; w <= 120; w++ {
-		plain := renderSpendBand(bandSummary(), w)
-		dressed, drew := renderSpendBandStyled(bandSummary(), w)
-		if len(plain) != spendBandLines || len(dressed) != spendBandLines {
-			t.Fatalf("width %d: %d plain rows and %d styled, want %d of each",
-				w, len(plain), len(dressed), spendBandLines)
+	for _, scoped := range []bool{false, true} {
+		for w := 1; w <= 120; w++ {
+			plain := renderSpendBand(bandSummary(), w, scoped)
+			dressed, drew := renderSpendBandStyled(bandSummary(), w, scoped)
+			if len(plain) != spendBandLines || len(dressed) != spendBandLines {
+				t.Fatalf("scoped=%v width %d: %d plain rows and %d styled, want %d of each",
+					scoped, w, len(plain), len(dressed), spendBandLines)
+			}
+			if got, want := lipgloss.Width(dressed[0]), lipgloss.Width(plain[0]); got != want {
+				t.Errorf("scoped=%v width %d: styled band is %d columns against the plain band's %d:\n%q",
+					scoped, w, got, want, dressed[0])
+			}
+			// AND `drew` AGREES WITH THE PLAIN LINE AT EVERY WIDTH. paneView gates the drawer on it, so
+			// a `drew` that disagreed would open the breakdown under an empty band — the state the
+			// styled string cannot be asked about, since an escape sequence is not whitespace.
+			//
+			// The marker must not move it either: a band whose figures all dropped is empty whether
+			// or not a marker would have fitted, and `drew` reports the figures.
+			if want := strings.TrimSpace(plain[0]) != ""; drew != want {
+				t.Errorf("scoped=%v width %d: drew = %v but the plain band is %q", scoped, w, drew, plain[0])
+			}
 		}
-		if got, want := lipgloss.Width(dressed[0]), lipgloss.Width(plain[0]); got != want {
-			t.Errorf("width %d: styled band is %d columns against the plain band's %d:\n%q",
-				w, got, want, dressed[0])
+
+		// Not vacuous: at a width that draws something, the styled form really does carry escapes.
+		dressed, drew := renderSpendBandStyled(bandSummary(), 200, scoped)
+		if !drew {
+			t.Errorf("scoped=%v: drew is false at width 200, so the agreement above was asserted on empty bands",
+				scoped)
 		}
-		// AND `drew` AGREES WITH THE PLAIN LINE AT EVERY WIDTH. paneView gates the drawer on it, so
-		// a `drew` that disagreed would open the breakdown under an empty band — the state the
-		// styled string cannot be asked about, since an escape sequence is not whitespace.
-		if want := strings.TrimSpace(plain[0]) != ""; drew != want {
-			t.Errorf("width %d: drew = %v but the plain band is %q", w, drew, plain[0])
+		if dressed[0] == renderSpendBand(bandSummary(), 200, scoped)[0] {
+			t.Errorf("scoped=%v: the styled band is byte-identical to the plain one, so nothing was styled", scoped)
 		}
 	}
-	// Not vacuous: at a width that draws something, the styled form really does carry escapes.
-	dressed, drew := renderSpendBandStyled(bandSummary(), 200)
-	if !drew {
-		t.Error("drew is false at width 200, so the agreement above was asserted on empty bands")
-	}
-	if dressed[0] == renderSpendBand(bandSummary(), 200)[0] {
-		t.Error("the styled band is byte-identical to the plain one, so nothing was styled")
+
+	// AND THE SCOPED SWEEP REALLY DID EXERCISE THE MARKER. Both loops above pass vacuously if
+	// `scoped` reaches no marker at this width — which is exactly how the gap being fixed here
+	// went unnoticed.
+	if !strings.Contains(renderSpendBand(bandSummary(), 200, true)[0], allSessionsMarker) {
+		t.Error("the scoped band carries no marker at width 200, so looping over scoped asserted nothing")
 	}
 }
 
@@ -838,7 +858,7 @@ func TestRenderSpendBand_StylingCostsNoColumns(t *testing.T) {
 // glyph as decoration — and nothing would have caught it coming back. A marker that is always
 // present carries no information, and it costs the two markers that ARE informative their meaning.
 func TestRenderSpendBand_ACleanSpanCarriesNoMarker(t *testing.T) {
-	lines := renderSpendBand(bandSummary(), 200)
+	lines := renderSpendBand(bandSummary(), 200, false)
 	joined := strings.Join(lines, "\n")
 
 	// The fixture is exact, fully priced, unclamped, undamaged and inside retention, so every
@@ -891,7 +911,7 @@ func TestRenderSpendBand_NoDroppedCellCouldHaveBeenKept(t *testing.T) {
 	}
 
 	for w := 1; w <= 120; w++ {
-		line := renderSpendBand(stale, w)[0]
+		line := renderSpendBand(stale, w, false)[0]
 		used := lipgloss.Width(line)
 		if used > w {
 			t.Errorf("width %d: band rendered %d columns: %q", w, used, line)
@@ -1002,7 +1022,7 @@ func TestRenderSpendBand_WideningOnlyEverGainsValue(t *testing.T) {
 			monthAlone := cells[spanMonth].width()
 
 			value := func(w int) int {
-				line := renderSpendBand(s, w)[0]
+				line := renderSpendBand(s, w, false)[0]
 				v := 0
 				for i := 0; i < int(numSpendSpans); i++ {
 					if strings.Contains(line, spendSpanDefs[bandDropOrder[i]].label) {
@@ -1013,7 +1033,7 @@ func TestRenderSpendBand_WideningOnlyEverGainsValue(t *testing.T) {
 			}
 
 			for w := 1; w < 200; w++ {
-				line := renderSpendBand(s, w)[0]
+				line := renderSpendBand(s, w, false)[0]
 				if w >= monthAlone && !strings.Contains(line, spendSpanDefs[spanMonth].label) {
 					t.Errorf("width %d holds the month's own cell (%d columns) and the band hides "+
 						"it anyway: %q", w, monthAlone, line)
@@ -1021,10 +1041,135 @@ func TestRenderSpendBand_WideningOnlyEverGainsValue(t *testing.T) {
 				if got, next := value(w), value(w+1); next < got {
 					t.Errorf("width %d keeps a more valued set than width %d — widening gave up a "+
 						"reading for a less important one:\n%s\n%s", w, w+1,
-						strings.Join(renderSpendBand(s, w), "\n"),
-						strings.Join(renderSpendBand(s, w+1), "\n"))
+						strings.Join(renderSpendBand(s, w, false), "\n"),
+						strings.Join(renderSpendBand(s, w+1, false), "\n"))
 				}
 			}
 		})
+	}
+}
+
+// Drilled into a session, the band says whose figures it is showing (#1116).
+//
+// allSessionsMarker's doc carries the reasoning — why a label rather than the per-session
+// figure the issue asked for. This pins the two halves of the behaviour: the marker is
+// absent unscoped, and leads the line scoped.
+func TestRenderSpendBand_NamesItsScopeWhenDrilledIn(t *testing.T) {
+	const wide = 200
+
+	plain := renderSpendBand(bandSummary(), wide, false)[0]
+	if strings.Contains(plain, allSessionsMarker) {
+		t.Errorf("the unscoped band wears the marker, which is noise on the sessions list:\n  %s", plain)
+	}
+
+	scoped := renderSpendBand(bandSummary(), wide, true)[0]
+	if !strings.HasPrefix(scoped, allSessionsMarker) {
+		t.Errorf("the drilled-in band does not lead with %q:\n  %s", allSessionsMarker, scoped)
+	}
+	// The figures are untouched — the marker explains them, it does not replace them.
+	if !strings.HasSuffix(scoped, plain) {
+		t.Errorf("the marker changed the readings:\n  scoped %q\n  plain  %q", scoped, plain)
+	}
+}
+
+// The marker is given up before any figure is.
+//
+// It is added after spendBandCells has already chosen the best-fitting set of readings,
+// so it must never cost one of them: a reading with no scope label still informs, where
+// a scope label with no reading informs about nothing. Asserted across every width
+// rather than at one, because the cell set changes shape as the terminal narrows.
+func TestRenderSpendBand_ScopeMarkerNeverCostsAReading(t *testing.T) {
+	for w := 1; w <= 120; w++ {
+		unscoped := renderSpendBand(bandSummary(), w, false)[0]
+		scoped := renderSpendBand(bandSummary(), w, true)[0]
+
+		// Same readings either way: the scoped line is the unscoped one, optionally
+		// with the marker in front.
+		if !strings.HasSuffix(scoped, unscoped) {
+			t.Errorf("width %d: the marker displaced a reading:\n  scoped   %q\n  unscoped %q", w, scoped, unscoped)
+		}
+		// And it never overflows the reservation app.go measured. Asserted outright rather
+		// than only where the unscoped band fits: TestRenderSpendBand_HeightIsConstantAndFiguresDropWhole
+		// already says no band of any width overruns its terminal, so excusing the scoped
+		// form wherever the unscoped one overflowed would only let this pass silently on a
+		// width where the other test is what fails.
+		if got := lipgloss.Width(scoped); got > w {
+			t.Errorf("width %d: the scoped band is %d columns, over budget", w, got)
+		}
+	}
+}
+
+// Only the two drilled-in panes get the marker.
+//
+// paneSessions lists every session, so there is nothing there for a reader to
+// mis-attribute the figures to — and the marker would be permanent noise on the pane
+// agentop is mostly used on.
+func TestSpendBandNeedsScopeMarker_OnlyWhenOneSessionIsOnScreen(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pane paneID
+		sess string
+		want bool
+	}{
+		{"events pane, drilled in", paneEvents, "s1", true},
+		{"event detail, drilled in", paneDetail, "s1", true},
+		{"sessions list", paneSessions, "s1", false},
+		{"usage pane says its own scope", paneUsage, "s1", false},
+		// Defensive: the drilled-in panes with no session selected name nothing, so
+		// there is nothing to disambiguate against.
+		{"events pane with no session", paneEvents, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &model{pane: tc.pane, selectedSess: tc.sess}
+			if got := m.spendBandNeedsScopeMarker(); got != tc.want {
+				t.Errorf("spendBandNeedsScopeMarker() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// EVERY pane is classified, so a new one cannot inherit a wrong answer in silence.
+//
+// spendBandNeedsScopeMarker names the panes that DO show one session, which is right for the
+// ten that exist but says nothing about the eleventh: a future single-session pane would get
+// no marker and carry exactly the ambiguity #1116 reported, with no test failing.
+//
+// Inverting the check — "not the sessions list and not Usage" — was considered and is worse.
+// selectedSess is set when entering a session and is not cleared on leaving the pane, only on
+// a connection switch or a clear, so it stays non-empty while the user is on Pipeline,
+// Catalog, Agents, PluginDetail, Namespaces or Pods. Inverting would mark the band on all six,
+// none of which shows a session for the figures to be mistaken for — trading a hypothetical
+// missing marker for six real spurious ones.
+//
+// So the allowlist stays and this test guards it the way TestPaneKeysCoverAllPanes guards
+// paneKeys: enumerate the real pane range, and require each pane to appear below. Adding a
+// paneID fails here until someone decides which half it belongs in.
+func TestSpendBandNeedsScopeMarker_EveryPaneIsClassified(t *testing.T) {
+	// The panes that show ONE session's content, and so need the band's scope spelled out.
+	singleSession := map[paneID]bool{
+		paneEvents: true, // one session's timeline
+		paneDetail: true, // one event of it, manifest view included
+	}
+	// The panes that do not. Usage is listed here for its own reason: it states its scope in
+	// its own header, and a user who scoped it to one session chose that.
+	manySessions := map[paneID]bool{
+		paneSessions: true, panePipeline: true, panePluginDetail: true,
+		paneCatalog: true, paneUsage: true, paneAgents: true,
+		paneNamespaces: true, panePods: true,
+	}
+
+	for p := paneID(0); p <= lastPaneID; p++ {
+		if singleSession[p] == manySessions[p] {
+			t.Errorf("pane %v is in %d of the two lists, want exactly 1 — classify it, and "+
+				"if it shows one session add it to spendBandNeedsScopeMarker too",
+				p, map[bool]int{true: 2, false: 0}[singleSession[p]])
+			continue
+		}
+		// A session is selected throughout: that is the state the marker exists for, and the
+		// state every pane is reachable in.
+		m := &model{pane: p, selectedSess: "s1"}
+		if got := m.spendBandNeedsScopeMarker(); got != singleSession[p] {
+			t.Errorf("pane %v: spendBandNeedsScopeMarker() = %v, want %v", p, got, singleSession[p])
+		}
 	}
 }

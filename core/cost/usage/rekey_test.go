@@ -56,7 +56,10 @@ func TestRekeyed_RenamesThePendingBucketInEveryAgentsRing(t *testing.T) {
 
 	a.Rekeyed("pending:bob-shell", "task-1")
 
-	for agent, want := range map[string]int64{"bob-shell": 13, "claude-code": 17} {
+	// Looked up by the FOLDED name: the ring keys Bob's ring "bob" however the
+	// event's client was labelled, so the pre-convergence "bob-shell" label above
+	// and today's query spell one agent.
+	for agent, want := range map[string]int64{"bob": 13, "claude-code": 17} {
 		series := mergeSeries(a.AgentSnapshot(10*time.Minute, BucketWidth, "", agent, GroupSession).Buckets)
 		if _, ok := series["pending:bob-shell"]; ok {
 			t.Errorf("%s's ring still names the adopted pending bucket: %v", agent, series)

@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/rossoctl/cortex/cmd/agentop/apiclient"
+	"github.com/rossoctl/cortex/cmd/agentop/tui/table"
 	"github.com/rossoctl/cortex/core/cost/usage"
 	"github.com/rossoctl/cortex/core/pipeline"
 )
@@ -572,6 +573,85 @@ func TestFetchSpendDrawer_AsksForTheDrawersAxis(t *testing.T) {
 	// never be scoped to whichever session a pane happens to have selected.
 	if got := q.Get("session"); got != "" {
 		t.Errorf("session = %q; the poll must cover every session", got)
+	}
+}
+
+// ON THE AGENTS PANE the drawer breaks down THE ROW UNDER THE CURSOR, not the committed
+// scope: the same row Enter would commit, read at fetch time and never stored, so `$` stays
+// pure inspection and Enter remains the only key that narrows anything. Everywhere else the
+// committed scope governs as before — including the band above the drawer, which is why the
+// two can name different agents on one screen; the drawer's caption says which one it holds
+// (TestRenderSpendDrawer_HeadersNameTheScopedAgent), and that is the reconciliation.
+func TestFetchSpendDrawer_AgentsPaneScopesToTheHighlightedRow(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pane   paneID
+		scope  string // the committed scope, m.agentScope
+		cursor int    // the highlighted row: 0 is All agents, 1.. the agents in order
+		want   string // the agent the request must carry; "" means no agent parameter at all
+	}{
+		{
+			name:   "the highlighted row wins over the committed scope",
+			pane:   paneAgents,
+			scope:  "claude-code/2.1.270",
+			cursor: 2,
+			want:   "bob-shell/2.0.5",
+		},
+		{
+			name:   "the All agents row is unscoped",
+			pane:   paneAgents,
+			cursor: 0,
+			want:   "",
+		},
+		{
+			name:   "off the pane the committed scope governs",
+			pane:   paneSessions,
+			scope:  "claude-code/2.1.270",
+			cursor: 2,
+			want:   "claude-code/2.1.270",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.RawQuery
+				// The agent is ECHOED, as the real server does: fetchUsageScoped treats a reply
+				// that does not name the agent it was asked for as an old server ignoring agent=,
+				// and re-asks unscoped — which would overwrite gotQuery with the fallback's
+				// query and fail this test for a reason that is not the one under test.
+				agent := r.URL.Query().Get("agent")
+				_, _ = w.Write([]byte(`{"window":"1h","group":"model","agent":"` + agent + `","buckets":[],"totals":{}}`))
+			}))
+			defer ts.Close()
+
+			m := &model{
+				pane:       tc.pane,
+				client:     apiclient.New(ts.URL),
+				agentScope: tc.scope,
+				agents:     navRows(),
+				agentsTbl:  newAgentsTable(),
+			}
+			// Rows on the table only so the cursor index is real; selectedAgentScope reads
+			// the label from pickerRows (m.agents), never from the rendered cell.
+			m.agentsTbl.SetRows([]table.Row{
+				{"All agents"}, {"claude-code/2.1.270"}, {"bob-shell/2.0.5"},
+			})
+			setCursorVisible(&m.agentsTbl, tc.cursor)
+			cmd := m.fetchSpendDrawer()
+			if cmd == nil {
+				t.Fatal("fetchSpendDrawer returned no command with a client set")
+			}
+			if _, ok := cmd().(spendDrawerLoadedMsg); !ok {
+				t.Fatalf("fetchSpendDrawer produced %T, want spendDrawerLoadedMsg", cmd())
+			}
+			q, err := url.ParseQuery(gotQuery)
+			if err != nil {
+				t.Fatalf("unparseable query %q: %v", gotQuery, err)
+			}
+			if got := q.Get("agent"); got != tc.want {
+				t.Errorf("agent = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1329,7 +1409,7 @@ func TestSpendSummary_AFailedWindowPollStillCarriesTheDayFigure(t *testing.T) {
 	// And the LIVE renderer really shows it, so the two halves are joined rather than each
 	// correct in isolation. Against renderSpendBand for the reason above: through
 	// renderSpendStrip this half vouched for a renderer paneView no longer called.
-	band := strings.Join(renderSpendBand(got, 200), "\n")
+	band := strings.Join(renderSpendBand(got, 200, false), "\n")
 	// $30.94, not $30.93: 30_935_000 micros is exactly half a cent over $30.93, and money now
 	// rounds HALF-UP FROM MICROS so that this cell and `agentop cost`'s headline answer identically.
 	// %.2f gave $30.93 here, because 30.935 has no exact binary form and lands a shade below the

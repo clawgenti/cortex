@@ -78,6 +78,8 @@ func fullEvent() pipeline.SessionEvent {
 		// Set only when a plugin redirected the request; differs from Host on purpose,
 		// so an assertion cannot pass by reading the wrong one.
 		RequestedHost: "requested.example.com",
+		// Set only when the client asked to switch protocol, which is almost never.
+		UpgradeStripped: "websocket",
 	}
 }
 
@@ -144,6 +146,13 @@ func TestSummarizeEvent_DropsPayloadsKeepsTimelineFields(t *testing.T) {
 	if got.RequestedHost != full.RequestedHost {
 		t.Errorf("requestedHost = %q, want %q — the detail pane's redirected: line reads it",
 			got.RequestedHost, full.RequestedHost)
+	}
+	// upgradeStripped is kept for the same reason as requestedHost: the detail pane's
+	// upgrade: line reads it off the projected event, and a 405 whose explanation only
+	// appears after a round trip is the confusion this field exists to end.
+	if got.UpgradeStripped != full.UpgradeStripped {
+		t.Errorf("upgradeStripped = %q, want %q — the detail pane's upgrade: line reads it",
+			got.UpgradeStripped, full.UpgradeStripped)
 	}
 	if got.Direction != full.Direction || got.Phase != full.Phase {
 		t.Error("direction/phase did not survive")
@@ -332,7 +341,10 @@ func TestSummarizeEvent_ShapeIsGuarded(t *testing.T) {
 		// 25 since RequestedHost, which is kept: agentop's detail pane draws its
 		// redirected: line from the projected event before the full one arrives. A
 		// scalar, so the struct copy keeps it; asserted above.
-		{"SessionEvent", reflect.TypeOf(pipeline.SessionEvent{}), 25},
+		// 26 since UpgradeStripped, which is kept as RequestedHost is: agentop's detail
+		// pane draws its upgrade: line from the projected event. A scalar, capped at
+		// maxClientLen, so it is not what view=summary exists to remove; asserted above.
+		{"SessionEvent", reflect.TypeOf(pipeline.SessionEvent{}), 26},
 		// 25 since AgentRole, which is TIMELINE data: agentop's CONTEXT gauge reads it on every
 		// row the timeline serves. It needs no assertion of its own in the projection test
 		// beyond the equality one there — a scalar survives the struct copy, unlike the two

@@ -41,7 +41,7 @@ Verify by sending one chat message and getting a weather response. Once that wor
 
 Download a prebuilt `agentop` (linux/macOS, amd64/arm64) from the
 [Releases page](https://github.com/rossoctl/cortex/releases) — see
-[Download prebuilt binaries](../../docs/architecture.md#download-prebuilt-binaries) for verify + macOS
+[Download prebuilt binaries](../../CONTRIBUTING.md#prebuilt-release-binaries) for verify + macOS
 quarantine steps — and put it on your PATH.
 
 Or build it from source:
@@ -71,9 +71,14 @@ automatically and drops you into the **Sessions** pane:
 │  (no sessions yet)                                                             │
 │                                                                                │
 │  ● connected   0.0 events/sec                                                  │
-│  [↑↓] nav  [↵] drill  [/] search  [p] pause  [P] pipeline  [?] help  [q]      │
+│ … [$] spend  [/] search  [esc] pods  [p] pause  [P] plugins  [?] keys  [q] quit│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 ```
+
+The footer's leading `…` is agentop's, not a typo on this page: the full
+hint line is 109 columns and the terminal drawn here is 80, so `[↑↓] nav`,
+`[↵] drill` and `[u] usage` have been dropped from the front to fit. Widen
+the terminal and they come back. `[?]` lists every key at any width.
 
 Esc backs you out to the Pods pane (and tears down the port-forward) so
 you can switch pods without quitting. `--endpoint http://...` skips the

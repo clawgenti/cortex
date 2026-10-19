@@ -182,8 +182,11 @@ func renderEffective(body []byte, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "\n  no gateway discount applies to this endpoint; rates above are %s\n", base)
 	}
 	if len(breakpoints) > 0 {
+		// "its breakpoint", not "that breakpoint": the list can hold more than one now
+		// (Anthropic prices above 200k, OpenAI above 272k), and the singular read as
+		// though every model shared the one figure.
 		fmt.Fprintf(stdout, "  long-context rates apply above %s prompt tokens; the indented line under a\n"+
-			"  model is what a request past that breakpoint is charged\n", breakpointList(breakpoints))
+			"  model is what a request past its own breakpoint is charged\n", breakpointList(breakpoints))
 	}
 	return 0
 }

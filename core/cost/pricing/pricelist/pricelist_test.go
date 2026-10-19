@@ -110,14 +110,37 @@ func TestFetch_AnUnchangedListIsNotDownloadedAgain(t *testing.T) {
 	}
 }
 
+// An OpenAI-only list is usable, which is the other half of the case above: the
+// allow-list carries two providers now, so neither one alone makes a list unusable.
+// Without this, deleting openai from the allow-list would leave the suite green —
+// the refusal case above would simply start passing for the wrong reason.
+func TestFetch_AcceptsAnOpenAIOnlyList(t *testing.T) {
+	s := &server{body: `{"gpt-9": {"litellm_provider": "openai", "input_cost_per_token": 1e-06}}`}
+	f, _ := newFetcher(t, s)
+	l, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch refused an openai-only list: %v", err)
+	}
+	if l == nil || len(l.Entries) == 0 {
+		t.Fatalf("Fetch returned no entries for an openai-only list: %v", l)
+	}
+	if l.Entries[0].Model != "gpt-9" {
+		t.Errorf("entry = %q, want gpt-9", l.Entries[0].Model)
+	}
+}
+
 func TestFetch_RefusesAListItCannotUse(t *testing.T) {
 	for name, s := range map[string]*server{
-		"server error":     {code: http.StatusInternalServerError},
-		"not json":         {body: "<html>rate limited</html>"},
-		"no anthropic row": {body: `{"gpt-9": {"litellm_provider": "openai", "input_cost_per_token": 1e-06}}`},
-		"no rate":          {body: rateless},
-		"renamed rate":     {body: `{"claude-opus-9": {"litellm_provider": "anthropic", "input_cost_per_token_v2": 4e-06}}`},
-		"too large":        {body: `{"x": "` + strings.Repeat("a", maxBytes) + `"}`},
+		"server error": {code: http.StatusInternalServerError},
+		"not json":     {body: "<html>rate limited</html>"},
+		// A row from a provider the bundled table does not carry. Was "no anthropic
+		// row" with an openai body, which stopped being unusable when openai joined
+		// the allow-list — vertex_ai is a real mirror we still exclude, so the case
+		// keeps testing what it was for: a list with nothing we can price from.
+		"no bundled provider": {body: `{"vertex_ai/claude-opus-9": {"litellm_provider": "vertex_ai", "input_cost_per_token": 4e-06}}`},
+		"no rate":             {body: rateless},
+		"renamed rate":        {body: `{"claude-opus-9": {"litellm_provider": "anthropic", "input_cost_per_token_v2": 4e-06}}`},
+		"too large":           {body: `{"x": "` + strings.Repeat("a", maxBytes) + `"}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, cache := newFetcher(t, s)

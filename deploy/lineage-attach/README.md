@@ -21,9 +21,12 @@ additive, it is reversible with one printed reverse patch, and it is the same
 for every workload in the fleet — an agent, a tool, a relay, a service nobody
 remembers writing.
 
-> **Until a release carries the plugin, build the sidecar yourself.** The
-> published `ghcr.io/rossoctl/cortex/authbridge-envoy` image does not carry
-> `lineage-telemetry`, so the generator **refuses** to emit a patch that pins
+> **On a sidecar image old enough not to carry the plugin, build it yourself.**
+> The published `ghcr.io/rossoctl/cortex/authbridge-envoy` image has carried
+> `lineage-telemetry` since the plugin landed (it is a member of the `envoy`
+> profile, so every image built from that profile registers it), but an image
+> pinned to a tag from before it does not. Against such an image the generator
+> **refuses** to emit a patch that pins
 > it (set `SIDECAR_IMAGE`, or `NO_EMIT=1`). What the refusal prevents: the
 > sidecar crashloops on the unknown plugin name (`plugins.Build` fails
 > closed), its startupProbe never passes, the app container never starts, and
@@ -58,8 +61,6 @@ pair is joined by `lineage.exchange.id` (the request span's own id):
 
 The attributes are the plugin's: [`plugin-catalog.md`](../../docs/plugin-catalog.md#lineage-telemetry)
 lists its knobs, [`lineage-wire-contract.md`](../../docs/lineage-wire-contract.md) the wire format.
-(Both docs arrive with the `lineage-telemetry` plugin in cortex #761; the links
-resolve once it lands.)
 
 A well-propagated trace has exactly one unstamped hop, at the entry: `wire`
 when the caller sent a `traceparent`, `none` when it sent nothing. Every other

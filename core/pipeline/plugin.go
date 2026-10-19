@@ -252,12 +252,10 @@ type Finisher interface {
 //     the duration of the call. Plugins that need to retain bytes
 //     must copy.
 //   - A non-Continue Action returned mid-stream stops further
-//     dispatch for that frame and rejects the response. Listener
-//     ordering varies: forwardproxy invokes OnResponseFrame before
-//     emitting frame bytes, while reverseproxy emits frame bytes
-//     first (FlushInterval=-1 ferries each Read straight to the
-//     client) and then dispatches. Either way previously-emitted
-//     frames cannot be un-sent, so a mid-stream Reject results in
+//     dispatch for that frame and rejects the response. Both
+//     proxies dispatch a frame's payload before writing its bytes,
+//     so a Reject keeps the rejected frame off the wire; but
+//     previously-emitted frames cannot be un-sent, so a mid-stream Reject results in
 //     a truncated stream rather than a 4xx/5xx response. Today no
 //     in-tree plugin returns Reject from this hook; the contract
 //     leaves the door open for per-message enforcement to be added

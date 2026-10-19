@@ -3,78 +3,89 @@
 # Regenerate the asset after editing:  go run .
 # CI fails if docs/assets/cortex-demo.svg does not match this file.
 #
-# Every string in the shell act is copied from the real source, not paraphrased.
-# The sources are scripts/install.sh (the download line) and agentop setup, which
-# install.sh execs: cmd/agentop/cmd_setup.go, cmd/agentop/setup_step_*.go and
-# cmd/agentop/checklist. grep a quoted fragment below to find the line it came from,
-# rather than trusting a line number here. Most of these strings interpolate a variable
-# at source, so grep a literal prefix of one rather than the whole rendered line. Setup's
-# lines are the plain-mode output its e2e tests assert (setup_e2e_test.go), with the
-# demo's version in place of the tests' v9.9.9.
+# The shell acts follow the README's quick start command for command: install, connect
+# the agent in a new terminal, run it as usual, and watch it in another.
+#
+# Every string in the shell acts is copied from the real source, not paraphrased.
+# The sources are scripts/install.sh (the title and the progress bar); agentop setup,
+# which install.sh execs: cmd/agentop/cmd_setup.go, cmd/agentop/setup_step_*.go and
+# cmd/agentop/checklist; and agentop configure claude-code: cmd/agentop/cmd_claudecode.go.
+# grep a quoted fragment below to find the line it came from, rather than trusting a
+# line number here. Most of these strings interpolate a variable at source, so grep a
+# literal prefix of one rather than the whole rendered line. Configure's lines are
+# cmd_claudecode_characterize_test.go's, with /Users/you as the home directory.
 # If those strings change, change them here too — the demo claims to be cortex.
 #
-# Plain mode, because a shell act only adds rows. On a real terminal the download line
-# is a title and a progress bar, which stay on screen in place of setup's header and its
-# "✓ downloaded" row; each ✓ line also shows how long its step took; and the CORTEX logo
-# and "v0.9.3 ready in Ns" replace "cortex v0.9.3 ready.". None of that can be drawn
-# here without inventing timings.
+# The install act is what a 120-column terminal shows, escapes included: install.sh's
+# title_line and done_line (its title right-aligned to column 78, a 40-cell bar), then
+# setup on a terminal, as setup_e2e_test.go's onScreen sees it with
+# CORTEX_INSTALLER_DREW=1. The colours are checklist.go's dark values — accent
+# 38;2;249;112;102, ok 38;2;110;231;183, faint 38;2;156;163;175 — and install.sh's bar
+# accent, 38;5;167. The download is v0.9.0-rc.3's two darwin/arm64 archives, 15.6 MB.
+# Two things a shell act cannot draw: the bar's percentage and byte count, which count
+# up as it fills, show only once it is full; and the spinner on a running step, which
+# the pause before its ✓ stands in for.
 
-total: 50s
+total: 58s
 grid:
   cols: 120
   rows: 34
 
 acts:
-  # Acts 1 and 2 of the storyboard are one continuous terminal, because
-  # --claude-code adds a "route Claude Code via Cortex" row to setup's one consent
-  # screen: the installer asks once, for everything, and routes Claude Code itself.
-  # So the consent prompt arrives in the middle of the install, with nothing typed
-  # but the y.
+  # The one-liner exactly as the README gives it, with no flags: setup asks once,
+  # for everything it will change, so the consent prompt arrives in the middle of the
+  # install with nothing typed but the y. Without --claude-code its closing hint
+  # names agentop exec, not configure; the next act is the README's next step.
   - name: install
     kind: shell
-    runtime: 14s
+    runtime: 13s
     steps:
-      - cmd: "curl -fsSL https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh | sh -s -- --claude-code"
+      - cmd: "curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh"
         out:
-          - "Downloading v0.9.3 for darwin/arm64..."
-          - "  rosso cortex · installer   v0.9.3 · darwin/arm64"
-          - "  ✓ downloaded   24.0 MB · sha256 verified"
+          - "  rosso cortex · installer                               v0.9.3 · darwin/arm64"
+          - "  \e[38;5;167m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m  100%  15.6 MB · sha256 ✓  2.0s"
           - ""
           - "  This will:"
-          - "    install  agentop, cortex         ~/.local/bin"
-          - "    add      ~/.local/bin to PATH    ~/.zshrc (2 marked lines)"
-          - "    write    the cortex config       ~/.cortex/config.yaml"
-          - "    run      the cortex proxy        launchd user agent · 127.0.0.1:47600"
-          - "    route    Claude Code via Cortex  ~/.claude/settings.json"
+          - "    install  agentop, cortex       \e[38;2;156;163;175m~/.local/bin\e[0m"
+          - "    add      ~/.local/bin to PATH  \e[38;2;156;163;175m~/.zshrc (2 marked lines)\e[0m"
+          - "    write    the cortex config     \e[38;2;156;163;175m~/.cortex/config.yaml\e[0m"
+          - "    run      the cortex proxy      \e[38;2;156;163;175mlaunchd user agent · 127.0.0.1:47600\e[0m"
           - ""
-          - "  Undo any time: agentop uninstall"
+          - "  \e[38;2;156;163;175mUndo any time: agentop uninstall\e[0m"
           - ""
           - "  Continue? [Y/n] y"
           - ""
-          - "  ✓ installed    agentop, cortex → ~/.local/bin"
-          - "  ✓ PATH         ~/.zshrc"
-          - "  ✓ config       ~/.cortex/config.yaml"
-          - "  ✓ started      launchd user agent · healthy on 127.0.0.1:47600"
-          - "  ✓ routed       Claude Code → Cortex"
+          - "  \e[38;2;110;231;183m✓\e[0m installed    agentop, cortex → ~/.local/bin                           \e[38;2;156;163;175m0.3s\e[0m"
+          - "  \e[38;2;110;231;183m✓\e[0m PATH         ~/.zshrc                                                 \e[38;2;156;163;175m0.1s\e[0m"
+          - "  \e[38;2;110;231;183m✓\e[0m config       ~/.cortex/config.yaml                                    \e[38;2;156;163;175m0.2s\e[0m"
+          - "  \e[38;2;110;231;183m✓\e[0m started      launchd user agent · healthy on 127.0.0.1:47600          \e[38;2;156;163;175m1.3s\e[0m"
           - ""
-          - "  cortex v0.9.3 ready."
+          - "  \e[38;2;249;112;102m ██████╗ ██████╗ ██████╗ ████████╗███████╗██╗  ██╗\e[0m"
+          - "  \e[38;2;249;112;102m██╔════╝██╔═══██╗██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝\e[0m"
+          - "  \e[38;2;249;112;102m██║     ██║   ██║██████╔╝   ██║   █████╗   ╚███╔╝\e[0m"
+          - "  \e[38;2;249;112;102m██║     ██║   ██║██╔══██╗   ██║   ██╔══╝   ██╔██╗\e[0m"
+          - "  \e[38;2;249;112;102m╚██████╗╚██████╔╝██║  ██║   ██║   ███████╗██╔╝ ██╗\e[0m"
+          - "  \e[38;2;249;112;102m ╚═════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝\e[0m"
+          - ""
+          - "    v0.9.3 ready in 1.9s"
           - ""
           - "  Open a new terminal, then:"
           - ""
-          - "    agentop        # watch your agent traffic live"
+          - "    agentop exec -- <cmd>        \e[38;2;156;163;175m# send an agent through Cortex\e[0m"
           - ""
-          - "  Undo any time: agentop uninstall"
+          - "  \e[38;2;156;163;175mUndo any time: agentop uninstall\e[0m"
         # The long pause on the download is the trick that makes an authored
-        # sequence read as a machine doing work rather than a text dump. Setup prints
-        # its header and the whole consent screen at once, then each ✓ as its step
-        # ends; the wait for /healthz is the long one.
+        # sequence read as a machine doing work rather than a text dump: the bar fills
+        # through it. Setup then prints the whole consent screen at once, and each ✓ as
+        # its step ends; the wait for /healthz is the long one. Each ✓ shows the pause
+        # before it as its time, and "ready in" is their sum.
+        ansi: true
+        bar: 1
         slow:
           - 150ms
-          - 2400ms
-          - 30ms
-          - 30ms
+          - 2000ms
           - 250ms
-          - 40ms
+          - 30ms
           - 40ms
           - 40ms
           - 40ms
@@ -85,12 +96,18 @@ acts:
           - 1200ms
           - 30ms
           - 300ms
-          - 150ms
-          - 250ms
+          - 100ms
+          - 200ms
           - 1300ms
-          - 250ms
           - 30ms
-          - 120ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
           - 30ms
           - 30ms
           - 30ms
@@ -98,9 +115,62 @@ acts:
           - 30ms
           - 30ms
 
-  # Three Claude Code sessions, one per working directory. These are the same
-  # three the next act opens on: agentop names sessions from Claude Code metadata,
-  # so the reader should recognise them by title.
+  # A new terminal, because the PATH edit reaches only new ones — and a new screen,
+  # which is what lets configure's preview fit. The macOS note is printed on every
+  # darwin enable that has something to write, so it stays.
+  - name: connect
+    kind: shell
+    runtime: 7s
+    steps:
+      - cmd: "agentop configure claude-code enable"
+        out:
+          - "Note: on macOS, Go tools (go, gh, helm) trust only the keychain, so unless"
+          - "  macOS trusts Cortex's CA, Cortex passes their HTTPS through unread rather"
+          - "  than breaking them. To have Cortex read them:"
+          - "    security add-trusted-cert -k ~/Library/Keychains/login.keychain-db -p ssl \\"
+          - "      /Users/you/.cortex/ca/ca.crt"
+          - "  (undo: security delete-certificate -c authbridge-tls-bridge-ca \\"
+          - "     ~/Library/Keychains/login.keychain-db)"
+          - ""
+          - "Adds to the \"env\" block of /Users/you/.claude/settings.json:"
+          - "  HTTPS_PROXY=http://127.0.0.1:47600"
+          - "  NODE_EXTRA_CA_CERTS=/Users/you/.cortex/ca/ca.crt"
+          - "  SSL_CERT_FILE=/Users/you/.cortex/ca/bundle.crt"
+          - "  GIT_SSL_CAINFO=/Users/you/.cortex/ca/bundle.crt"
+          - "  REQUESTS_CA_BUNDLE=/Users/you/.cortex/ca/bundle.crt"
+          - "  CURL_CA_BUNDLE=/Users/you/.cortex/ca/bundle.crt"
+          - "  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
+          - "Nothing else in the file changes; a copy is kept as /Users/you/.claude/settings.json.bak"
+          - ""
+          - "Apply? [y/N] y"
+          - "Enabled — run `claude` as usual."
+        # Everything up to the prompt prints at once; the pause before the y is the
+        # reader's time to take in what will be written.
+        slow:
+          - 200ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 30ms
+          - 1500ms
+          - 300ms
+
+  # Three Claude Code sessions, one per working directory, each started the way it
+  # always was. These are the same three agentop opens on: it names sessions from
+  # Claude Code metadata, so the reader should recognise them by title.
   - name: sessions
     kind: windows
     runtime: 6s
@@ -120,6 +190,14 @@ acts:
           - "$ claude"
           - "▸ debug the helm chart"
           - "  Bash helm template ."
+
+  # In another terminal, the command that opens the next act. Nothing else on screen
+  # names it now that setup's closing hint is agentop exec.
+  - name: observe
+    kind: shell
+    runtime: 2s
+    steps:
+      - cmd: "agentop observe"
 
   # Where did the money go? Answered with evidence, in the real agentop.
   - name: insights

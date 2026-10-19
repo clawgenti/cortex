@@ -12,7 +12,7 @@
 //
 // It carries no rate options either. input_cost_per_token and its three siblings were REMOVED,
 // and a config still setting them now fails to start with the field named — see
-// docs/litellm-budgettrack-plugin.md. It requires inference-parser LATER in the
+// docs/litellm-budget-track-plugin.md. It requires inference-parser LATER in the
 // chain, because the response pass runs in reverse; see Capabilities.
 //
 // What it does still own about cost is the DRIFT CHECK in drift.go: the rate table measured
@@ -138,7 +138,7 @@ func (p *BudgetTrack) Configure(raw json.RawMessage) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p.cfg); err != nil {
-		return fmt.Errorf("litellm-budget-track config: %w (rates moved to the top-level `pricing:` section; see docs/litellm-budgettrack-plugin.md)", err)
+		return fmt.Errorf("litellm-budget-track config: %w (rates moved to the top-level `pricing:` section; see docs/litellm-budget-track-plugin.md)", err)
 	}
 	// Decode stops at the first JSON value, so trailing content was silently
 	// accepted — a regression from json.Unmarshal, which rejected it. Switching to a

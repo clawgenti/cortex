@@ -717,7 +717,7 @@ func TestAgentsPane_RefreshKeepsTheCursorOnItsAgent(t *testing.T) {
 			if got, _ := m.selectedAgentScope(); got != "opencode" {
 				t.Fatalf("fixture cursor is on %q, want opencode", got)
 			}
-			m.Update(agentRowsLoadedMsg{rows: tc.after, open: agentsOpenNever})
+			m.Update(agentRowsLoadedMsg{rows: tc.after, open: agentsOpenNever, window: usage.WindowToday})
 			if got, _ := m.selectedAgentScope(); got != "opencode" {
 				t.Errorf("after the refresh the cursor selects %q, want opencode", got)
 			}
