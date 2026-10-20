@@ -9,6 +9,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/rossoctl/cortex/core/pipeline"
+	"github.com/rossoctl/cortex/core/plugins/internal/parsercommon"
 )
 
 func TestInferenceParser_ResponsesAPI_Request(t *testing.T) {
@@ -267,12 +268,12 @@ func TestInferenceParser_ResponsesAPI_StringInput(t *testing.T) {
 
 // zstd.NewReader defaults to a 64 GiB decoded-size limit — far beyond the 32 MiB wire-size
 // cap the listener already enforces for the compressed body. Pins that a payload
-// decompressing past maxDecodedRequestSize is rejected (treated as unreadable, same as any
+// decompressing past parsercommon.MaxDecodedRequestSize is rejected (treated as unreadable, same as any
 // other body this parser can't use) rather than allowed to grow unbounded.
 func TestInferenceParser_ResponsesAPI_ZstdDecodeSizeCapped(t *testing.T) {
 	// A single repeated byte compresses to a tiny fraction of its decoded size, which is
 	// exactly the "small wire body, huge decoded body" shape the cap defends against.
-	huge := bytes.Repeat([]byte("a"), maxDecodedRequestSize+1)
+	huge := bytes.Repeat([]byte("a"), parsercommon.MaxDecodedRequestSize+1)
 	enc, err := zstd.NewWriter(nil)
 	if err != nil {
 		t.Fatalf("zstd.NewWriter: %v", err)
@@ -283,12 +284,12 @@ func TestInferenceParser_ResponsesAPI_ZstdDecodeSizeCapped(t *testing.T) {
 	}
 	t.Logf("huge body: %d bytes decoded, %d bytes compressed", len(huge), len(compressed))
 
-	out := maybeDecompressRequest(http.Header{"Content-Encoding": []string{"zstd"}}, compressed)
+	out := parsercommon.DecodeRequestBody(http.Header{"Content-Encoding": []string{"zstd"}}, compressed)
 	if len(out) == len(huge) {
-		t.Fatal("decompression succeeded past maxDecodedRequestSize — the cap did not apply")
+		t.Fatal("decompression succeeded past parsercommon.MaxDecodedRequestSize — the cap did not apply")
 	}
 	// Rejected decompression falls back to the original (still-compressed) bytes per
-	// maybeDecompressRequest's documented contract.
+	// parsercommon.DecodeRequestBody's documented contract.
 	if !bytes.Equal(out, compressed) {
 		t.Error("expected the original compressed bytes back when the decoded size cap is exceeded")
 	}
