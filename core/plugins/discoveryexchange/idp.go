@@ -211,3 +211,29 @@ func audienceContains(token, audience string) error {
 	}
 	return fmt.Errorf("issued token's audience %v does not include %q", auds, audience)
 }
+
+// tokenSubjectAndScopes returns a JWT's sub claim and its space-separated scope
+// claim, unverified, for the same reason as audienceContains. A token it cannot
+// decode yields zero values: the claims only enrich policy input.
+func tokenSubjectAndScopes(token string) (string, []string) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", nil
+	}
+	var claims struct {
+		Sub   string `json:"sub"`
+		Scope string `json:"scope"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return "", nil
+	}
+	scopes := strings.Fields(claims.Scope)
+	if len(scopes) == 0 {
+		scopes = nil
+	}
+	return claims.Sub, scopes
+}

@@ -4,9 +4,10 @@
 // caller is granted, "no such client" means the destination is not a target and
 // the request passes through, and every other answer denies.
 //
-// It shares no code with token-exchange, by design: the two are alternatives,
-// and a fix to one must not silently change the other. See
-// docs/discovery-exchange-plugin.md.
+// It shares no exchange code with token-exchange, by design: the two are
+// alternatives, and a fix to one must not silently change the other. Both read
+// the bearer and name their no-token policies through core/auth, so a request
+// carries the same meaning under either. See docs/discovery-exchange-plugin.md.
 package discoveryexchange
 
 import (
@@ -21,20 +22,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rossoctl/cortex/core/auth"
 	"github.com/rossoctl/cortex/core/config"
 	"github.com/rossoctl/cortex/core/pipeline"
+	"github.com/rossoctl/cortex/core/placeholder"
 	"github.com/rossoctl/cortex/core/plugins"
 )
 
 // PluginName is the name the plugin registers under and is configured by.
 const PluginName = "discovery-exchange"
-
-// no_token_policy values.
-const (
-	noTokenClientCredentials = "client-credentials"
-	noTokenPassthrough       = "passthrough"
-	noTokenDeny              = "deny"
-)
 
 // Invocation reasons, machine-stable.
 const (
@@ -45,6 +41,8 @@ const (
 	reasonNotGranted        = "audience_not_granted"
 	reasonExchangeFailed    = "exchange_failed"
 	reasonCredentialsAbsent = "credentials_not_ready"
+
+	reasonPlaceholderUnresolved = "placeholder_unresolved"
 )
 
 // selfTokenKey caches the caller's own client-credentials token. It cannot
@@ -68,9 +66,12 @@ type discoveryExchangeConfig struct {
 	ClusterDomain    string `json:"cluster_domain" description:"Cluster DNS domain; hosts ending in .svc.<cluster_domain> are in-cluster." default:"cluster.local"`
 	Namespace        string `json:"namespace" description:"Namespace assumed for short service names, for templates that use {namespace}. Typically ${POD_NAMESPACE}."`
 
-	NoTokenPolicy      string `json:"no_token_policy" description:"Outbound request with no bearer: exchange the workload's own client-credentials token, pass through, or deny." default:"client-credentials" enum:"client-credentials,passthrough,deny"`
+	NoTokenPolicy      string `json:"no_token_policy" description:"Outbound request with no bearer: exchange the workload's own client-credentials token, allow it through unchanged, or deny." default:"deny" enum:"client-credentials,allow,deny"`
 	UnknownAudienceTTL string `json:"unknown_audience_ttl" description:"How long an audience the IdP does not know is passed through without asking again. 0 asks every time." default:"5m"`
 	Timeout            string `json:"timeout" description:"Timeout for each call to the token endpoint." default:"5s"`
+
+	// ResolvePlaceholders matches token-exchange's option of the same name.
+	ResolvePlaceholders bool `json:"resolve_placeholders" default:"false" description:"Resolve an outbound bearer carrying the placeholder prefix from the shared store to the real token before exchange. Unresolvable placeholders are denied (fail closed)."`
 }
 
 func (c *discoveryExchangeConfig) applyDefaults() {
@@ -90,7 +91,7 @@ func (c *discoveryExchangeConfig) applyDefaults() {
 		c.ClusterDomain = "cluster.local"
 	}
 	if c.NoTokenPolicy == "" {
-		c.NoTokenPolicy = noTokenClientCredentials
+		c.NoTokenPolicy = auth.NoTokenPolicyDeny
 	}
 	if c.UnknownAudienceTTL == "" {
 		c.UnknownAudienceTTL = "5m"
@@ -112,10 +113,10 @@ func (c *discoveryExchangeConfig) validate() (settings, error) {
 		return s, errors.New("token_url is required (or keycloak_url and keycloak_realm)")
 	}
 	switch c.NoTokenPolicy {
-	case noTokenClientCredentials, noTokenPassthrough, noTokenDeny:
+	case auth.NoTokenPolicyClientCredentials, auth.NoTokenPolicyAllow, auth.NoTokenPolicyDeny:
 	default:
 		return s, fmt.Errorf("no_token_policy must be %s, %s or %s, got %q",
-			noTokenClientCredentials, noTokenPassthrough, noTokenDeny, c.NoTokenPolicy)
+			auth.NoTokenPolicyClientCredentials, auth.NoTokenPolicyAllow, auth.NoTokenPolicyDeny, c.NoTokenPolicy)
 	}
 	var err error
 	if s.unknownTTL, err = time.ParseDuration(c.UnknownAudienceTTL); err != nil || s.unknownTTL < 0 {
@@ -266,6 +267,20 @@ func (p *DiscoveryExchange) OnRequest(ctx context.Context, pctx *pipeline.Contex
 		return pipeline.DenyStatus(http.StatusServiceUnavailable, "upstream.unreachable", PluginName+" not configured")
 	}
 
+	// Resolved before the host is looked at, as in token-exchange: an
+	// unresolvable placeholder is denied whatever the destination. Only the
+	// exchange sees the real token; a request that passes through keeps the
+	// placeholder.
+	subject := auth.ExtractBearer(pctx.Headers.Get("Authorization"))
+	if p.cfg.ResolvePlaceholders && placeholder.IsPlaceholder(subject) {
+		real, ok := resolvePlaceholder(pctx, subject)
+		if !ok {
+			p.denied.Add(1)
+			return pctx.DenyAndRecord(reasonPlaceholderUnresolved, "auth.unauthorized", "unresolvable credential placeholder")
+		}
+		subject = real
+	}
+
 	t, why := p.targets.resolve(pctx.Host)
 	if why != "" {
 		p.notEligible.Add(1)
@@ -285,15 +300,14 @@ func (p *DiscoveryExchange) OnRequest(ctx context.Context, pctx *pipeline.Contex
 			"upstream.token-exchange-failed", "client credentials are not loaded yet")
 	}
 
-	subject := bearer(pctx.Headers.Get("Authorization"))
 	if subject == "" {
 		switch p.cfg.NoTokenPolicy {
-		case noTokenPassthrough:
+		case auth.NoTokenPolicyAllow:
 			pctx.Record(pipeline.Invocation{Action: pipeline.ActionSkip, Reason: reasonNoToken, Details: details})
 			return pipeline.Action{Type: pipeline.Continue}
-		case noTokenDeny:
+		case auth.NoTokenPolicyDeny:
 			return p.deny(pctx, details, reasonNoToken, http.StatusUnauthorized,
-				"auth.unauthorized", "outbound request carries no bearer token")
+				"auth.unauthorized", "missing Authorization header")
 		}
 		self, err := p.selfToken(ctx, *creds)
 		if err != nil {
@@ -334,6 +348,20 @@ func (p *DiscoveryExchange) OnRequest(ctx context.Context, pctx *pipeline.Contex
 	}
 }
 
+// resolvePlaceholder looks a handle up in the shared store. Returns ok=false
+// (fail closed) when no store is wired or the handle is unknown or expired.
+func resolvePlaceholder(pctx *pipeline.Context, handle string) (string, bool) {
+	if pctx.Shared == nil {
+		return "", false
+	}
+	v, ok := pctx.Shared.Get(placeholder.Key(handle))
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
 // selfToken returns this workload's own client-credentials token, cached.
 func (p *DiscoveryExchange) selfToken(ctx context.Context, creds credentials) (string, error) {
 	if tok, ok := p.tokens.get(selfTokenKey); ok {
@@ -354,8 +382,33 @@ func (p *DiscoveryExchange) replace(pctx *pipeline.Context, details map[string]s
 		reason = reasonCacheHit
 	}
 	details["cache_hit"] = boolString(cacheHit)
+	recordDelegationHop(pctx, token, details["target_audience"], cacheHit)
 	pctx.Record(pipeline.Invocation{Action: pipeline.ActionModify, Reason: reason, Details: details})
 	return pipeline.Action{Type: pipeline.Continue}
+}
+
+// recordDelegationHop appends the exchange to the delegation chain, which the
+// opa plugin exposes as input.delegation and, on the outbound leg, as
+// input.identity. Subject and scopes come from the issued token: it came from
+// the IdP over this plugin's own connection, so unlike the incoming bearer it
+// is not a value the workload chose. A validated inbound identity, when one is
+// present, names the subject instead.
+func recordDelegationHop(pctx *pipeline.Context, token, audience string, cacheHit bool) {
+	sub, scopes := tokenSubjectAndScopes(token)
+	if pctx.Identity != nil {
+		sub = pctx.Identity.Subject()
+	}
+	if pctx.Extensions.Delegation == nil {
+		pctx.Extensions.Delegation = &pipeline.DelegationExtension{}
+	}
+	pctx.Extensions.Delegation.AppendHop(pipeline.DelegationHop{
+		SubjectID: sub,
+		Scopes:    scopes,
+		Timestamp: time.Now(),
+		Audience:  audience,
+		Strategy:  PluginName,
+		FromCache: cacheHit,
+	})
 }
 
 // passUnknown forwards a request to a destination the IdP has no client for,
@@ -386,15 +439,6 @@ func (p *DiscoveryExchange) Metrics() []pipeline.Metric {
 		{Name: PluginName + ".not_eligible", Value: float64(p.notEligible.Load()), Unit: "count", Note: "requests to hosts not offered to the IdP"},
 		{Name: PluginName + ".denied", Value: float64(p.denied.Load()), Unit: "count"},
 	}
-}
-
-// bearer returns the token from an "Authorization: Bearer <token>" value, or "".
-func bearer(h string) string {
-	const prefix = "bearer "
-	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
-		return strings.TrimSpace(h[len(prefix):])
-	}
-	return ""
 }
 
 func boolString(b bool) string {

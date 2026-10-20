@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rossoctl/cortex/core/memstore"
 	"github.com/rossoctl/cortex/core/pipeline"
+	"github.com/rossoctl/cortex/core/placeholder"
 )
 
 // fakeKeycloak answers the token endpoint the way Keycloak 26.5's standard
@@ -77,7 +79,7 @@ func (kc *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case aud == "":
 			issue(w, []string{"github-tool", "weather-agent", "account"})
 		case kc.granted[aud]:
-			issue(w, []string{aud})
+			issueClaims(w, map[string]any{"aud": []string{aud}, "sub": "alice", "scope": "openid github-read"})
 		case kc.existing[aud]:
 			oauthError(w, 400, "invalid_request", "Requested audience not available: "+aud)
 		default:
@@ -89,7 +91,11 @@ func (kc *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func issue(w http.ResponseWriter, aud []string) {
-	payload, _ := json.Marshal(map[string]any{"aud": aud})
+	issueClaims(w, map[string]any{"aud": aud})
+}
+
+func issueClaims(w http.ResponseWriter, claims map[string]any) {
+	payload, _ := json.Marshal(claims)
 	enc := base64.RawURLEncoding.EncodeToString
 	tok := enc([]byte(`{"alg":"RS256"}`)) + "." + enc(payload) + ".sig"
 	w.Header().Set("Content-Type", "application/json")
@@ -181,6 +187,40 @@ func TestGrantedTargetIsExchangedAndCached(t *testing.T) {
 	}
 	if n := kc.calls.Load(); n != 1 {
 		t.Errorf("IdP calls = %d, want 1 (second request served from cache)", n)
+	}
+}
+
+// An exchange records a delegation hop, which the opa plugin turns into the
+// outbound input.identity; a request that is not exchanged records none.
+func TestExchangeRecordsDelegationHop(t *testing.T) {
+	_, srv := newFakeKeycloak(t)
+	p := configured(t, srv, "")
+
+	for i, wantCache := range []bool{false, true} {
+		pctx := outbound("github-tool", "Bearer user-token")
+		p.OnRequest(context.Background(), pctx)
+		d := pctx.Extensions.Delegation
+		if d == nil || len(d.Chain()) != 1 {
+			t.Fatalf("request %d: delegation = %+v, want one hop", i, d)
+		}
+		hop := d.Chain()[0]
+		if hop.SubjectID != "alice" || hop.Audience != "github-tool" || hop.Strategy != PluginName || hop.FromCache != wantCache {
+			t.Errorf("request %d: hop = %+v", i, hop)
+		}
+		if strings.Join(hop.Scopes, " ") != "openid github-read" {
+			t.Errorf("request %d: scopes = %v", i, hop.Scopes)
+		}
+		if d.Origin != "alice" || d.Actor != "alice" {
+			t.Errorf("request %d: origin/actor = %q/%q", i, d.Origin, d.Actor)
+		}
+	}
+
+	for _, host := range []string{"ollama", "hr-tool", "api.openai.com"} {
+		pctx := outbound(host, "Bearer user-token")
+		p.OnRequest(context.Background(), pctx)
+		if pctx.Extensions.Delegation != nil {
+			t.Errorf("%s: delegation recorded for a request that was not exchanged", host)
+		}
 	}
 }
 
@@ -329,7 +369,7 @@ func TestNoTokenClientCredentialsIsNarrowed(t *testing.T) {
 		defer mu.Unlock()
 		return append([]string(nil), grants...)
 	}
-	p := configured(t, srv, "")
+	p := configured(t, srv, `,"no_token_policy":"client-credentials"`)
 
 	pctx := outbound("github-tool", "")
 	if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
@@ -364,22 +404,147 @@ func TestNoTokenClientCredentialsIsNarrowed(t *testing.T) {
 func TestNoTokenPolicies(t *testing.T) {
 	kc, srv := newFakeKeycloak(t)
 
-	pass := configured(t, srv, `,"no_token_policy":"passthrough"`)
+	allow := configured(t, srv, `,"no_token_policy":"allow"`)
 	pctx := outbound("github-tool", "")
-	if a := pass.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
-		t.Errorf("passthrough: action = %v", a.Type)
+	if a := allow.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
+		t.Errorf("allow: action = %v", a.Type)
 	}
 	if pctx.Headers.Get("Authorization") != "" {
-		t.Error("passthrough added an Authorization header")
+		t.Error("allow added an Authorization header")
+	}
+	if inv := lastInvocation(t, pctx); inv.Reason != reasonNoToken {
+		t.Errorf("allow: reason = %s, want %s", inv.Reason, reasonNoToken)
 	}
 
-	deny := configured(t, srv, `,"no_token_policy":"deny"`)
-	a := deny.OnRequest(context.Background(), outbound("github-tool", ""))
-	if a.Type != pipeline.Reject || a.Violation.Status != http.StatusUnauthorized {
-		t.Errorf("deny: action = %v %+v, want 401", a.Type, a.Violation)
+	// deny is the default, as in token-exchange.
+	for name, extra := range map[string]string{"explicit": `,"no_token_policy":"deny"`, "default": ""} {
+		deny := configured(t, srv, extra)
+		a := deny.OnRequest(context.Background(), outbound("github-tool", ""))
+		if a.Type != pipeline.Reject || a.Violation.Status != http.StatusUnauthorized ||
+			a.Violation.Code != "auth.unauthorized" || a.Violation.Reason != "missing Authorization header" {
+			t.Errorf("deny (%s): action = %v %+v, want 401 auth.unauthorized", name, a.Type, a.Violation)
+		}
 	}
 	if n := kc.calls.Load(); n != 0 {
 		t.Errorf("IdP calls = %d, want 0", n)
+	}
+}
+
+// subjectSeen records the subject_token of every token exchange.
+func subjectSeen(kc *fakeKeycloak) func() []string {
+	var mu sync.Mutex
+	var subjects []string
+	kc.override = func(_ http.ResponseWriter, form map[string]string) bool {
+		if form["grant_type"] == grantTokenExchange {
+			mu.Lock()
+			subjects = append(subjects, form["subject_token"])
+			mu.Unlock()
+		}
+		return false
+	}
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), subjects...)
+	}
+}
+
+func withPlaceholder(t *testing.T, pctx *pipeline.Context, real string) string {
+	t.Helper()
+	st := memstore.New()
+	handle, err := placeholder.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Put(placeholder.Key(handle), real, time.Hour)
+	pctx.Shared = st
+	pctx.Headers.Set("Authorization", "Bearer "+handle)
+	return handle
+}
+
+func TestPlaceholderIsResolvedBeforeExchange(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	subjects := subjectSeen(kc)
+	p := configured(t, srv, `,"resolve_placeholders":true`)
+
+	pctx := outbound("github-tool", "")
+	withPlaceholder(t, pctx, "real-user-token")
+	if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
+		t.Fatalf("action = %v %+v", a.Type, a.Violation)
+	}
+	if got := subjects(); len(got) != 1 || got[0] != "real-user-token" {
+		t.Errorf("subject tokens = %v, want [real-user-token]", got)
+	}
+	if got := audOf(t, pctx); len(got) != 1 || got[0] != "github-tool" {
+		t.Errorf("forwarded aud = %v, want [github-tool]", got)
+	}
+}
+
+func TestPlaceholderIsNotResolvedByDefault(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	subjects := subjectSeen(kc)
+	p := configured(t, srv, "")
+
+	pctx := outbound("github-tool", "")
+	handle := withPlaceholder(t, pctx, "real-user-token")
+	p.OnRequest(context.Background(), pctx)
+	if got := subjects(); len(got) != 1 || got[0] != handle {
+		t.Errorf("subject tokens = %v, want the handle sent as is", got)
+	}
+}
+
+func TestUnresolvablePlaceholderIsDeniedForEveryHost(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	p := configured(t, srv, `,"resolve_placeholders":true`)
+	handle, _ := placeholder.New()
+
+	for _, host := range []string{"github-tool", "api.openai.com"} {
+		for name, shared := range map[string]bool{"no store": false, "unknown handle": true} {
+			pctx := outbound(host, "Bearer "+handle)
+			if shared {
+				pctx.Shared = memstore.New()
+			}
+			a := p.OnRequest(context.Background(), pctx)
+			if a.Type != pipeline.Reject || a.Violation.Code != "auth.unauthorized" {
+				t.Errorf("%s, %s: action = %v %+v, want auth.unauthorized", host, name, a.Type, a.Violation)
+				continue
+			}
+			if inv := lastInvocation(t, pctx); inv.Reason != reasonPlaceholderUnresolved {
+				t.Errorf("%s, %s: reason = %s", host, name, inv.Reason)
+			}
+		}
+	}
+	if n := kc.calls.Load(); n != 0 {
+		t.Errorf("IdP calls = %d, want 0", n)
+	}
+}
+
+func TestPassedThroughRequestKeepsThePlaceholder(t *testing.T) {
+	_, srv := newFakeKeycloak(t)
+	p := configured(t, srv, `,"resolve_placeholders":true`)
+
+	for _, host := range []string{"ollama", "api.openai.com"} {
+		pctx := outbound(host, "")
+		handle := withPlaceholder(t, pctx, "real-user-token")
+		if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
+			t.Fatalf("%s: action = %v %+v", host, a.Type, a.Violation)
+		}
+		if got := pctx.Headers.Get("Authorization"); got != "Bearer "+handle {
+			t.Errorf("%s: Authorization = %q, want the placeholder, never the real token", host, got)
+		}
+	}
+}
+
+// The bearer is read with auth.ExtractBearer, as in token-exchange: the
+// token is everything after "Bearer ", spaces included.
+func TestBearerIsTakenVerbatim(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	subjects := subjectSeen(kc)
+	p := configured(t, srv, "")
+
+	p.OnRequest(context.Background(), outbound("github-tool", "bearer  user-token"))
+	if got := subjects(); len(got) != 1 || got[0] != " user-token" {
+		t.Errorf("subject tokens = %q, want [\" user-token\"]", got)
 	}
 }
 
@@ -409,6 +574,7 @@ func TestConfigure(t *testing.T) {
 	cases := map[string]string{
 		"no token url":   `{"client_id":"a","client_secret":"b"}`,
 		"bad policy":     `{"token_url":"http://kc","no_token_policy":"exchange"}`,
+		"passthrough":    `{"token_url":"http://kc","no_token_policy":"passthrough"}`,
 		"bad template":   `{"token_url":"http://kc","audience_template":"fixed"}`,
 		"bad ttl":        `{"token_url":"http://kc","unknown_audience_ttl":"-1s"}`,
 		"bad timeout":    `{"token_url":"http://kc","timeout":"0s"}`,

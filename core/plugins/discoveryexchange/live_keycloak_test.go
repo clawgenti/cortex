@@ -73,7 +73,7 @@ func TestLiveKeycloak(t *testing.T) {
 	userToken := passwordGrant(t, tokenURL)
 
 	p := New()
-	cfg := fmt.Sprintf(`{"token_url":%q,"client_id":"agent","client_secret":"s3cret"}`, tokenURL)
+	cfg := fmt.Sprintf(`{"token_url":%q,"client_id":"agent","client_secret":"s3cret","no_token_policy":"client-credentials"}`, tokenURL)
 	if err := p.Configure(json.RawMessage(cfg)); err != nil {
 		t.Fatal(err)
 	}

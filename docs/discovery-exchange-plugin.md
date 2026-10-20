@@ -22,8 +22,11 @@ data:
 
 It is an **alternative** to [`token-exchange`](./plugin-catalog.md#token-exchange),
 not a complement. Both rewrite the outbound `Authorization` header, so put
-one or the other on a chain, never both. The two share no code, so a change to
-one can never quietly change the other.
+one or the other on a chain, never both. The two share no exchange code, so a
+change to one can never quietly change the other. They read the bearer the same
+way, though: both use `core/auth` to take it from `Authorization`, both name the
+no-token policies `allow`, `deny` and `client-credentials`, and both default to
+`deny`. See [Differences from `token-exchange`](#differences-from-token-exchange).
 
 ## What happens to each request
 
@@ -35,6 +38,7 @@ one can never quietly change the other.
 | In-cluster, client exists but is **not granted** to this workload | 400 `invalid_request` "Requested audience not available" | **403** | `deny / audience_not_granted` |
 | Keycloak down, timeout, 5xx, bad credentials, any other error | — | **503** | `deny / exchange_failed` |
 | Credentials not yet loaded from `/shared/` | not asked | **503** | `deny / credentials_not_ready` |
+| Any host, bearer is a placeholder that can't be resolved (`resolve_placeholders: true`) | not asked | **401** | `deny / placeholder_unresolved` |
 
 Two rules hold throughout:
 
@@ -89,9 +93,10 @@ pipeline:
           client_secret_file: /shared/client-secret.txt
           audience_template: "{service}"
           cluster_domain: cluster.local
-          no_token_policy: client-credentials
+          no_token_policy: deny
           unknown_audience_ttl: 5m
           timeout: 5s
+          resolve_placeholders: false
 ```
 
 | Field | Default | Meaning |
@@ -103,9 +108,10 @@ pipeline:
 | `audience_template` | `{service}` | Audience requested for a destination. Placeholders: `{service}`, `{namespace}`. Must contain `{service}`. |
 | `namespace` | — | Namespace assumed for short names, for templates that use `{namespace}`. Usually `${POD_NAMESPACE}`. Without it, short names pass through with `skip / namespace_unknown`. |
 | `cluster_domain` | `cluster.local` | Cluster DNS domain, for recognising FQDNs. |
-| `no_token_policy` | `client-credentials` | The request carries no bearer token: `client-credentials` exchanges the workload's own token (see below), `passthrough` forwards it, `deny` answers 401. |
+| `no_token_policy` | `deny` | The request carries no bearer token: `deny` answers 401, `allow` forwards it unchanged, `client-credentials` exchanges the workload's own token (see below). The same values and default as `token-exchange`. |
 | `unknown_audience_ttl` | `5m` | How long a destination Keycloak doesn't know is passed through without asking again. `0` asks on every request. |
 | `timeout` | `5s` | Timeout for each call to the token endpoint. |
+| `resolve_placeholders` | `false` | Resolve a placeholder bearer from the shared store before the exchange. See [Placeholder bearers](#placeholder-bearers). |
 
 There is no `routes`, `token_scopes`, `default_policy` or `audience_from_host`
 field. Configure rejects unknown fields, so a `token-exchange` config pasted in
@@ -178,7 +184,21 @@ the caller can reach, and scope-based authorization at a target (e.g. a
 
 ## No bearer token on the request
 
-With `no_token_policy: client-credentials` (the default), the plugin gets the
+The bearer is taken from `Authorization` exactly as `token-exchange` takes it
+(`auth.ExtractBearer`): a case-insensitive `Bearer ` prefix, and everything after
+it, spaces included. When there is none, `no_token_policy` decides:
+
+| `no_token_policy` | Result | Session event |
+|---|---|---|
+| `deny` (default) | **401** `auth.unauthorized`, "missing Authorization header" | `deny / no_token` |
+| `allow` | forwarded unchanged, with no `Authorization` | `skip / no_token` |
+| `client-credentials` | exchanged with the workload's own token as the subject | `modify / token_exchanged` |
+
+Only a destination that is a target gets this far. A host outside the cluster,
+or a destination remembered as unknown, passes through before the policy is
+consulted.
+
+With `no_token_policy: client-credentials`, the plugin gets the
 workload's own token with `client_credentials` (cached until shortly before it
 expires) and exchanges it for the destination's audience. That second step is
 required, not an optimisation: Keycloak ignores `audience` on
@@ -186,6 +206,27 @@ required, not an optimisation: Keycloak ignores `audience` on
 
 Discovery works the same way without a user token. An unknown destination still
 passes through, and the workload's own token is never attached to it.
+
+This is where `discovery-exchange` deliberately differs from `token-exchange`,
+whose `client-credentials` sends the `client_credentials` token itself. Here
+the second step is what makes discovery work: only an exchange tells "granted",
+"not granted" and "no such client" apart.
+
+## Placeholder bearers
+
+With `resolve_placeholders: true`, a bearer carrying the placeholder prefix is
+looked up in the shared store first, before the destination is looked at, just
+as `token-exchange` does:
+
+- A handle that resolves: the real token becomes the exchange subject.
+- A handle that doesn't (no store, unknown or expired handle): **401**
+  `auth.unauthorized`, `deny / placeholder_unresolved`, whatever the
+  destination. Keycloak is not asked.
+- A request that passes through (outside the cluster, unknown audience, not
+  eligible) keeps the placeholder. The real token only ever goes to Keycloak.
+
+With `resolve_placeholders: false` (the default), a placeholder is an ordinary
+bearer and is sent to Keycloak as the subject, which rejects it.
 
 ## Caching and timing
 
@@ -198,6 +239,26 @@ passes through, and the workload's own token is never attached to it.
   the TTL.
 - Each cache holds at most 10,000 entries. Revoking a grant does not invalidate a
   token already issued; it lives until it expires.
+
+## Policy input (opa)
+
+An exchanged request (`token_exchanged` or `cache_hit`) also appends one hop
+to the delegation chain, so an `opa` plugin placed **after** discovery-exchange
+on the outbound chain sees `input.delegation` and an outbound `input.identity`
+in the same shape `token-exchange` produces:
+
+| Field | Value |
+|---|---|
+| `identity.subject` | `sub` of the issued token (the delegating user, or the workload's service account under `no_token_policy: client-credentials`) |
+| `identity.client_id` | this workload's own client ID |
+| `identity.scopes` | `scope` of the issued token |
+| `identity.service_id` | the target audience |
+| `delegation.chain[].strategy` | `"discovery-exchange"` |
+
+Subject and scopes are read from the token Keycloak just issued, not from the
+caller's bearer, so the workload cannot choose them. A request that is not
+exchanged (passed through, not eligible, or denied) records no hop and carries
+no outbound `identity`, so a policy keyed on it falls to its default.
 
 ## Observability
 
@@ -231,10 +292,26 @@ audiences the caller holds.
 - **The service account and the Service must share a name** for SPIFFE-ID
   audiences. See [Choosing `audience_template`](#choosing-audience_template).
 
+## Differences from `token-exchange`
+
+On the bearer, the two plugins behave the same: same extraction, same
+`no_token_policy` values and default, same `resolve_placeholders`. These
+differences remain on purpose:
+
+| | `token-exchange` | `discovery-exchange` | Why |
+|---|---|---|---|
+| `client-credentials` with no bearer | sends the `client_credentials` token | exchanges it, narrowed to the destination | Only an exchange discovers whether the destination is a target. See [No bearer token on the request](#no-bearer-token-on-the-request). |
+| `input.identity.subject` | `sub` of the incoming bearer, unverified | `sub` of the token Keycloak issued | The workload cannot choose it. |
+| `input.identity.scopes` | the route's requested scopes | `scope` of the issued token | There are no routes. |
+| No-bearer 401 code | `upstream.token-exchange-failed` | `auth.unauthorized` | No exchange failed; the caller sent no token. |
+| Token cache key | the subject token | SHA-256 of the subject token | Internal; the cache holds no usable copy of a caller's token. |
+
 ## Moving the github-issue demo to it
 
 1. In the agent's runtime config, replace the `token-exchange` entry with the
    `discovery-exchange` example above.
+   - If the agent calls tools without a user token, set
+     `no_token_policy: client-credentials`; the default, `deny`, answers 401.
 2. Delete the `authproxy-routes` ConfigMap.
 3. In Keycloak, enable standard token exchange on the agent's client.
    - Attach `github-tool-aud` as a **default** scope of the agent's client.
