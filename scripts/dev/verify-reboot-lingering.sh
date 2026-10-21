@@ -32,19 +32,23 @@
 #     line in the journal — what the passwordless sudo journalctl is for).
 #
 # Both units must have come up at least MIN_MARGIN_S before that login, or a
-# login may have started them. Two things keep that comparison honest:
+# login may have started them. Three things keep that comparison honest:
 #
 #   - The quiet window. sshd comes up at about the moment lingering does, so a
 #     login the instant SSH answers leaves no gap to measure. Each cycle stays
 #     off the host for QUIET_SECONDS after it goes down, so the boot's first
 #     login lands long after lingering's work. Do not SSH to the host yourself
 #     during a run: your login would become that boot's first.
-#   - The margin. On systemd 256 and later, starting a user manager opens a
-#     session of class 'manager' for the manager itself, and the login that
-#     caused it was logged about 0.15s after that session on the systemd 259
-#     host this was written against. So a bare "came up before the login"
-#     test passes even when the login started it. Manager-class sessions are
-#     not counted as logins, and the margin is far above that 0.15s.
+#   - Manager sessions. From systemd 256 on, starting a user manager opens a
+#     session of class 'manager' for the manager itself. When lingering works,
+#     that is the user's first "New session" line of the boot, opened as
+#     lingering starts the manager, so counting it as a login would compare
+#     the manager against its own session and fail every good run. That class
+#     is skipped; any other is a real session that can start the manager.
+#   - The margin. The two times are written by different processes, and when a
+#     login does start the manager they land about 0.1s apart (systemd 261:
+#     the manager went active 0.08-0.11s after the login was logged). A margin
+#     instead of bare ordering keeps the verdict off which write landed first.
 #
 # Usage: verify-reboot-lingering.sh <ssh-host> [reboot-count]
 #   ssh-host:     user@host, passed straight to ssh. Needs SSH key auth (no
