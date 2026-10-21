@@ -121,7 +121,8 @@ trap 'rm -f "${tmp}" "${snap}" "${runs}" "${latest}" "${merged}" \
 # understate the all-time figure.
 gh api "repos/${REPO}/releases" --paginate >"${tmp}"
 
-# Smoke runs, as {id, created_at, installs} rather than per-day counts.
+# Smoke runs, as {id, created_at, installs, installs_rule} rather than per-day
+# counts.
 #
 # Timestamps, not calendar dates, because a snapshot interval is not a day. The
 # cron fires at 03:17 UTC, so a row covers (previous 03:17, this 03:17] -- and
@@ -182,14 +183,20 @@ else
 	# steady state is the handful of runs since yesterday.
 	#
 	# Only counts carrying installs_rule "step" are reused. A count recorded without
-	# it was taken under the old successful-jobs rule (#1455), so that run is queried
-	# once more, which costs ~100 queries on the first run after the rule changed.
+	# it was taken under the old successful-jobs rule (#1455), so a run still in the
+	# last-100 window is queried once more, which costs ~100 queries on the first
+	# run after the rule changed. A run already outside the window keeps its old
+	# count for good. None of those had failed, so the two rules agree on all of them.
 	#
 	# "Rarely", not never: "Re-run failed jobs" keeps the run id, so a leg re-run
 	# after its run was counted installs again, and this loop never asks about that
 	# run again. That install reads as a person. No smoke run had been re-run as of
-	# 2026-10-20; catching it would mean storing run_attempt and re-querying a run
-	# when it rises.
+	# 2026-10-21. Re-querying when run_attempt rises is not enough on its own: the
+	# jobs endpoint defaults to filter=latest, which lists every job under the new
+	# attempt, including copies of the jobs that were not re-run, so a failed leg
+	# that installed and was then re-run counts once instead of twice. Counting
+	# exactly needs filter=all, dropping each copy (a job whose name and started_at
+	# match a job in an earlier attempt).
 	if [ -f "${OUT}" ]; then
 		jq -r '[.snapshots[]?.smoke_runs[]?
 		        | select(type == "object" and (.installs | type) == "number"
@@ -326,10 +333,10 @@ jq --arg date "${today}" \
     # and almost every run lands after that.
     taken_at: $taken_at,
 
-    # Every completed smoke run, as {id, created_at, installs}, or null when the
-    # query failed. The page merges these across snapshots on id, so a run stays
-    # counted after it falls out of the last-100 window the API returns, and it
-    # ignores the installs:0 rows when counting runs.
+    # Every completed smoke run, as {id, created_at, installs, installs_rule}, or
+    # null when the query failed. The page merges these across snapshots on id, so
+    # a run stays counted after it falls out of the last-100 window the API
+    # returns, and it ignores the installs:0 rows when counting runs.
     #
     # The installs field counts the jobs of that run that ran the smoke-test step,
     # and installs_rule "step" marks it as counted that way (an older record without
