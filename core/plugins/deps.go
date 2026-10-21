@@ -87,10 +87,14 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 			return nil, fmt.Errorf("unknown plugin %q (registered: %v)", e.Name, pluginNames)
 		}
 		p := factory()
+		// Read before Configure: what an unconfigured instance reports is the ceiling
+		// the catalog advertises for this name, and the configured instance is held to
+		// it below.
+		ceiling := p.Capabilities()
 
 		// Before anything is injected or configured: a plugin the listener cannot honor
 		// is refused before it can build state or start work.
-		if c := deps.Listener.Unsupported(p.Capabilities()); c != "" {
+		if c := deps.Listener.Unsupported(ceiling); c != "" {
 			return nil, fmt.Errorf("plugin %q declares %s, which the %s does not honor", e.Name, c, deps.Listener.Name())
 		}
 
@@ -115,6 +119,15 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 			p = pipeline.WrapConfigured(p, e.Config)
 		} else if len(e.Config) > 0 {
 			return nil, fmt.Errorf("plugin %q does not accept configuration", e.Name)
+		}
+		// A configured instance may narrow its capabilities. Widening them leaves the
+		// catalog, agentop and every reader of /v1/plugins showing less than the plugin
+		// does, so it is reported — but not refused: the rule before narrowing existed
+		// said capabilities never vary, nothing enforced it, and a plugin outside this
+		// tree that widens from config would stop building if it were refused now.
+		if extra := p.Capabilities().WithinCeiling(ceiling); extra != "" {
+			slog.Warn("plugin declares a capability once configured that its unconfigured instance does not; the catalog under-reports it",
+				"plugin", e.Name, "capability", extra)
 		}
 		ps = append(ps, p)
 		policies = append(policies, e.OnError.Resolved())

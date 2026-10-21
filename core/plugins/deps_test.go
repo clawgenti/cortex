@@ -310,3 +310,88 @@ func TestBuildWithDeps_InjectsTheHistoryBeforeConfigure(t *testing.T) {
 		t.Error("the history was not injected before Configure ran")
 	}
 }
+
+// narrowingPlugin reports ceiling until Configure, and configured after it: the shape
+// of a plugin whose config decides how much of its ceiling it uses.
+type narrowingPlugin struct {
+	name                string
+	ceiling, configured pipeline.PluginCapabilities
+	done                bool
+}
+
+func (p *narrowingPlugin) Name() string { return p.name }
+func (p *narrowingPlugin) Capabilities() pipeline.PluginCapabilities {
+	if p.done {
+		return p.configured
+	}
+	return p.ceiling
+}
+func (p *narrowingPlugin) Configure(json.RawMessage) error { p.done = true; return nil }
+func (p *narrowingPlugin) OnRequest(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (p *narrowingPlugin) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+
+func registerNarrowing(t *testing.T, name string, ceiling, configured pipeline.PluginCapabilities) []config.PluginEntry {
+	t.Helper()
+	RegisterPlugin(name, func() pipeline.Plugin {
+		return &narrowingPlugin{name: name, ceiling: ceiling, configured: configured}
+	})
+	t.Cleanup(func() { UnregisterPlugin(name) })
+	return entriesFor(name)
+}
+
+// The pipeline a narrowed plugin is built into sees the narrower set, so a plugin whose
+// config turns off its response rewriting no longer buffers every response.
+func TestBuildWithDeps_AConfiguredPluginMayNarrowItsCapabilities(t *testing.T) {
+	entries := registerNarrowing(t, "test-narrow",
+		pipeline.PluginCapabilities{WritesRequestBody: true, WritesResponseBody: true},
+		pipeline.PluginCapabilities{WritesRequestBody: true})
+	p, err := BuildWithDeps(entries, Deps{})
+	if err != nil {
+		t.Fatalf("BuildWithDeps refused a narrowed plugin: %v", err)
+	}
+	if p.WritesResponseBody() {
+		t.Error("the pipeline still reports WritesResponseBody for a plugin that narrowed it away")
+	}
+	if !p.WritesRequestBody() {
+		t.Error("the pipeline lost the WritesRequestBody the plugin kept")
+	}
+}
+
+// Widening is reported, not refused: nothing enforced the old "capabilities never vary"
+// rule, so refusing it now would break a plugin that relied on that. The pipeline uses
+// what the configured instance declares, as it always has.
+func TestBuildWithDeps_AdmitsAConfiguredPluginThatWidens(t *testing.T) {
+	entries := registerNarrowing(t, "test-widen",
+		pipeline.PluginCapabilities{WritesRequestBody: true},
+		pipeline.PluginCapabilities{WritesRequestBody: true, WritesResponseBody: true})
+	p, err := BuildWithDeps(entries, Deps{})
+	if err != nil {
+		t.Fatalf("BuildWithDeps refused a plugin that widens: %v", err)
+	}
+	if !p.WritesResponseBody() {
+		t.Error("the pipeline dropped the capability the configured instance declared")
+	}
+}
+
+// The catalog keeps reporting the ceiling: it is built from an unconfigured instance, so
+// a narrowed build cannot shrink what /v1/plugins advertises.
+func TestCatalog_ReportsTheCeilingOfANarrowingPlugin(t *testing.T) {
+	registerNarrowing(t, "test-narrow-catalog",
+		pipeline.PluginCapabilities{WritesResponseBody: true, Description: "test"},
+		pipeline.PluginCapabilities{})
+	resetCatalogCache()
+	t.Cleanup(resetCatalogCache)
+	for _, e := range Catalog() {
+		if e.Name == "test-narrow-catalog" {
+			if !e.Capabilities.WritesResponseBody {
+				t.Error("the catalog lost the ceiling's WritesResponseBody")
+			}
+			return
+		}
+	}
+	t.Fatal("test-narrow-catalog missing from the catalog")
+}

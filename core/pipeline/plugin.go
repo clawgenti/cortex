@@ -1,6 +1,10 @@
 package pipeline
 
-import "context"
+import (
+	"context"
+	"slices"
+	"strconv"
+)
 
 // Plugin is the interface that all pipeline extensions implement.
 type Plugin interface {
@@ -124,11 +128,55 @@ type PluginCapabilities struct {
 	// describing what this plugin does. Surfaces in `agentop`'s
 	// plugin-detail and catalog panes, and in /v1/plugins.
 	//
-	// Capabilities are static type-level metadata: Capabilities() must
-	// return the same value for any instance produced by a given
-	// factory. If a plugin's behavior varies enough that its capabilities
-	// differ, register it under multiple names.
+	// The capabilities an UNCONFIGURED instance reports are the ceiling for
+	// every instance its factory produces: plugins.Catalog() reads them from
+	// such an instance, once, so they are what /v1/plugins and agentop's
+	// catalog show. A CONFIGURED instance may report less — WithinCeiling
+	// says how much less — when its config means it will not use some of
+	// them, and the pipeline it is built into reads the narrower set. That
+	// is the point: a plugin whose config turns off its response rewriting
+	// stops costing every response its streaming. It should never report
+	// more: the catalog would under-report it, and plugins.BuildWithDeps
+	// logs a WARN naming the excess.
 	Description string
+}
+
+// WithinCeiling reports whether c asks for nothing ceiling does not: no flag
+// ceiling leaves false is set, and no Requires, RequiresAny or RequiresLater
+// name is added. Both sides are normalized first, so a configured instance
+// that keeps WritesRequestBody need not repeat the ReadsBody it implies.
+// Description is not compared. It names the first excess, or "" when there is
+// none.
+func (c PluginCapabilities) WithinCeiling(ceiling PluginCapabilities) string {
+	c, ceiling = c.Normalize(), ceiling.Normalize()
+	for _, f := range []struct {
+		name      string
+		got, have bool
+	}{
+		{"ReadsBody", c.ReadsBody, ceiling.ReadsBody},
+		{"WritesRequestBody", c.WritesRequestBody, ceiling.WritesRequestBody},
+		{"WritesResponseBody", c.WritesResponseBody, ceiling.WritesResponseBody},
+		{"WritesDestination", c.WritesDestination, ceiling.WritesDestination},
+	} {
+		if f.got && !f.have {
+			return f.name
+		}
+	}
+	for _, f := range []struct {
+		name      string
+		got, have []string
+	}{
+		{"Requires", c.Requires, ceiling.Requires},
+		{"RequiresAny", c.RequiresAny, ceiling.RequiresAny},
+		{"RequiresLater", c.RequiresLater, ceiling.RequiresLater},
+	} {
+		for _, n := range f.got {
+			if !slices.Contains(f.have, n) {
+				return f.name + " " + strconv.Quote(n)
+			}
+		}
+	}
+	return ""
 }
 
 // Normalize applies WritesRequestBody-implies-ReadsBody promotion.
