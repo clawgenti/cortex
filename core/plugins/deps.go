@@ -44,6 +44,20 @@ type Deps struct {
 	// serves can honor; a plugin declaring one it cannot is refused. The zero value
 	// honors none of them, so a build that names no listener admits no such plugin.
 	Listener pipeline.ListenerSupport
+
+	// LocalInstall is true for a laptop proxy started from ~/.cortex, and is
+	// injected into plugins implementing LocalInstallConsumer. Only cmd/cortex sets
+	// it. The zero value is false, so a binary that has not decided is treated as a
+	// shared deployment, where a plugin that runs the user's own programs must not.
+	LocalInstall bool
+}
+
+// LocalInstallConsumer is implemented by plugins that behave differently on a
+// local install. BuildWithDeps tells every such plugin, before Configure, whether
+// this is one — false included, since false is the safe answer and must not depend
+// on a plugin's zero value.
+type LocalInstallConsumer interface {
+	SetLocalInstall(bool)
 }
 
 // BuildWithDeps constructs a pipeline from an ordered list of plugin entries,
@@ -103,6 +117,9 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 		}
 		if c, ok := p.(session.HistoryConsumer); ok && deps.History != nil {
 			c.SetHistory(deps.History)
+		}
+		if c, ok := p.(LocalInstallConsumer); ok {
+			c.SetLocalInstall(deps.LocalInstall)
 		}
 
 		if c, ok := p.(pipeline.Configurable); ok {

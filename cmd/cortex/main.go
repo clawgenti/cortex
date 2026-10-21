@@ -512,6 +512,7 @@ func main() {
 		}
 		c.Mode = config.ModeProxySidecar
 		config.ApplyPreset(c)
+		addScriptSlot(c, localInstall)
 		if err := config.Validate(c); err != nil {
 			return nil, nil, nil, err
 		}
@@ -536,8 +537,8 @@ func main() {
 		// cannot honor fails here — on startup and on every reload — instead of
 		// running to no effect. The reverse proxy honors no redirect, which is what
 		// keeps a WritesDestination plugin off the inbound chain.
-		inDeps := plugins.Deps{SPIFFE: provider, Pricing: pricingRegistry, Store: pluginStore, History: history, Listener: reverseproxy.Support()}
-		outDeps := plugins.Deps{SPIFFE: provider, Pricing: pricingRegistry, Store: pluginStore, History: history, Listener: forwardproxy.Support(c.MTLS != nil)}
+		inDeps := plugins.Deps{SPIFFE: provider, Pricing: pricingRegistry, Store: pluginStore, History: history, Listener: reverseproxy.Support(), LocalInstall: localInstall}
+		outDeps := plugins.Deps{SPIFFE: provider, Pricing: pricingRegistry, Store: pluginStore, History: history, Listener: forwardproxy.Support(c.MTLS != nil), LocalInstall: localInstall}
 		in, err := plugins.BuildWithDeps(c.Pipeline.Inbound.Plugins, inDeps)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("inbound: %w", err)
@@ -605,8 +606,14 @@ func main() {
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	defer cancelCtx()
+	// The script plugin's folders are watched as well as the config, so adding or
+	// editing a script reloads as a config edit does. The folders come from the
+	// startup config: a slot added later is watched from the next restart, though
+	// the reload that adds it loads its scripts.
+	slots := scriptFolders(cfg)
 	rld := reloader.New(*configPath, inboundH, outboundH, buildPipelines, cfg,
-		reloader.WithOnCommit(applyPricing))
+		reloader.WithOnCommit(applyPricing),
+		reloader.WithExtraWatch(slots, func() string { return scriptFingerprint(slots) }))
 	if err := rld.Start(ctx); err != nil {
 		log.Fatalf("reloader: %v", err)
 	}
