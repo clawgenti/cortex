@@ -363,7 +363,7 @@ func describePipeline(h *pipeline.Holder, direction string) []pipelinePluginView
 			Name:        pl.Name(),
 			Direction:   direction,
 			Position:    i + 1,
-			ReadsBody:   caps.ReadsBody,
+			ReadsBody:   caps.ReadsResponseBody,
 			Requires:    caps.Requires,
 			RequiresAny: caps.RequiresAny,
 			Description: caps.Description,

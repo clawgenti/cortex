@@ -565,7 +565,7 @@ func TestCapabilities_FollowTheHooks(t *testing.T) {
 	dir := home(t)
 	script(t, dir, "seen", "resp-seen")
 	caps := configured(t, true, "").Capabilities()
-	if caps.WritesResponseBody || !caps.ReadsBody {
+	if caps.WritesResponseBody || caps.ReadsBody || !caps.ReadsResponseBody {
 		t.Errorf("a response reader declares %+v", caps)
 	}
 }
@@ -730,7 +730,7 @@ func TestResponse_BufferedIsReadWhole(t *testing.T) {
 	if inv.Details["body"] != `{"answer":"hi"}` || inv.Details["streamed"] != "false" || inv.Details["status"] != "200" {
 		t.Errorf("the script saw %+v", inv.Details)
 	}
-	if caps := s.Capabilities(); !caps.ReadsBody || caps.WritesResponseBody {
+	if caps := s.Capabilities(); !caps.ReadsResponseBody || caps.WritesResponseBody {
 		t.Errorf("a response reader declares %+v; it must not cost streaming", caps)
 	}
 }
@@ -829,5 +829,35 @@ func TestResponse_RunsInReverseOrder(t *testing.T) {
 func TestResponse_HeadersHideCookies(t *testing.T) {
 	if _, ok := flatten(response("").ResponseHeaders)["set-cookie"]; ok {
 		t.Error("set-cookie reached the script")
+	}
+}
+
+// Two slots in one chain each keep their own copy of a streamed response: the
+// pipeline hands every frame to both, and each slot's scripts see it once.
+func TestResponse_StreamedCopyIsPerSlot(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "a", "resp-seen")
+	if err := os.MkdirAll(filepath.Join(dir, "b"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script(t, filepath.Join(dir, "b"), "b", "resp-seen")
+	first, second := configured(t, true, ""), configured(t, true, `{"dir":"b"}`)
+	pctx := response("")
+	// The response pass runs in reverse chain order: the later slot first.
+	for _, f := range []string{"f1", "f2"} {
+		second.OnResponseFrame(context.Background(), pctx, []byte(f), false)
+		first.OnResponseFrame(context.Background(), pctx, []byte(f), false)
+	}
+	pctx.MarkResponseDelivered()
+	second.OnResponseFrame(context.Background(), pctx, nil, true)
+	first.OnResponseFrame(context.Background(), pctx, nil, true)
+	invs := invocations(pctx)
+	if len(invs) != 2 {
+		t.Fatalf("invocations = %+v", invs)
+	}
+	for _, inv := range invs {
+		if inv.Details["frames"] != "f1|f2" {
+			t.Errorf("script %s saw frames %q, want f1|f2", inv.Plugin, inv.Details["frames"])
+		}
 	}
 }

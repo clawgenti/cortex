@@ -67,6 +67,9 @@ type Script struct {
 	holder int
 	loaded []*loaded
 	m      metrics
+	// stateKey is where this slot keeps a streamed response's frames on the
+	// request's context. Per instance: two slots in one chain see the same frames.
+	stateKey string
 }
 
 // loaded is one file whose worker started.
@@ -80,15 +83,18 @@ type metrics struct {
 	calls, errors, denies, edits, shadows atomic.Int64
 }
 
+var slots atomic.Int64
+
 // New returns an unconfigured instance.
-func New() *Script { return &Script{} }
+func New() *Script { return &Script{stateKey: fmt.Sprintf("%s#%d", Name, slots.Add(1))} }
 
 func (s *Script) Name() string { return Name }
 
 // Capabilities is the ceiling until Configure, and after it what the slot is
-// wherever scripts run: a request writer, empty or not. Response rewriting is
-// the one part that still narrows to what the loaded scripts asked for, so a
-// slot of request scripts does not cost every streamed response its streaming.
+// wherever scripts run: a request writer, empty or not. The response side is
+// what still narrows to what the loaded scripts asked for — reading or
+// rewriting responses — so a slot of request scripts does not cost every
+// streamed response its streaming.
 func (s *Script) Capabilities() pipeline.PluginCapabilities {
 	caps := pipeline.PluginCapabilities{
 		ReadsBody:          true,
@@ -102,15 +108,18 @@ func (s *Script) Capabilities() pipeline.PluginCapabilities {
 	caps.ReadsBody, caps.WritesRequestBody, caps.WritesResponseBody = false, false, false
 	if s.local {
 		// The floor: which scripts load depends on the folder, and a slot that
-		// runs them is a request writer — every script with a hook is one.
-		// Holding that back until a script loads would let a slot build before a
-		// body reader while its folder is empty, then refuse the chain — and
-		// crash-loop the next restart — when the first script is dropped in.
+		// runs them is a request writer whatever their hooks. Holding that back
+		// until a script loads would let a slot build before a body reader while
+		// its folder is empty, then refuse the chain — and crash-loop the next
+		// restart — when the first script is dropped in.
 		caps.WritesRequestBody = true
 	}
 	for _, l := range s.loaded {
-		if l.hs.Has("request") || l.hs.Has("response") {
+		if l.hs.Has("request") {
 			caps.ReadsBody, caps.WritesRequestBody = true, true
+		}
+		if l.hs.Has("response") {
+			caps.ReadsResponseBody = true
 		}
 		if l.hs.RewriteResponse {
 			caps.WritesResponseBody = true
@@ -296,13 +305,13 @@ func (s *Script) OnResponseFrame(ctx context.Context, pctx *pipeline.Context, fr
 	// response writer — reaches its last frame unsent, with pctx.ResponseBody whole,
 	// so the scripts get the body and their edits and denies apply.
 	if last && !pctx.ResponseDelivered() {
-		pipeline.SetState[streamState](pctx, Name, nil)
+		pipeline.SetState[streamState](pctx, s.stateKey, nil)
 		return s.responseHooks(ctx, pctx, false, nil)
 	}
-	st := pipeline.GetState[streamState](pctx, Name)
+	st := pipeline.GetState[streamState](pctx, s.stateKey)
 	if st == nil {
 		st = &streamState{}
-		pipeline.SetState(pctx, Name, st)
+		pipeline.SetState(pctx, s.stateKey, st)
 	}
 	if !last {
 		if !st.cut && st.size+len(frame) <= maxStreamCopy {
@@ -313,7 +322,7 @@ func (s *Script) OnResponseFrame(ctx context.Context, pctx *pipeline.Context, fr
 		}
 		return pipeline.Action{Type: pipeline.Continue}
 	}
-	pipeline.SetState[streamState](pctx, Name, nil)
+	pipeline.SetState[streamState](pctx, s.stateKey, nil)
 	return s.responseHooks(ctx, pctx, true, st)
 }
 
