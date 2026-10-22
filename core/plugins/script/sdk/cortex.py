@@ -272,7 +272,7 @@ class Flow:
 
     def set_body(self, body):
         """Replace the body outright: a str, bytes, or anything JSON-encodable."""
-        if isinstance(body, (dict, list)):
+        if body is not None and not isinstance(body, (str, bytes)):
             body = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
         self._new_body = body
         self._json = _UNSET
@@ -336,6 +336,10 @@ def handle(msg):
         reply = {"deny": {"reason": d.reason, "status": d.status, "code": d.code}}
     except Exception:  # a bug in the hook must not end the script
         reply = {"error": traceback.format_exc(limit=3).strip()}
+    try:
+        _encode(reply)
+    except Exception as e:
+        reply = {"error": "".join(traceback.format_exception_only(type(e), e)).strip()}
     printed = out.getvalue().rstrip("\n")
     return reply, printed
 
@@ -346,6 +350,8 @@ def handle(msg):
 def run(enforce=False):
     """Serve Cortex, or with --replay <session-id>, test against a recorded
     session. Call it last, after every hook is defined."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     if len(sys.argv) >= 3 and sys.argv[1] == "--replay":
         sys.exit(replay(sys.argv[2], api=(sys.argv[3] if len(sys.argv) > 3 else SESSION_API)))
     out = sys.stdout
@@ -373,8 +379,12 @@ def run(enforce=False):
         _send(out, reply)
 
 
+def _encode(obj):
+    return json.dumps(obj, separators=(",", ":"), allow_nan=False)
+
+
 def _send(out, obj):
-    out.write(json.dumps(obj, separators=(",", ":")) + "\n")
+    out.write(_encode(obj) + "\n")
     out.flush()
 
 

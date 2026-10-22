@@ -355,6 +355,88 @@ def test_run_speaks_the_protocol(tmp_path):
     assert "a ***" in reply["request"]["body"]
 
 
+def strict_json(line):
+    """json.loads as Cortex reads a reply: NaN and Infinity are not JSON."""
+
+    def refuse(name):
+        raise ValueError(name)
+
+    return json.loads(line, parse_constant=refuse)
+
+
+# (hook body, what the first reply carries besides its id, extra environment)
+UNSENDABLE = {
+    "a bytes header value": ("flow.set_header('X', b'v')", "error", {}),
+    "a bytes header name": ("flow.set_header(b'X', 'v')", "error", {}),
+    "a bytes header to remove": ("flow.remove_header(b'X')", "error", {}),
+    "a NaN header value": ("flow.set_header('X', float('nan'))", "error", {}),
+    "an object body": ("flow.set_body(object())", "error", {}),
+    "a bytearray body": ("flow.set_body(bytearray(b'x'))", "error", {}),
+    "a number body": ("flow.set_body(42)", "request", {}),
+    "an object deny reason": ("flow.deny(object())", "error", {}),
+    "a bytes deny code": ("flow.deny('no', code=b'x')", "error", {}),
+    "an object record action": ("flow.record(object())", "error", {}),
+    "an invocation set by hand": ("flow.invocation = {'action': 'observe', 'details': {1: b'x'}}", "error", {}),
+    "a circular invocation": ("d = {}; d['self'] = d; flow.invocation = d", "error", {}),
+    "a lone surrogate in a header": ("flow.set_header('X', 'cut \\ud83d')", "request", {}),
+    "a lone surrogate in the body": ("flow.set_body('cut \\ud83d')", "request", {}),
+    "a lone surrogate printed": ("print('cut \\ud83d')", "", {}),
+    "a character the output cannot encode": ("print('\\u2713')", "", {"PYTHONIOENCODING": "ascii"}),
+}
+
+
+@pytest.mark.parametrize("hook, carries, env", list(UNSENDABLE.values()), ids=list(UNSENDABLE))
+def test_a_hook_cannot_end_the_script(tmp_path, hook, carries, env):
+    script = tmp_path / "bad.py"
+    script.write_text(
+        "from cortex import on, run\n"
+        "@on.request\n"
+        "def bad(flow):\n"
+        "    if flow.host == 'bad':\n"
+        "        %s\n"
+        "    else:\n"
+        "        flow.set_header('X-Seen', flow.host)\n"
+        "run(enforce=True)\n" % hook
+    )
+    first, second = anthropic_request("x"), anthropic_request("y")
+    first["id"], first["request"]["host"] = 1, "bad"
+    second["id"], second["request"]["host"] = 2, "good"
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        input=(json.dumps(first) + "\n" + json.dumps(second) + "\n").encode(),
+        capture_output=True,
+        env={"PYTHONPATH": str(SDK.parent), "LANG": "en_US.UTF-8", **env},
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr.decode(errors="replace")
+    replies = {}
+    for line in proc.stdout.decode("utf-8").splitlines():  # strict: Cortex reads UTF-8
+        try:
+            obj = strict_json(line)
+        except ValueError:
+            continue  # a printed line
+        if isinstance(obj, dict) and "id" in obj:
+            replies[obj["id"]] = obj
+    assert set(replies) == {1, 2}
+    assert set(replies[1]) - {"id"} == ({carries} if carries else set()), replies[1]
+    assert replies[2]["request"] == {"set_headers": {"X-Seen": "good"}}
+
+
+@pytest.mark.parametrize(
+    "hook, summary",
+    [
+        ("flow.set_body(object())", "replayed 2 requests: 0 modified, 0 denied, 2 errors"),
+        ("flow.set_body(42)", "replayed 2 requests: 2 modified, 0 denied, 0 errors"),
+    ],
+)
+def test_replay_reports_a_body_a_hook_set(cortex, monkeypatch, hook, summary):
+    exec("@cortex.on.request\ndef bad(flow):\n    %s\n" % hook, {"cortex": cortex})
+    fake_api(cortex, monkeypatch, [recorded(1, ("user", "x")), recorded(3, ("user", "y"))])
+    out = io.StringIO()
+    assert cortex.replay("s", write=lambda s: out.write(s + "\n")) == 0
+    assert summary in out.getvalue()
+
+
 def test_replay(cortex, monkeypatch):
     @cortex.on.request
     def mask(flow):
@@ -666,6 +748,17 @@ def test_the_guides_replay_command_runs_from_a_shell(tmp_path, session_api):
     proc = run_in_shell(cmd.replace("<session-id>", "s1 " + session_api), tmp_path, tmp_path)
     assert proc.returncode == 0, proc.stderr
     assert "replayed 1 requests: 1 modified" in proc.stdout
+
+
+def test_replay_prints_what_a_hook_printed_from_a_shell(tmp_path, session_api):
+    plugins = plugins_folder(tmp_path)
+    (plugins / "p.py").write_text(
+        "from cortex import on, run\n@on.request\ndef p(flow):\n    print('cut \\ud83d')\nrun()\n"
+    )
+    proc = run_in_shell("PYTHONPATH=~/.cortex/plugins/_sdk python3 p.py --replay s1 " + session_api, tmp_path, plugins)
+    assert proc.returncode == 0, proc.stderr
+    assert "#1  print   cut \\ud83d" in proc.stdout
+    assert "replayed 1 requests" in proc.stdout
 
 
 def test_the_sdk_docstrings_replay_command_runs_from_a_shell(cortex, tmp_path, session_api):
