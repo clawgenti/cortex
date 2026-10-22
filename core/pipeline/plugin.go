@@ -142,7 +142,7 @@ type PluginCapabilities struct {
 }
 
 // WithinCeiling reports whether c asks for nothing ceiling does not: no flag
-// ceiling leaves false is set, and no Requires, RequiresAny or RequiresLater
+// ceiling leaves false is set, and no Requires or RequiresLater
 // name is added. Both sides are normalized first, so a configured instance
 // that keeps WritesRequestBody need not repeat the ReadsBody it implies.
 // Description is not compared. It names the first excess, or "" when there is
@@ -167,12 +167,23 @@ func (c PluginCapabilities) WithinCeiling(ceiling PluginCapabilities) string {
 		got, have []string
 	}{
 		{"Requires", c.Requires, ceiling.Requires},
-		{"RequiresAny", c.RequiresAny, ceiling.RequiresAny},
 		{"RequiresLater", c.RequiresLater, ceiling.RequiresLater},
 	} {
 		for _, n := range f.got {
 			if !slices.Contains(f.have, n) {
 				return f.name + " " + strconv.Quote(n)
+			}
+		}
+	}
+	if len(c.RequiresAny) > 0 {
+		for _, n := range c.RequiresAny {
+			if !slices.Contains(ceiling.RequiresAny, n) {
+				return "RequiresAny " + strconv.Quote(n)
+			}
+		}
+		for _, n := range ceiling.RequiresAny {
+			if !slices.Contains(c.RequiresAny, n) {
+				return "RequiresAny " + strconv.Quote(n)
 			}
 		}
 	}

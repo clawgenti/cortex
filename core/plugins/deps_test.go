@@ -343,6 +343,32 @@ func registerNarrowing(t *testing.T, name string, ceiling, configured pipeline.P
 	return entriesFor(name)
 }
 
+// The listener check holds for the capabilities the pipeline runs, not only for the
+// ceiling: a plugin that takes WritesDestination on at Configure is refused wherever a
+// plugin declaring it up front would be.
+func TestBuildWithDeps_RefusesADestinationWriterThatWidensIntoIt(t *testing.T) {
+	widened := pipeline.PluginCapabilities{WritesDestination: true}
+	for _, listener := range []pipeline.ListenerSupport{{Listener: "reverse proxy"}, {}} {
+		entries := registerNarrowing(t, "test-widen-dest", pipeline.PluginCapabilities{}, widened)
+		_, err := BuildWithDeps(entries, Deps{Listener: listener})
+		if err == nil {
+			t.Fatalf("%s admitted a plugin that widened into WritesDestination", listener.Name())
+		}
+		for _, want := range []string{`"test-widen-dest"`, "WritesDestination", listener.Name()} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not mention %s", err, want)
+			}
+		}
+		UnregisterPlugin("test-widen-dest")
+	}
+
+	entries := registerNarrowing(t, "test-widen-dest-ok", pipeline.PluginCapabilities{}, widened)
+	deps := Deps{Listener: pipeline.ListenerSupport{Listener: "forward proxy", Destination: true}}
+	if _, err := BuildWithDeps(entries, deps); err != nil {
+		t.Fatalf("a listener that honors WritesDestination refused a plugin widening into it: %v", err)
+	}
+}
+
 // The pipeline a narrowed plugin is built into sees the narrower set, so a plugin whose
 // config turns off its response rewriting no longer buffers every response.
 func TestBuildWithDeps_AConfiguredPluginMayNarrowItsCapabilities(t *testing.T) {

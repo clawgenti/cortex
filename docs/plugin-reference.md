@@ -801,7 +801,7 @@ nothing about how the response may be relayed.
 *unconfigured* instance's `Capabilities()` returns is the ceiling: it is what
 `plugins.Catalog()` reads, once, and so what `/v1/plugins` and agentop's catalog
 show. After `Configure`, an instance may return a subset — a flag dropped, a
-`Requires*` name dropped — and the pipeline it is built into reads that narrower
+`Requires` name dropped — and the pipeline it is built into reads that narrower
 set. A plugin whose config means it will never rewrite a response should drop
 `WritesResponseBody` there, so that it stops buffering every streamed response
 on its chain. It should never return more, since the catalog would then

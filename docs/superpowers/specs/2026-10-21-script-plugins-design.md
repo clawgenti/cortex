@@ -107,7 +107,7 @@ from config. `Pipeline.New` already reads capabilities from the instances it is
 given, so nothing else changes.
 
 Subset means: each boolean may go from true to false, never false to true;
-`Requires`, `RequiresAny` and `RequiresLater` may not gain names. `Description`
+`Requires` and `RequiresLater` may not gain names. `Description`
 is not compared.
 
 This is not script-specific: `cpex` declares `WritesResponseBody`

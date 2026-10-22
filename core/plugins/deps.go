@@ -120,6 +120,9 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 		} else if len(e.Config) > 0 {
 			return nil, fmt.Errorf("plugin %q does not accept configuration", e.Name)
 		}
+		if c := deps.Listener.Unsupported(p.Capabilities()); c != "" {
+			return nil, fmt.Errorf("plugin %q declares %s, which the %s does not honor", e.Name, c, deps.Listener.Name())
+		}
 		// A configured instance may narrow its capabilities. Widening them leaves the
 		// catalog, agentop and every reader of /v1/plugins showing less than the plugin
 		// does, so it is reported — but not refused: the rule before narrowing existed

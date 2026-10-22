@@ -22,7 +22,7 @@ func TestWithinCeiling(t *testing.T) {
 		// WritesResponseBody implies ReadsBody, so a narrowed set that keeps only the writer
 		// is still inside a ceiling that lists both.
 		{"implied flag", PluginCapabilities{WritesResponseBody: true}, ""},
-		{"a requirement dropped", PluginCapabilities{RequiresAny: []string{"a2a-parser"}}, ""},
+		{"a requirement dropped", PluginCapabilities{RequiresAny: ceiling.RequiresAny}, ""},
 		{"description differs", PluginCapabilities{Description: "configured"}, ""},
 		{"flag added", PluginCapabilities{WritesDestination: true}, "WritesDestination"},
 		{"requirement added", PluginCapabilities{Requires: []string{"mcp-parser"}}, `Requires "mcp-parser"`},
@@ -34,6 +34,36 @@ func TestWithinCeiling(t *testing.T) {
 				t.Errorf("WithinCeiling = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// RequiresAny is met by any one of its names, and each one present must also come
+// earlier, so dropping a name and adding one each can refuse a chain the ceiling
+// accepts: only the same set, or none, is within it.
+func TestWithinCeiling_RequiresAny(t *testing.T) {
+	ceiling := PluginCapabilities{RequiresAny: []string{"mcp-parser", "a2a-parser"}}
+	cases := []struct {
+		name string
+		got  []string
+		want string
+	}{
+		{"same names", []string{"mcp-parser", "a2a-parser"}, ""},
+		{"same names reordered", []string{"a2a-parser", "mcp-parser"}, ""},
+		{"same names repeated", []string{"a2a-parser", "mcp-parser", "a2a-parser"}, ""},
+		{"none", nil, ""},
+		{"one name dropped", []string{"a2a-parser"}, `RequiresAny "mcp-parser"`},
+		{"alternative added", []string{"mcp-parser", "a2a-parser", "inference-parser"}, `RequiresAny "inference-parser"`},
+		{"names replaced", []string{"inference-parser"}, `RequiresAny "inference-parser"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (PluginCapabilities{RequiresAny: tc.got}).WithinCeiling(ceiling); got != tc.want {
+				t.Errorf("WithinCeiling = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := (PluginCapabilities{RequiresAny: []string{"mcp-parser"}}).WithinCeiling(PluginCapabilities{}); got != `RequiresAny "mcp-parser"` {
+		t.Errorf("a RequiresAny the ceiling lacks: WithinCeiling = %q", got)
 	}
 }
 
