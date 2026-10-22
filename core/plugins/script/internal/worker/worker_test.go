@@ -438,10 +438,10 @@ func TestWorker_TimeoutCoversTheWrite(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the call blocked past its 200ms deadline")
 	}
-	// The worker is not wedged: the next call is answered at once, not queued
-	// behind a write that never finishes.
 	start := time.Now()
-	w.Call(context.Background(), map[string]any{})
+	if _, err := w.Call(context.Background(), map[string]any{}); !errors.Is(err, ErrBackoff) {
+		t.Errorf("next call = %v, want ErrBackoff", err)
+	}
 	if d := time.Since(start); d > time.Second {
 		t.Errorf("the next call waited %v behind the stuck one", d)
 	}
