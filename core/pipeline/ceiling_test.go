@@ -22,6 +22,7 @@ func TestWithinCeiling(t *testing.T) {
 		// WritesResponseBody implies ReadsBody, so a narrowed set that keeps only the writer
 		// is still inside a ceiling that lists both.
 		{"implied flag", PluginCapabilities{WritesResponseBody: true}, ""},
+		{"writers dropped, reading kept", PluginCapabilities{ReadsBody: true}, "ReadsBody without a body writer"},
 		{"a requirement dropped", PluginCapabilities{RequiresAny: ceiling.RequiresAny}, ""},
 		{"description differs", PluginCapabilities{Description: "configured"}, ""},
 		{"flag added", PluginCapabilities{WritesDestination: true}, "WritesDestination"},
@@ -71,7 +72,7 @@ func TestWithinCeiling_RequiresAny(t *testing.T) {
 // ceiling is normalized too, so it means what Pipeline.New will treat it as.
 func TestWithinCeiling_NormalizesTheCeiling(t *testing.T) {
 	ceiling := PluginCapabilities{WritesRequestBody: true}
-	if got := (PluginCapabilities{ReadsBody: true}).WithinCeiling(ceiling); got != "" {
+	if got := (PluginCapabilities{ReadsBody: true, WritesRequestBody: true}).WithinCeiling(ceiling); got != "" {
 		t.Errorf("ReadsBody refused under a WritesRequestBody ceiling: %q", got)
 	}
 }

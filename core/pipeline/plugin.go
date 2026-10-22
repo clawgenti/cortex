@@ -162,6 +162,10 @@ func (c PluginCapabilities) WithinCeiling(ceiling PluginCapabilities) string {
 			return f.name
 		}
 	}
+	if c.ReadsBody && !c.WritesRequestBody && !c.WritesResponseBody &&
+		(ceiling.WritesRequestBody || ceiling.WritesResponseBody) {
+		return "ReadsBody without a body writer"
+	}
 	for _, f := range []struct {
 		name      string
 		got, have []string

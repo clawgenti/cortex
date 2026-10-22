@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"testing"
 
@@ -54,43 +55,81 @@ func chains(others []string) [][]string {
 	return out
 }
 
-func validChain(chain []string, caps pipeline.PluginCapabilities) bool {
+// validChain reports whether BuildWithDeps's two chain checks accept chain, with "x"
+// declaring caps and every other plugin what others gives it.
+func validChain(chain []string, others map[string]pipeline.PluginCapabilities, caps pipeline.PluginCapabilities) bool {
 	ps := make([]pipeline.Plugin, len(chain))
 	for i, n := range chain {
-		ps[i] = capsPlugin{name: n}
+		ps[i] = capsPlugin{name: n, caps: others[n]}
 		if n == "x" {
 			ps[i] = capsPlugin{name: n, caps: caps}
 		}
 	}
-	return validateRelationships(ps) == nil
+	if validateRelationships(ps) != nil {
+		return false
+	}
+	_, err := pipeline.New(ps)
+	return err == nil
 }
 
-// A configured instance WithinCeiling admits must be satisfied by every chain its
-// ceiling is satisfied by, or the catalog — and agentop's edit check, which reads it —
+// assertWithinCeilingIsSafe fails for any pair WithinCeiling admits where some chain
+// accepts the ceiling and refuses the configured set.
+func assertWithinCeilingIsSafe(t *testing.T, label string, others map[string]pipeline.PluginCapabilities, caps []pipeline.PluginCapabilities) {
+	t.Helper()
+	all := chains(slices.Sorted(maps.Keys(others)))
+	for _, ceiling := range caps {
+		for _, configured := range caps {
+			if configured.WithinCeiling(ceiling) != "" {
+				continue
+			}
+			for _, chain := range all {
+				if validChain(chain, others, ceiling) && !validChain(chain, others, configured) {
+					t.Errorf("%s: configured %+v is within ceiling %+v, but chain %v accepts the ceiling and refuses it",
+						label, configured, ceiling, chain)
+					break
+				}
+			}
+		}
+	}
+}
+
+// A configured instance WithinCeiling admits must be accepted by every chain its
+// ceiling is accepted by, or the catalog — and agentop's edit check, which reads it —
 // passes a chain the build then refuses.
 func TestWithinCeiling_AdmitsNoRelationshipTheCeilingDoesNot(t *testing.T) {
 	names := []string{"a", "b", "c"}
-	all := chains(names)
+	others := map[string]pipeline.PluginCapabilities{"a": {}, "b": {}, "c": {}}
 	fields := map[string]func([]string) pipeline.PluginCapabilities{
 		"Requires":      func(n []string) pipeline.PluginCapabilities { return pipeline.PluginCapabilities{Requires: n} },
 		"RequiresAny":   func(n []string) pipeline.PluginCapabilities { return pipeline.PluginCapabilities{RequiresAny: n} },
 		"RequiresLater": func(n []string) pipeline.PluginCapabilities { return pipeline.PluginCapabilities{RequiresLater: n} },
 	}
 	for field, mk := range fields {
-		for _, c := range subsets(names) {
-			for _, g := range subsets(names) {
-				ceiling, configured := mk(c), mk(g)
-				if configured.WithinCeiling(ceiling) != "" {
-					continue
-				}
-				for _, chain := range all {
-					if validChain(chain, ceiling) && !validChain(chain, configured) {
-						t.Errorf("%s: configured %v is within ceiling %v, but chain %v satisfies the ceiling and not it",
-							field, g, c, chain)
-						break
-					}
-				}
-			}
+		var caps []pipeline.PluginCapabilities
+		for _, n := range subsets(names) {
+			caps = append(caps, mk(n))
 		}
+		assertWithinCeilingIsSafe(t, field, others, caps)
 	}
+}
+
+// The same holds for the flags pipeline.New orders by: a body reader must precede every
+// mutator, and a chain has at most one destination writer.
+func TestWithinCeiling_AdmitsNoFlagTheCeilingDoesNot(t *testing.T) {
+	others := map[string]pipeline.PluginCapabilities{
+		"reader":   {ReadsBody: true},
+		"req-mut":  {WritesRequestBody: true},
+		"resp-mut": {WritesResponseBody: true},
+		"dest":     {WritesDestination: true},
+	}
+	var caps []pipeline.PluginCapabilities
+	for mask := 0; mask < 16; mask++ {
+		caps = append(caps, pipeline.PluginCapabilities{
+			ReadsBody:          mask&1 != 0,
+			WritesRequestBody:  mask&2 != 0,
+			WritesResponseBody: mask&4 != 0,
+			WritesDestination:  mask&8 != 0,
+		})
+	}
+	assertWithinCeilingIsSafe(t, "flags", others, caps)
 }
