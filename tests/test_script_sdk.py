@@ -460,8 +460,7 @@ def test_replay_reads_one_event_at_a_time(cortex, monkeypatch):
     assert sorted(u.rsplit("/", 1)[1] for u in urls if "/events/" in u) == ["1", "3", "5"]
 
 
-def test_replay_stops_when_the_session_is_recreated_under_it(cortex, monkeypatch):
-    # A cursor above everything held answers with the tail again; replay must not loop.
+def test_replay_stops_when_a_page_does_not_move_back(cortex, monkeypatch):
     @cortex.on.request
     def noop(flow):
         pass
