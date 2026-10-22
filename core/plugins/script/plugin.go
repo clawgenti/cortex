@@ -68,7 +68,8 @@ type Script struct {
 	loaded []*loaded
 	m      metrics
 	// stateKey is where this slot keeps a streamed response's frames on the
-	// request's context. Per instance: two slots in one chain see the same frames.
+	// request's context. Per folder: two slots in one chain see the same frames,
+	// and a reload's rebuild of a slot carries on with the copy the old build kept.
 	stateKey string
 }
 
@@ -83,10 +84,8 @@ type metrics struct {
 	calls, errors, denies, edits, shadows atomic.Int64
 }
 
-var slots atomic.Int64
-
 // New returns an unconfigured instance.
-func New() *Script { return &Script{stateKey: fmt.Sprintf("%s#%d", Name, slots.Add(1))} }
+func New() *Script { return &Script{} }
 
 func (s *Script) Name() string { return Name }
 
@@ -158,6 +157,7 @@ func (s *Script) Configure(raw json.RawMessage) error {
 		return err
 	}
 	s.dir = dir
+	s.stateKey = Name + "#" + dir
 	if !s.local {
 		slog.Warn("script plugin: not a local install, so no scripts are run", "dir", dir)
 		return nil

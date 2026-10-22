@@ -861,3 +861,20 @@ func TestResponse_StreamedCopyIsPerSlot(t *testing.T) {
 		}
 	}
 }
+
+// A reload that lands mid-stream hands the rest of the stream to the new build of the
+// slot, which carries on with the copy the old build kept.
+func TestResponse_StreamedCopySurvivesAReload(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "a", "resp-seen")
+	old := configured(t, true, "")
+	pctx := response("")
+	old.OnResponseFrame(context.Background(), pctx, []byte("f1"), false)
+	rebuilt := configured(t, true, "")
+	rebuilt.OnResponseFrame(context.Background(), pctx, []byte("f2"), false)
+	pctx.MarkResponseDelivered()
+	rebuilt.OnResponseFrame(context.Background(), pctx, nil, true)
+	if invs := invocations(pctx); len(invs) != 1 || invs[0].Details["frames"] != "f1|f2" {
+		t.Errorf("invocations = %+v, want one that saw f1|f2", invs)
+	}
+}
