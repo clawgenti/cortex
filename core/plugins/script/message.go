@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/rossoctl/cortex/core/pipeline"
+	"golang.org/x/net/http/httpguts"
 )
 
 // secretHeaders never reach a script. A script is the user's own code, but its
@@ -145,11 +146,21 @@ func parseReply(line json.RawMessage) (reply, error) {
 }
 
 // applyHeaders edits h in place. A script cannot set a header it may not read.
+// Every key is checked before any is set, so a refused edit leaves nothing
+// half-applied however the map iterates.
 func applyHeaders(h http.Header, e *edits) error {
 	for k, v := range e.SetHeaders {
 		if secretHeaders[strings.ToLower(k)] {
 			return fmt.Errorf("may not set %s", k)
 		}
+		if !httpguts.ValidHeaderFieldName(k) {
+			return fmt.Errorf("invalid header name %q", k)
+		}
+		if !httpguts.ValidHeaderFieldValue(v) {
+			return fmt.Errorf("invalid value for header %s", k)
+		}
+	}
+	for k, v := range e.SetHeaders {
 		h.Set(k, v)
 	}
 	for _, k := range e.RemoveHeaders {
