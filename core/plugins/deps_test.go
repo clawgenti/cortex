@@ -1,9 +1,12 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -400,6 +403,60 @@ func TestBuildWithDeps_AdmitsAConfiguredPluginThatWidens(t *testing.T) {
 	}
 	if !p.WritesResponseBody() {
 		t.Error("the pipeline dropped the capability the configured instance declared")
+	}
+}
+
+func TestBuildWithDeps_WarnsOfADifferenceFromTheCeiling(t *testing.T) {
+	cases := []struct {
+		name                string
+		ceiling, configured pipeline.PluginCapabilities
+		want                string
+	}{
+		{"widened", pipeline.PluginCapabilities{WritesRequestBody: true},
+			pipeline.PluginCapabilities{WritesRequestBody: true, WritesResponseBody: true}, "difference=WritesResponseBody"},
+		{"narrowed to a pure reader", pipeline.PluginCapabilities{WritesRequestBody: true},
+			pipeline.PluginCapabilities{ReadsBody: true}, `difference="ReadsBody without a body writer"`},
+		{"RequiresAny name dropped", pipeline.PluginCapabilities{RequiresAny: []string{"a", "b"}},
+			pipeline.PluginCapabilities{RequiresAny: []string{"b"}}, `difference="RequiresAny without \"a\""`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			entries := slices.Concat(registerNarrowing(t, "b", pipeline.PluginCapabilities{}, pipeline.PluginCapabilities{}),
+				registerNarrowing(t, "test-ceiling-warn", tc.ceiling, tc.configured))
+			if _, err := BuildWithDeps(entries, Deps{}); err != nil {
+				t.Fatalf("BuildWithDeps: %v", err)
+			}
+			line := logs.String()
+			for _, want := range []string{"level=WARN", "the catalog misdescribes it", "plugin=test-ceiling-warn", tc.want} {
+				if !strings.Contains(line, want) {
+					t.Errorf("log %q does not contain %s", line, want)
+				}
+			}
+			UnregisterPlugin("test-ceiling-warn")
+			UnregisterPlugin("b")
+		})
+	}
+}
+
+func TestBuildWithDeps_DoesNotWarnOfANarrowingWithinTheCeiling(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	entries := registerNarrowing(t, "test-ceiling-quiet",
+		pipeline.PluginCapabilities{WritesRequestBody: true, WritesResponseBody: true, RequiresAny: []string{"a"}},
+		pipeline.PluginCapabilities{WritesRequestBody: true})
+	if _, err := BuildWithDeps(entries, Deps{}); err != nil {
+		t.Fatalf("BuildWithDeps: %v", err)
+	}
+	if strings.Contains(logs.String(), "level=WARN") {
+		t.Errorf("a narrowing within the ceiling logged %q", logs.String())
 	}
 }
 

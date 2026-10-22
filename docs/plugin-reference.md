@@ -800,14 +800,26 @@ nothing about how the response may be relayed.
 **A configured instance may declare less than its ceiling.** What an
 *unconfigured* instance's `Capabilities()` returns is the ceiling: it is what
 `plugins.Catalog()` reads, once, and so what `/v1/plugins` and agentop's catalog
-show. After `Configure`, an instance may return a subset — a
-`Requires` name dropped — and the pipeline it is built into reads that narrower
-set. A plugin whose config means it will never rewrite a response should drop
-`WritesResponseBody` there, so that it stops buffering every streamed response
-on its chain. It should never return more, since the catalog would then
-under-report it: `plugins.BuildWithDeps` logs a WARN naming any capability the
-ceiling lacks (`PluginCapabilities.WithinCeiling`). It warns rather than refuses
-because the older rule — capabilities never vary — was never enforced.
+show. After `Configure`, an instance may return less, and the pipeline it is
+built into reads that narrower set. A plugin whose config means it will never
+rewrite a response should drop `WritesResponseBody` there, so that it stops
+buffering every streamed response on its chain. What it may return
+(`PluginCapabilities.WithinCeiling`):
+
+- no flag the ceiling leaves false, and no `Requires` or `RequiresLater` name
+  the ceiling does not list — a flag or a name may be dropped;
+- not `ReadsBody` alone when the ceiling writes a body: a pure reader must
+  precede every mutator, which a writer need not;
+- `RequiresAny` as the ceiling's set or empty: one of its names satisfies it and
+  every one present must come earlier, so dropping a name and adding one each
+  refuse chains the ceiling accepts.
+
+Anything else, `plugins.BuildWithDeps` logs as a WARN naming the difference,
+because the catalog no longer describes the plugin. It warns rather than refuses
+because the older rule — capabilities never vary — was never enforced. The
+listener check is the exception: a listener-dependent capability such as
+`WritesDestination` is checked against the ceiling and against the configured
+set, and refused if either declares it where the listener cannot honor it.
 
 ```go
 func (p *Redactor) Capabilities() pipeline.PluginCapabilities {

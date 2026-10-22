@@ -106,8 +106,10 @@ was never enforced, and an in-tree test plugin (the parity spy) already widens
 from config. `Pipeline.New` already reads capabilities from the instances it is
 given, so nothing else changes.
 
-Subset means: `Requires` and `RequiresLater` may not gain names. `Description`
-is not compared.
+Subset means: no boolean goes from false to true; `ReadsBody` is not kept alone
+when the ceiling writes a body, since a pure reader must precede every mutator;
+`Requires` and `RequiresLater` may not gain names; `RequiresAny` is the
+ceiling's set or empty. `Description` is not compared.
 
 This is not script-specific: `cpex` declares `WritesResponseBody`
 unconditionally and could narrow to it only when a response hook is

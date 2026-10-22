@@ -52,7 +52,7 @@ func TestWithinCeiling_RequiresAny(t *testing.T) {
 		{"same names reordered", []string{"a2a-parser", "mcp-parser"}, ""},
 		{"same names repeated", []string{"a2a-parser", "mcp-parser", "a2a-parser"}, ""},
 		{"none", nil, ""},
-		{"one name dropped", []string{"a2a-parser"}, `RequiresAny "mcp-parser"`},
+		{"one name dropped", []string{"a2a-parser"}, `RequiresAny without "mcp-parser"`},
 		{"alternative added", []string{"mcp-parser", "a2a-parser", "inference-parser"}, `RequiresAny "inference-parser"`},
 		{"names replaced", []string{"inference-parser"}, `RequiresAny "inference-parser"`},
 	}

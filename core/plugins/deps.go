@@ -123,14 +123,14 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 		if c := deps.Listener.Unsupported(p.Capabilities()); c != "" {
 			return nil, fmt.Errorf("plugin %q declares %s, which the %s does not honor", e.Name, c, deps.Listener.Name())
 		}
-		// A configured instance may narrow its capabilities. Widening them leaves the
-		// catalog, agentop and every reader of /v1/plugins showing less than the plugin
-		// does, so it is reported — but not refused: the rule before narrowing existed
+		// A configured instance may narrow its capabilities. One the catalog does not
+		// describe — it declares more than the ceiling, or a chain the catalog accepts
+		// could refuse it — is reported, but not refused: the rule before narrowing existed
 		// said capabilities never vary, nothing enforced it, and a plugin outside this
 		// tree that widens from config would stop building if it were refused now.
-		if extra := p.Capabilities().WithinCeiling(ceiling); extra != "" {
-			slog.Warn("plugin declares a capability once configured that its unconfigured instance does not; the catalog under-reports it",
-				"plugin", e.Name, "capability", extra)
+		if diff := p.Capabilities().WithinCeiling(ceiling); diff != "" {
+			slog.Warn("plugin's capabilities once configured differ from its unconfigured instance's; the catalog misdescribes it",
+				"plugin", e.Name, "difference", diff)
 		}
 		ps = append(ps, p)
 		policies = append(policies, e.OnError.Resolved())

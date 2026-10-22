@@ -135,18 +135,21 @@ type PluginCapabilities struct {
 	// says how much less — when its config means it will not use some of
 	// them, and the pipeline it is built into reads the narrower set. That
 	// is the point: a plugin whose config turns off its response rewriting
-	// stops costing every response its streaming. It should never report
-	// more: the catalog would under-report it, and plugins.BuildWithDeps
-	// logs a WARN naming the excess.
+	// stops costing every response its streaming. Anything WithinCeiling
+	// does not admit, plugins.BuildWithDeps logs a WARN naming.
 	Description string
 }
 
-// WithinCeiling reports whether c asks for nothing ceiling does not: no flag
-// ceiling leaves false is set, and no Requires or RequiresLater
-// name is added. Both sides are normalized first, so a configured instance
-// that keeps WritesRequestBody need not repeat the ReadsBody it implies.
-// Description is not compared. It names the first excess, or "" when there is
-// none.
+// WithinCeiling reports whether the catalog, which shows ceiling, describes c:
+// whether c declares nothing ceiling does not, and fits every chain ceiling
+// fits. That holds when no flag ceiling leaves false is set; ReadsBody is not
+// kept alone when ceiling writes a body, since a pure reader may not follow a
+// mutator; no Requires or RequiresLater name is added; and RequiresAny is
+// either ceiling's set or empty, since dropping a name and adding one each
+// refuse chains ceiling fits. Both sides are normalized first, so a configured
+// instance that keeps WritesRequestBody need not repeat the ReadsBody it
+// implies. Description is not compared. It names the first difference, or ""
+// when there is none.
 func (c PluginCapabilities) WithinCeiling(ceiling PluginCapabilities) string {
 	c, ceiling = c.Normalize(), ceiling.Normalize()
 	for _, f := range []struct {
@@ -187,7 +190,7 @@ func (c PluginCapabilities) WithinCeiling(ceiling PluginCapabilities) string {
 		}
 		for _, n := range ceiling.RequiresAny {
 			if !slices.Contains(c.RequiresAny, n) {
-				return "RequiresAny " + strconv.Quote(n)
+				return "RequiresAny without " + strconv.Quote(n)
 			}
 		}
 	}
