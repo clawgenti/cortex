@@ -43,8 +43,9 @@ beside them.
   replay, not isolation.
 - Scrubbing what Cortex records. The parsers run before scripts, so the session
   store and archive keep what the client sent. The doc says so.
-- Vendor formats beyond Anthropic Messages and OpenAI Chat Completions in the
-  SDK's text helpers. Every other format is reachable through `flow.json`.
+- Vendor formats beyond Anthropic Messages, OpenAI Chat Completions and OpenAI
+  Responses in the SDK's text helpers. Every other format is reachable through
+  `flow.json`.
 
 ## User experience
 
@@ -239,7 +240,7 @@ run(enforce=False)
 ```
 
 `flow` offers `session`, `host`, `path`, `headers`, `body`, `json`, and:
-- `flow.texts` — every prompt text fragment, Anthropic or OpenAI chat shape.
+- `flow.texts` — every prompt text fragment, Anthropic or OpenAI shape.
 - `flow.latest_text` — the text of the newest user message only. Gates should
   read this: the client re-sends its whole history every turn, so a rule that
   denies on history denies every later turn too.

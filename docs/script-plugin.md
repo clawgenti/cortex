@@ -96,9 +96,8 @@ it within a second.
 | `flow.deny(reason, status=403)` | block the request |
 | `flow.record(action, reason, **details)` | say what the hook did, for its row |
 
-`replace_text` and `texts` understand Anthropic Messages and OpenAI Chat
-Completions bodies, which is what coding agents send. Other formats are in
-`flow.json`.
+`replace_text` and `texts` understand Anthropic Messages, OpenAI Chat
+Completions and OpenAI Responses bodies. Other formats are in `flow.json`.
 
 ## Things worth knowing
 

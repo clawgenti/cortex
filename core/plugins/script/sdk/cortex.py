@@ -73,9 +73,9 @@ on = _Registry()
 # ---- wire formats -----------------------------------------------------------
 #
 # A text fragment is a string the user or the agent wrote: a system prompt, a
-# message, a tool result. The helpers below find them in Anthropic Messages and
-# OpenAI Chat Completions bodies, which is what every coding agent Cortex sees
-# speaks. Anything else is still reachable through flow.json.
+# message, a tool result. The helpers below find them in Anthropic Messages,
+# OpenAI Chat Completions and OpenAI Responses bodies. Anything else is still
+# reachable through flow.json.
 
 
 _TEXT_TYPES = ("text", "input_text", "output_text")
@@ -110,11 +110,50 @@ def _walk_body(body, fn):
     """Apply fn to every prompt text in a request body, in place."""
     if not isinstance(body, dict):
         return
-    if "system" in body:
-        body["system"] = _walk_content(body["system"], fn)
+    for key in ("system", "instructions"):
+        if key in body:
+            body[key] = _walk_content(body[key], fn)
     for msg in body.get("messages") or []:
         if isinstance(msg, dict) and "content" in msg:
             msg["content"] = _walk_content(msg["content"], fn)
+    if isinstance(body.get("input"), str):
+        body["input"] = fn(body["input"])
+    for item in _list(body.get("input")):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "function_call_output" and "output" in item:
+            item["output"] = _walk_content(item["output"], fn)
+        elif item.get("type", "message") == "message" and "content" in item:
+            item["content"] = _walk_content(item["content"], fn)
+
+
+def _list(v):
+    return v if isinstance(v, list) else []
+
+
+def _is_tool_result(block):
+    return isinstance(block, dict) and block.get("type") == "tool_result"
+
+
+def _messages(body):
+    """The conversation, oldest first, as (role, content, tool_output) triples.
+    tool_output is content that came back from a tool rather than from a person."""
+    out = []
+    for msg in _list(body.get("messages")):
+        if isinstance(msg, dict):
+            content = msg.get("content")
+            tool = isinstance(content, list) and all(_is_tool_result(b) for b in content)
+            out.append((msg.get("role"), content, tool or msg.get("role") == "tool"))
+    if isinstance(body.get("input"), str):
+        out.append(("user", body["input"], False))
+    for item in _list(body.get("input")):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "function_call_output":
+            out.append(("tool", item.get("output"), True))
+        elif item.get("type", "message") == "message":
+            out.append((item.get("role"), item.get("content"), False))
+    return out
 
 
 def _texts(body):
@@ -124,23 +163,19 @@ def _texts(body):
 
 
 def _latest_user_text(body):
-    """The text of the newest user message."""
+    """The text of the newest user message that is not only tool results."""
     if not isinstance(body, dict):
         return ""
-    for msg in reversed(body.get("messages") or []):
-        if not isinstance(msg, dict) or msg.get("role") != "user":
+    for role, content, tool_output in reversed(_messages(body)):
+        if role != "user" or tool_output:
             continue
-        content = msg.get("content")
-        if not isinstance(content, list):
-            content = [content]
         found = []
-        for block in content:
+        for block in content if isinstance(content, list) else [content]:
             if isinstance(block, dict) and block.get("type") in _TEXT_TYPES:
                 block = block.get("text")
             if isinstance(block, str) and block:
                 found.append(block)
-        if found:
-            return "\n".join(found)
+        return "\n".join(found)
     return ""
 
 
@@ -359,11 +394,17 @@ def _rebuild_request(event):
     inf = event.get("inference") or {}
     system, messages = [], []
     for m in inf.get("messages") or []:
-        block = [{"type": "text", "text": m.get("content") or ""}]
+        block = [{"type": "text", "text": m["content"]}] if m.get("content") else []
         if m.get("role") == "system":
             system += block
         else:
             messages.append({"role": m.get("role"), "content": block})
+    results = [
+        {"type": "tool_result", "tool_use_id": r.get("toolUseId", ""), "content": r.get("content") or ""}
+        for r in inf.get("toolResults") or []
+    ]
+    if results:
+        messages.append({"role": "user", "content": results})
     body = {"model": inf.get("model"), "messages": messages}
     if system:
         body["system"] = system
@@ -388,14 +429,17 @@ def replay(session_id, api=SESSION_API, write=print):
         write("no @on.request hook to replay")
         return 1
     try:
-        view = _get("%s/v1/sessions/%s?limit=2000" % (api, session_id))
+        seqs = _request_seqs(session_id, api)
     except Exception as e:
         write("cannot read session %s from %s: %s" % (session_id, api, e))
         return 1
     rows = {"modify": 0, "deny": 0, "error": 0, "unchanged": 0}
-    for ev in view.get("events") or []:
-        if ev.get("phase") != "request" or not (ev.get("inference") or {}).get("messages"):
-            continue
+    for seq in seqs:
+        try:
+            ev = _get("%s/v1/sessions/%s/events/%d" % (api, session_id, seq))
+        except Exception as e:
+            write("cannot read event %d of session %s from %s: %s" % (seq, session_id, api, e))
+            return 1
         msg = _rebuild_request(ev)
         before = _texts(json.loads(msg["request"]["body"]))
         reply, printed = handle(msg)
@@ -425,6 +469,25 @@ def replay(session_id, api=SESSION_API, write=print):
         % (total, rows["modify"], rows["deny"], rows["error"], rows["unchanged"])
     )
     return 0
+
+
+def _request_seqs(session_id, api):
+    """The seq of each inference request the session recorded, oldest first. Pages
+    back from the newest event in summaries, which leave out message bodies."""
+    seqs, before = [], 0
+    while True:
+        url = "%s/v1/sessions/%s?view=summary&limit=2000" % (api, session_id)
+        view = _get(url + ("&before=%d" % before if before else ""))
+        events = view.get("events") or []
+        for ev in events:
+            inf = ev.get("inference") or {}
+            if ev.get("phase") == "request" and (inf.get("messageCount") or inf.get("messages")):
+                seqs.append(ev["seq"])
+        if not events or not view.get("totalEvents") or events[0]["seq"] <= view.get("oldestSeq", 0):
+            return sorted(set(seqs))
+        if before and events[0]["seq"] >= before:
+            raise RuntimeError("the session changed while it was read; run the replay again")
+        before = events[0]["seq"]
 
 
 def _diff_summary(before, after):
