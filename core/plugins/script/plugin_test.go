@@ -629,3 +629,29 @@ func TestCapabilities_ASlotCanFollowARequestWriter(t *testing.T) {
 		})
 	}
 }
+
+// Under on_error: observe a plugin's header writes still apply — only its
+// rejections, body writes and redirects are dropped (see pipeline.PolicyAt). A
+// script's header edit therefore applies, and its body edit is recorded as shadow.
+func TestRun_ObservePolicyAppliesHeadersOnly(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "10-header", "header")
+	script(t, dir, "20-mask", "mask")
+	s := configured(t, true, "")
+	p, err := pipeline.New([]pipeline.Plugin{s}, pipeline.WithPolicies(pipeline.ErrorPolicyObserve))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx := request("a secret")
+	p.Run(context.Background(), pctx)
+	if pctx.Headers.Get("X-Script") != "yes" {
+		t.Errorf("a header edit did not apply under observe: %v", pctx.Headers)
+	}
+	if string(pctx.Body) != "a secret" {
+		t.Errorf("a body edit applied under observe: %s", pctx.Body)
+	}
+	invs := invocations(pctx)
+	if len(invs) != 2 || invs[0].Shadow || !invs[1].Shadow {
+		t.Errorf("invocations = %+v, want the header edit applied and the body edit shadow", invs)
+	}
+}

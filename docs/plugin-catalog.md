@@ -224,9 +224,6 @@ yourself, with `config.dir`, to place a second slot elsewhere — between two Go
 plugins, for example. Anywhere but a local install a `script` entry loads
 nothing, so a config naming it cannot run commands in a sidecar.
 
-Declares only what its loaded scripts need: an empty slot declares nothing, and
-response streaming is unaffected unless a loaded script rewrites responses.
-
 | Field | Default | Meaning |
 |---|---|---|
 | `dir` | (empty) | Folder inside `~/.cortex/plugins` this slot runs; empty is that folder itself |

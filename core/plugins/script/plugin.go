@@ -286,9 +286,7 @@ func (s *Script) apply(pctx *pipeline.Context, l *loaded, rep reply, logs []stri
 		inv.Details = rep.Invocation.Details
 	}
 	inv.Details = withLogs(inv.Details, logs)
-	// Shadow when the script has not turned enforcement on, or when the slot itself
-	// runs under on_error: observe, where nothing it does takes effect.
-	shadow := !l.hs.Enforce || pctx.Observing()
+	shadow := !l.hs.Enforce
 	fail := func(err error) (pipeline.Action, bool, bool) {
 		a, stop := s.failed(pctx, l, err, logs)
 		return a, stop, false
@@ -306,7 +304,7 @@ func (s *Script) apply(pctx *pipeline.Context, l *loaded, rep reply, logs []stri
 		inv.Action, inv.Reason = pipeline.ActionDeny, code
 		inv.Details = withDetail(inv.Details, "deny_reason", reason)
 		s.m.denies.Add(1)
-		if shadow {
+		if shadow || pctx.Observing() {
 			s.m.shadows.Add(1)
 			inv.Shadow = true
 			pctx.Record(inv)
