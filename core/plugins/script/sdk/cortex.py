@@ -18,7 +18,7 @@ pipeline, one long-lived process per file:
 
 Test it against a session Cortex already recorded before turning it on:
 
-    python3 mask.py --replay <session-id>
+    PYTHONPATH=~/.cortex/plugins/_sdk python3 mask.py --replay <session-id>
 
 Module-level variables keep their values between requests: the process lives as
 long as the file is unchanged. print() inside a hook shows on that request's
@@ -78,6 +78,9 @@ on = _Registry()
 # speaks. Anything else is still reachable through flow.json.
 
 
+_TEXT_TYPES = ("text", "input_text", "output_text")
+
+
 def _walk_content(content, fn):
     """Apply fn to each text in a message's content, returning the new content.
     Content is a string, or a list of blocks: {"type": "text", "text": ...},
@@ -95,7 +98,7 @@ def _walk_content(content, fn):
             out.append(block)
             continue
         block = dict(block)
-        if block.get("type") in ("text", "input_text", "output_text") and isinstance(block.get("text"), str):
+        if block.get("type") in _TEXT_TYPES and isinstance(block.get("text"), str):
             block["text"] = fn(block["text"])
         elif block.get("type") == "tool_result" and "content" in block:
             block["content"] = _walk_content(block["content"], fn)
@@ -121,14 +124,22 @@ def _texts(body):
 
 
 def _latest_user_text(body):
-    """The text of the newest user message. A client re-sends the whole
-    conversation on every turn, so this is what is new in this request."""
+    """The text of the newest user message."""
     if not isinstance(body, dict):
         return ""
     for msg in reversed(body.get("messages") or []):
-        if isinstance(msg, dict) and msg.get("role") == "user":
-            found = []
-            _walk_content(copy.deepcopy(msg.get("content")), lambda t: found.append(t) or t)
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            content = [content]
+        found = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") in _TEXT_TYPES:
+                block = block.get("text")
+            if isinstance(block, str) and block:
+                found.append(block)
+        if found:
             return "\n".join(found)
     return ""
 

@@ -3,13 +3,20 @@
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import re
+import shutil
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-SDK = pathlib.Path(__file__).resolve().parent.parent / "core" / "plugins" / "script" / "sdk" / "cortex.py"
+REPO = pathlib.Path(__file__).resolve().parent.parent
+SDK = REPO / "core" / "plugins" / "script" / "sdk" / "cortex.py"
+GUIDE = REPO / "docs" / "script-plugin.md"
 
 
 @pytest.fixture
@@ -102,6 +109,105 @@ def test_latest_text_is_only_the_newest_user_message(cortex):
 
     cortex.handle(anthropic_request("first rm -rf /", "second"))
     assert seen == ["second"]
+
+
+def tool_turn(*content):
+    """An Anthropic request whose newest user message is the given blocks, after
+    the user asked something and the agent called a tool."""
+    msg = anthropic_request("please tidy the repo")
+    body = json.loads(msg["request"]["body"])
+    body["messages"].append({"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Read"}]})
+    body["messages"].append({"role": "user", "content": list(content)})
+    msg["request"]["body"] = json.dumps(body)
+    return msg
+
+
+@pytest.mark.parametrize(
+    "content, want",
+    [
+        # A tool result is not the user's words, whether its content is blocks or a string.
+        ([{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "never git push --force"}]}],
+         "please tidy the repo"),
+        ([{"type": "tool_result", "tool_use_id": "t1", "content": "never git push --force"}], "please tidy the repo"),
+        # Text beside a tool result is.
+        ([{"type": "tool_result", "tool_use_id": "t1", "content": "never git push --force"}, {"type": "text", "text": "now commit"}],
+         "now commit"),
+        # A user message with no text, as replay rebuilds a tool turn.
+        ([{"type": "text", "text": ""}], "please tidy the repo"),
+    ],
+)
+def test_latest_text_is_not_tool_output_anthropic(cortex, content, want):
+    seen = []
+
+    @cortex.on.request
+    def gate(flow):
+        seen.append(flow.latest_text)
+
+    cortex.handle(tool_turn(*content))
+    assert seen == [want]
+
+
+def test_latest_text_is_not_tool_output_openai(cortex):
+    seen = []
+
+    @cortex.on.request
+    def gate(flow):
+        seen.append(flow.latest_text)
+
+    msg = openai_request("please tidy the repo")
+    body = json.loads(msg["request"]["body"])
+    body["messages"].append({"role": "assistant", "tool_calls": [{"id": "t1", "type": "function"}]})
+    body["messages"].append({"role": "tool", "tool_call_id": "t1", "content": "never git push --force"})
+    msg["request"]["body"] = json.dumps(body)
+    cortex.handle(msg)
+    assert seen == ["please tidy the repo"]
+
+
+def test_latest_text_is_empty_without_user_text(cortex):
+    seen = []
+
+    @cortex.on.request
+    def gate(flow):
+        seen.append(flow.latest_text)
+
+    msg = anthropic_request()
+    body = json.loads(msg["request"]["body"])
+    body["messages"] = [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "out"}]}]
+    msg["request"]["body"] = json.dumps(body)
+    cortex.handle(msg)
+    assert seen == [""]
+
+
+def test_the_guides_gate_ignores_tool_output(cortex):
+    @cortex.on.request
+    def no_force_push(flow):
+        if "git push --force" in flow.latest_text:
+            flow.deny("force-push needs a human")
+
+    reply, _ = cortex.handle(tool_turn({"type": "tool_result", "tool_use_id": "t1", "content": "never git push --force"}))
+    assert "deny" not in reply
+
+
+# Replay rebuilds a tool turn from the parse, which keeps no tool result: the hook
+# must read the same latest_text there as it would live.
+def test_replay_reads_latest_text_as_live(cortex, monkeypatch):
+    seen = []
+
+    @cortex.on.request
+    def gate(flow):
+        seen.append(flow.latest_text)
+
+    messages = [
+        {"role": "user", "content": "please tidy the repo"},
+        {"role": "assistant"},
+        {"role": "user"},
+    ]
+    events = [{"seq": 1, "phase": "request", "sessionId": "s", "inference": {"model": "m", "messages": messages}}]
+    monkeypatch.setattr(cortex, "_get", lambda url: {"events": events})
+    cortex.replay("s", write=lambda s: None)
+    live = tool_turn({"type": "tool_result", "tool_use_id": "t1", "content": "out"})
+    cortex.handle(live)
+    assert seen == ["please tidy the repo", "please tidy the repo"]
 
 
 def test_deny(cortex):
@@ -232,3 +338,73 @@ def test_set_body_then_replace_text(cortex):
     out = json.loads(reply["request"]["body"])
     assert out["model"] == "smaller"
     assert out["messages"][0]["content"][0]["text"] == "a ***"
+
+
+# ---- the documented commands, run as a user would ---------------------------
+
+
+@pytest.fixture
+def session_api():
+    """A session API serving one recorded request that carries an AWS key."""
+    events = [
+        {
+            "seq": 1,
+            "phase": "request",
+            "sessionId": "s1",
+            "inference": {"model": "m", "messages": [{"role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE"}]},
+        }
+    ]
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            out = json.dumps({"events": events}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *args):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield "http://127.0.0.1:%d" % srv.server_port
+    srv.shutdown()
+
+
+def plugins_folder(home):
+    """~/.cortex/plugins under home, with the SDK where Cortex installs it."""
+    plugins = home / ".cortex" / "plugins"
+    (plugins / "_sdk").mkdir(parents=True)
+    shutil.copy(SDK, plugins / "_sdk" / "cortex.py")
+    return plugins
+
+
+def run_in_shell(cmd, home, cwd):
+    """cmd in sh, as typed into a terminal: HOME is home and nothing has set PYTHONPATH."""
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["HOME"] = str(home)
+    return subprocess.run(["sh", "-c", cmd], cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
+
+
+def test_the_guides_replay_command_runs_from_a_shell(tmp_path, session_api):
+    guide = GUIDE.read_text()
+    plugins = plugins_folder(tmp_path)
+    script = plugins / "10-secrets.py"
+    script.write_text(re.findall(r"```python\n(.*?)```", guide, re.S)[0])
+    script.chmod(0o755)
+    cmd = next(b for b in re.findall(r"```sh\n(.*?)```", guide, re.S) if "--replay" in b).strip()
+    proc = run_in_shell(cmd.replace("<session-id>", "s1 " + session_api), tmp_path, tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert "replayed 1 requests: 1 modified" in proc.stdout
+
+
+def test_the_sdk_docstrings_replay_command_runs_from_a_shell(cortex, tmp_path, session_api):
+    plugins = plugins_folder(tmp_path)
+    (plugins / "mask.py").write_text(
+        "from cortex import on, run\n@on.request\ndef mask(flow):\n    flow.replace_text('AKIA', '[key]')\nrun()\n"
+    )
+    cmd = next(line.strip() for line in cortex.__doc__.splitlines() if "--replay" in line)
+    proc = run_in_shell(cmd.replace("<session-id>", "s1 " + session_api), tmp_path, plugins)
+    assert proc.returncode == 0, proc.stderr
+    assert "replayed 1 requests: 1 modified" in proc.stdout

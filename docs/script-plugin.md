@@ -45,7 +45,7 @@ Every request your agents sent is in a session Cortex recorded. Replay one
 through the script before letting it touch anything:
 
 ```sh
-~/.cortex/plugins/10-secrets.py --replay <session-id>
+PYTHONPATH=~/.cortex/plugins/_sdk ~/.cortex/plugins/10-secrets.py --replay <session-id>
 ```
 
 ```
