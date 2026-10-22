@@ -35,6 +35,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"time"
 )
 
@@ -63,6 +64,8 @@ var ErrBackoff = errors.New("worker: restarting after a failure")
 // ErrStarting is returned by Call while the child is being started in the
 // background.
 var ErrStarting = errors.New("worker: script is starting")
+
+var errStopped = errors.New("worker: stopped")
 
 // Config describes the child to run.
 type Config struct {
@@ -106,6 +109,9 @@ type Reply struct {
 type Worker struct {
 	cfg  Config
 	name string
+	// callTimeout is cfg.CallTimeout, settable while calls run: a pool hands a
+	// running worker to a build whose timeout may differ.
+	callTimeout atomic.Int64
 
 	// sem serialises everything that touches the child. A channel rather than a
 	// mutex so that waiting for it can give up when a call's deadline passes.
@@ -116,8 +122,17 @@ type Worker struct {
 	failures  int
 	retryAt   time.Time
 	stopped   bool
-	starting  bool
-	now       func() time.Time
+	// start is the start in progress, nil when none is. It runs without sem, so a
+	// call made meanwhile is not held up by it.
+	start *startup
+	now   func() time.Time
+}
+
+// startup is one background start of the child.
+type startup struct {
+	done   chan struct{}
+	cancel context.CancelFunc
+	err    error // set before done is closed
 }
 
 // New returns a worker for cfg. Nothing runs until Start or the first Call.
@@ -128,7 +143,16 @@ func New(cfg Config) *Worker {
 	if cfg.CallTimeout <= 0 {
 		cfg.CallTimeout = DefaultCallTimeout
 	}
-	return &Worker{cfg: cfg, name: filepath.Base(cfg.Path), sem: make(chan struct{}, 1), now: time.Now}
+	w := &Worker{cfg: cfg, name: filepath.Base(cfg.Path), sem: make(chan struct{}, 1), now: time.Now}
+	w.callTimeout.Store(int64(cfg.CallTimeout))
+	return w
+}
+
+func (w *Worker) setCallTimeout(d time.Duration) {
+	if d <= 0 {
+		d = DefaultCallTimeout
+	}
+	w.callTimeout.Store(int64(d))
 }
 
 func (w *Worker) lock(ctx context.Context) error {
@@ -142,17 +166,38 @@ func (w *Worker) lock(ctx context.Context) error {
 
 func (w *Worker) unlock() { <-w.sem }
 
-// Start runs the child and waits for its handshake. Calling it on a running
-// worker returns the running child's handshake.
+// Start runs the child and waits for its handshake, or for the start already in
+// progress. Calling it on a running worker returns the running child's handshake.
+// ctx bounds the wait; the start itself is bounded by StartTimeout.
 func (w *Worker) Start(ctx context.Context) (Handshake, error) {
-	if err := w.lock(ctx); err != nil {
-		return Handshake{}, err
+	for {
+		if err := w.lock(ctx); err != nil {
+			return Handshake{}, err
+		}
+		running, err := w.runnable()
+		if running {
+			hs := w.handshake
+			w.unlock()
+			return hs, nil
+		}
+		if err != nil && !errors.Is(err, ErrStarting) {
+			w.unlock()
+			return Handshake{}, err
+		}
+		if err == nil {
+			w.begin()
+		}
+		s := w.start
+		w.unlock()
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			return Handshake{}, fmt.Errorf("worker: %s did not start in time: %w", w.name, ctx.Err())
+		}
+		if s.err != nil {
+			return Handshake{}, s.err
+		}
 	}
-	defer w.unlock()
-	if err := w.ensure(ctx); err != nil {
-		return Handshake{}, err
-	}
-	return w.handshake, nil
 }
 
 // Handshake returns the last handshake the child sent; zero before the first start.
@@ -165,7 +210,7 @@ func (w *Worker) Handshake() Handshake {
 // Call sends msg with a fresh "id" and returns the child's reply to it. msg must
 // marshal to a JSON object.
 func (w *Worker) Call(ctx context.Context, msg map[string]any) (Reply, error) {
-	ctx, cancel := context.WithTimeout(ctx, w.cfg.CallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(w.callTimeout.Load()))
 	defer cancel()
 	if err := w.lock(ctx); err != nil {
 		return Reply{}, err
@@ -196,6 +241,9 @@ func (w *Worker) Stop() {
 	w.sem <- struct{}{}
 	defer w.unlock()
 	w.stopped = true
+	if w.start != nil {
+		w.start.cancel()
+	}
 	if w.proc != nil {
 		w.proc.stop()
 		w.proc = nil
@@ -205,54 +253,65 @@ func (w *Worker) Stop() {
 // ready reports whether a child is running to take a call, and when none is, starts
 // one in the background rather than making this call wait for it. Caller holds sem.
 func (w *Worker) ready() error {
-	if w.stopped {
-		return errors.New("worker: stopped")
-	}
-	if w.proc != nil && !w.proc.exited() {
+	running, err := w.runnable()
+	if running {
 		return nil
 	}
-	if w.proc != nil {
-		w.fail(fmt.Errorf("worker: %s exited: %v", w.name, w.proc.exitErr()))
+	if err != nil {
+		return err
 	}
-	if w.now().Before(w.retryAt) {
-		return ErrBackoff
-	}
-	if !w.starting {
-		w.starting = true
-		go func() {
-			w.sem <- struct{}{}
-			defer w.unlock()
-			w.starting = false
-			_ = w.ensure(context.Background())
-		}()
-	}
+	w.begin()
 	return ErrStarting
 }
 
-// ensure starts the child when none is running. Caller holds sem. The start is
-// bounded by StartTimeout and by ctx, whichever ends first.
-func (w *Worker) ensure(ctx context.Context) error {
+// runnable reports whether a child is running, and when none is, the reason a start
+// cannot begin now: stopped, ErrStarting, or ErrBackoff. A nil error with running
+// false means the caller may begin one. Caller holds sem.
+func (w *Worker) runnable() (running bool, err error) {
 	if w.stopped {
-		return errors.New("worker: stopped")
+		return false, errStopped
 	}
 	if w.proc != nil && !w.proc.exited() {
-		return nil
+		return true, nil
 	}
 	if w.proc != nil {
 		w.fail(fmt.Errorf("worker: %s exited: %v", w.name, w.proc.exitErr()))
 	}
+	if w.start != nil {
+		return false, ErrStarting
+	}
 	if w.now().Before(w.retryAt) {
-		return ErrBackoff
+		return false, ErrBackoff
 	}
-	ctx, cancel := context.WithTimeout(ctx, w.cfg.StartTimeout)
-	defer cancel()
-	p, hs, err := spawn(ctx, w.cfg, w.name)
-	if err != nil {
-		w.fail(err)
-		return err
-	}
-	w.proc, w.handshake = p, hs
-	return nil
+	return false, nil
+}
+
+// begin starts the child in the background, bounded by StartTimeout. The spawn runs
+// without sem; sem is taken again only to install the child. Caller holds sem.
+func (w *Worker) begin() {
+	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.StartTimeout)
+	s := &startup{done: make(chan struct{}), cancel: cancel}
+	w.start = s
+	go func() {
+		defer cancel()
+		p, hs, err := spawn(ctx, w.cfg, w.name)
+		w.sem <- struct{}{}
+		w.start = nil
+		switch {
+		case w.stopped:
+			if p != nil {
+				p.kill()
+			}
+			err = errStopped
+		case err != nil:
+			w.fail(err)
+		default:
+			w.proc, w.handshake = p, hs
+		}
+		s.err = err
+		w.unlock()
+		close(s.done)
+	}()
 }
 
 // fail kills the child, if any, and schedules the next start. Caller holds sem.

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,9 @@ func fakeWorker(mode string) {
 		time.Sleep(time.Hour)
 	case "exit-at-start":
 		os.Exit(3)
+	}
+	if d, err := time.ParseDuration(os.Getenv("FAKE_START_DELAY")); err == nil {
+		time.Sleep(d)
 	}
 	fmt.Fprintln(out, "starting up") // stray output before the handshake is skipped
 	send(Handshake{Cortex: Protocol, Hooks: []string{"request"}, Enforce: mode == "enforce"})
@@ -206,6 +210,56 @@ func TestWorker_TimeoutKillsAndRestarts(t *testing.T) {
 	}
 }
 
+// A start in progress, from a call or from Start, holds nothing a call waits for:
+// calls made meanwhile fail at once, and Start waits for that same start.
+func TestWorker_CallsDuringAStartFailAtOnce(t *testing.T) {
+	for _, by := range []string{"call", "Start"} {
+		t.Run("started by "+by, func(t *testing.T) {
+			cfg := fake(t, "plain", "FAKE_START_DELAY=1500ms")
+			cfg.CallTimeout = 500 * time.Millisecond
+			w := New(cfg)
+			t.Cleanup(w.Stop)
+			started := make(chan error, 1)
+			if by == "call" {
+				if _, err := w.Call(context.Background(), map[string]any{}); !errors.Is(err, ErrStarting) {
+					t.Fatalf("first Call = %v, want ErrStarting", err)
+				}
+			} else {
+				go func() { _, err := w.Start(context.Background()); started <- err }()
+			}
+			time.Sleep(100 * time.Millisecond)
+			for i := range 3 {
+				t0 := time.Now()
+				_, err := w.Call(context.Background(), map[string]any{})
+				if !errors.Is(err, ErrStarting) {
+					t.Fatalf("call %d during the start = %v, want ErrStarting", i, err)
+				}
+				if d := time.Since(t0); d > 100*time.Millisecond {
+					t.Fatalf("call %d during the start took %v", i, d)
+				}
+			}
+			t0 := time.Now()
+			w.Handshake()
+			if d := time.Since(t0); d > 100*time.Millisecond {
+				t.Errorf("Handshake during the start took %v", d)
+			}
+			// Start joins the start in progress rather than running a second child.
+			hs, err := w.Start(context.Background())
+			if err != nil || hs.Cortex != Protocol {
+				t.Fatalf("Start = %+v, %v", hs, err)
+			}
+			if by == "Start" {
+				if err := <-started; err != nil {
+					t.Fatalf("first Start: %v", err)
+				}
+			}
+			if got, _ := call(t, w, "x"); got["count"] != float64(1) {
+				t.Errorf("reply %v: not the first call to one child", got)
+			}
+		})
+	}
+}
+
 func TestWorker_TimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	pidfile := filepath.Join(t.TempDir(), "pid")
 	cfg := fake(t, "spawn-child", "FAKE_PIDFILE="+pidfile)
@@ -332,6 +386,39 @@ func TestEnviron(t *testing.T) {
 	}
 }
 
+// A shell whose profile leaves a background process holding stdout still answers
+// within the probe's budget: with its PATH when it printed one, empty when it hung.
+func TestLoginPath_BackgroundChildHoldingStdout(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	for name, tc := range map[string]struct{ body, want string }{
+		"printed then exited": {"sleep 5 &\nshift\nPATH=/from/login exec " + sh + " \"$@\"\n", "/from/login"},
+		"hung":                {"sleep 5 &\nsleep 5\n", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			shell := filepath.Join(t.TempDir(), "shell")
+			os.WriteFile(shell, []byte("#!"+sh+"\n"+tc.body), 0o700)
+			t.Setenv("SHELL", shell)
+			loginPathMu.Lock()
+			loginPathVal, loginPathTried = "", time.Time{}
+			old := loginPathTimeout
+			loginPathTimeout = 500 * time.Millisecond
+			loginPathMu.Unlock()
+			t.Cleanup(func() { loginPathVal, loginPathTried, loginPathTimeout = "", time.Now(), old })
+			t0 := time.Now()
+			got := loginPath()
+			if d := time.Since(t0); d > 2*time.Second {
+				t.Errorf("loginPath took %v against a %v budget", d, loginPathTimeout)
+			}
+			if got != tc.want {
+				t.Errorf("loginPath() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // waitStopped waits for w to refuse calls; a released worker stops in the background.
 func waitStopped(t *testing.T, w *Worker, what string) {
 	t.Helper()
@@ -368,6 +455,45 @@ func TestPool_ReusesAnUnchangedScript(t *testing.T) {
 	}
 	p.Release(two)
 	waitStopped(t, a, "a worker no build holds")
+}
+
+// A reused worker takes the call timeout of the build that acquired it, so an edited
+// timeout applies to the running script without restarting it.
+func TestPool_AReusedWorkerTakesTheNewCallTimeout(t *testing.T) {
+	p := NewPool()
+	cfg := fake(t, "hang")
+	cfg.CallTimeout = 10 * time.Second
+	a := p.Acquire(p.NewHolder(), cfg, "h1")
+	t.Cleanup(a.Stop)
+	if _, err := a.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cfg.CallTimeout = 200 * time.Millisecond
+	if b := p.Acquire(p.NewHolder(), cfg, "h1"); b != a {
+		t.Fatal("a changed timeout restarted the script")
+	}
+	t0 := time.Now()
+	if _, err := a.Call(context.Background(), map[string]any{}); err == nil {
+		t.Fatal("call to a hanging script succeeded")
+	}
+	if d := time.Since(t0); d > 2*time.Second {
+		t.Errorf("call took %v: the new 200ms timeout was not applied", d)
+	}
+}
+
+// The environment is fixed for a process's life, so a changed one gets a new worker.
+func TestPool_AChangedEnvironmentGetsANewWorker(t *testing.T) {
+	p := NewPool()
+	cfg := fake(t, "plain")
+	one := p.NewHolder()
+	a := p.Acquire(one, cfg, "h1")
+	t.Cleanup(a.Stop)
+	cfg.Env = append(slices.Clone(cfg.Env), "PATH=/elsewhere")
+	b := p.Acquire(p.NewHolder(), cfg, "h1")
+	t.Cleanup(b.Stop)
+	if b == a {
+		t.Fatal("a changed environment kept the old worker")
+	}
 }
 
 // An edited script gets a new worker, and the old one keeps serving the running
@@ -444,5 +570,12 @@ func TestWorker_TimeoutCoversTheWrite(t *testing.T) {
 	}
 	if d := time.Since(start); d > time.Second {
 		t.Errorf("the next call waited %v behind the stuck one", d)
+	}
+	stopped := make(chan struct{})
+	go func() { w.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop blocked behind the stuck call")
 	}
 }

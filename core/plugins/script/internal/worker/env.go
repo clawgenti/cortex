@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -85,6 +86,10 @@ var (
 	// loginPathTimeout bounds one probe. A var so a test on a loaded machine is not
 	// at the mercy of the budget a real login gets.
 	loginPathTimeout = 2 * time.Second
+	// loginPathWaitDelay bounds the wait for stdout to close once the shell has
+	// exited or been killed. A process the profile backgrounds inherits stdout, and
+	// without this the probe would last as long as that process does.
+	loginPathWaitDelay = 100 * time.Millisecond
 )
 
 // loginPath is the PATH a login shell of the user's own sets up. A successful
@@ -105,8 +110,9 @@ func loginPath() string {
 	ctx, cancel := context.WithTimeout(context.Background(), loginPathTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, "-l", "-c", `printf '\n'"$0"'%s'"$0"'\n' "$PATH"`, pathMarker)
+	cmd.WaitDelay = loginPathWaitDelay
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return ""
 	}
 	loginPathVal = parseLoginPath(string(out))

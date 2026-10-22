@@ -1,13 +1,16 @@
 package worker
 
 import (
+	"strings"
 	"sync"
+	"time"
 )
 
 // Pool keeps workers alive across pipeline builds. A config reload rebuilds every
 // plugin, and a script that restarted on every build would lose its state whenever
 // anything at all in the config changed. The pool hands the next build the worker
-// the previous build was using, for as long as the script file is unchanged.
+// the previous build was using, for as long as the script file and the child's
+// command and environment are unchanged.
 //
 // A build is a holder. It acquires workers while it is configured, activates once
 // its pipeline starts, and releases them when its pipeline is shut down. A worker
@@ -27,7 +30,20 @@ type Pool struct {
 	active  map[int]bool
 }
 
-type key struct{ path, hash string }
+// key is what a running child is made from. A build that changes any of it gets a
+// new worker; the call timeout is not in it, and a reused worker takes the new one.
+type key struct {
+	path, hash, args, env string
+	start                 time.Duration
+}
+
+func keyOf(cfg Config, hash string) key {
+	return key{
+		path: cfg.Path, hash: hash,
+		args: strings.Join(cfg.Args, "\x00"), env: strings.Join(cfg.Env, "\x00"),
+		start: cfg.StartTimeout,
+	}
+}
 
 type poolEntry struct {
 	w       *Worker
@@ -46,16 +62,18 @@ func (p *Pool) NewHolder() int {
 	return p.next
 }
 
-// Acquire returns the worker for this version of cfg.Path, starting a new one when
-// none runs it.
+// Acquire returns the worker for this version of cfg.Path and this cfg, starting a
+// new one when none runs it.
 func (p *Pool) Acquire(holder int, cfg Config, hash string) *Worker {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	k := key{cfg.Path, hash}
+	k := keyOf(cfg, hash)
 	e, ok := p.entries[k]
 	if !ok {
 		e = &poolEntry{w: New(cfg), holders: map[int]bool{}}
 		p.entries[k] = e
+	} else {
+		e.w.setCallTimeout(cfg.CallTimeout)
 	}
 	e.holders[holder] = true
 	return e.w
