@@ -61,7 +61,7 @@ func fakeWorker(mode string) {
 	if mode == "deaf" {
 		time.Sleep(time.Hour) // handshakes, then never reads stdin
 	}
-	if mode == "spawn-child" {
+	if mode == "spawn-child" || mode == "spawn-child-then-crash" {
 		// A grandchild in the same process group; the test checks a timeout kills it.
 		child := exec.Command("sleep", "3600")
 		_ = child.Start()
@@ -83,6 +83,8 @@ func fakeWorker(mode string) {
 			os.Stderr.WriteString(strings.Repeat("x", 2<<20))
 		case "slow":
 			time.Sleep(300 * time.Millisecond)
+		case "spawn-child-then-crash":
+			os.Exit(2)
 		case "crash-after-one":
 			if count > 1 {
 				os.Exit(2)
@@ -381,6 +383,53 @@ func (l lockedWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.Write(p)
+}
+
+// A script that exits takes the processes it started with it.
+func TestWorker_AnExitKillsTheWholeProcessGroup(t *testing.T) {
+	pidfile := filepath.Join(t.TempDir(), "pid")
+	w := New(fake(t, "spawn-child-then-crash", "FAKE_PIDFILE="+pidfile))
+	t.Cleanup(w.Stop)
+	if _, err := w.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	w.Call(context.Background(), map[string]any{}) // the script exits on it
+	b, err := os.ReadFile(pidfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(string(b))
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("grandchild %d survived the script's exit", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A child that exited and was reaped before the worker noticed is not signalled
+// again: by then its process group id may belong to an unrelated group.
+func TestWorker_AReapedChildIsNotSignalledLater(t *testing.T) {
+	w := New(fake(t, "crash-after-one"))
+	t.Cleanup(w.Stop)
+	call(t, w, "first")
+	p := w.proc
+	var late atomic.Int64
+	real := killGroup
+	killGroup = func(cmd *exec.Cmd) {
+		if p.exited() {
+			late.Add(1)
+		}
+		real(cmd)
+	}
+	t.Cleanup(func() { killGroup = real })
+	p.stdin.Write([]byte("{}\n")) // the second message makes it exit
+	<-p.done
+	w.Call(context.Background(), map[string]any{})
+	if n := late.Load(); n != 0 {
+		t.Errorf("signalled a reaped child's process group %d times", n)
+	}
 }
 
 // A caller that goes away mid-call stops waiting without killing the script.

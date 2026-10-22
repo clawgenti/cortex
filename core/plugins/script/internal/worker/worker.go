@@ -383,7 +383,11 @@ func spawn(ctx context.Context, cfg Config, name string) (*process, Handshake, e
 	}
 	p := &process{cmd: cmd, stdin: stdin, out: bufio.NewReaderSize(stdout, 64<<10), done: make(chan struct{})}
 	go logStderr(stderr, name)
-	go func() { p.waited = cmd.Wait(); close(p.done) }()
+	go func() {
+		p.waited = cmd.Wait()
+		killGroup(cmd) // what the script started dies with it
+		close(p.done)
+	}()
 
 	var hs Handshake
 	var logs []string
@@ -421,7 +425,7 @@ func (p *process) call(ctx context.Context, line []byte, id uint64) (Reply, erro
 			return reply, fmt.Errorf("worker: write: %w", err)
 		}
 	case <-ctx.Done():
-		killProcessGroup(p.cmd)
+		p.killGroup()
 		<-wrote
 		return reply, fmt.Errorf("worker: script did not read its input in time: %w", ctx.Err())
 	}
@@ -510,8 +514,19 @@ func (p *process) stop() {
 
 func (p *process) kill() {
 	_ = p.stdin.Close()
-	killProcessGroup(p.cmd)
+	p.killGroup()
 	<-p.done
+}
+
+// killGroup is a var so a test can see when it is called.
+var killGroup = killProcessGroup
+
+// killGroup kills the child's process group unless the child has exited, in which
+// case its wait already killed the group and the id may since have been reused.
+func (p *process) killGroup() {
+	if !p.exited() {
+		killGroup(p.cmd)
+	}
 }
 
 // logStderr logs r a line at a time until it ends. A line is kept to maxLogBytes and
