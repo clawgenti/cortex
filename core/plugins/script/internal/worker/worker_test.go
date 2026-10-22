@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -281,6 +282,43 @@ func TestWorker_AQueueThatOutlastsACallerKeepsTheScript(t *testing.T) {
 	got := callKept(t, w)
 	if got["count"].(float64) < 2 {
 		t.Errorf("reply %v: the script was restarted", got)
+	}
+}
+
+// Under a queue longer than the call timeout, a message the script is sent is one its
+// caller still waits for: the script answers no call nobody reads, so calls keep
+// succeeding at the rate it can answer them.
+func TestWorker_AnOverloadedScriptAnswersOnlyCallersStillWaiting(t *testing.T) {
+	cfg := fake(t, "slow") // 300ms a call
+	cfg.CallTimeout = time.Second
+	w := New(cfg)
+	t.Cleanup(w.Stop)
+	if _, err := w.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var ok atomic.Int64
+	var wg sync.WaitGroup
+	end := time.Now().Add(3 * time.Second)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for time.Now().Before(end) {
+				if _, err := w.Call(context.Background(), map[string]any{}); err == nil {
+					ok.Add(1)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	got := callKept(t, w)
+	answered := int64(got["count"].(float64)) - 1 // the script's count includes callKept's call
+	if answered != ok.Load() {
+		t.Errorf("the script answered %d calls and %d callers got a reply: %d answers went unread",
+			answered, ok.Load(), answered-ok.Load())
+	}
+	if ok.Load() == 0 {
+		t.Error("no call succeeded")
 	}
 }
 

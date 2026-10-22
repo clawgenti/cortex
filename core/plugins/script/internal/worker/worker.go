@@ -12,10 +12,7 @@
 //     print, a library's warning — and is returned with the reply as Logs, so
 //     stray output cannot corrupt the exchange.
 //   - Calls are serialised: a script is a plain read-reply loop, and its state
-//     cannot race. A caller waits at most the call timeout, its wait for the calls
-//     ahead of it included, so a slow script delays requests by at most the call
-//     timeout, never by the length of a queue. A caller that gives up first leaves
-//     its message to finish without it.
+//     cannot race.
 //   - A script that takes longer than the call timeout to answer a message it was
 //     sent has its whole process group killed. So does a child that exits. Either way a new one is started in the
 //     background after a backoff, and the script's in-memory state is gone. A call
@@ -211,15 +208,14 @@ func (w *child) Handshake() Handshake {
 }
 
 // Call sends msg with a fresh "id" and returns the child's reply to it. msg must
-// marshal to a JSON object. Call returns when ctx ends or the call timeout passes,
-// whichever is first; the message, once sent, is answered or timed out without it.
+// marshal to a JSON object.
 func (w *Worker) Call(ctx context.Context, msg map[string]any) (Reply, error) {
-	ctx, cancel := context.WithTimeout(ctx, w.callTimeout)
+	queued, cancel := context.WithTimeout(ctx, w.callTimeout)
 	defer cancel()
-	if err := w.lock(ctx); err != nil {
+	if err := w.lock(queued); err != nil {
 		return Reply{}, err
 	}
-	if err := ctx.Err(); err != nil {
+	if err := queued.Err(); err != nil {
 		w.unlock()
 		return Reply{}, fmt.Errorf("worker: %s: %w", w.name, err)
 	}
