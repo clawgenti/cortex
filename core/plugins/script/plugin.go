@@ -159,7 +159,7 @@ func (s *Script) Configure(raw json.RawMessage) error {
 		return fmt.Errorf("script: read %s: %w", dir, err)
 	}
 	if len(files) == 0 {
-		return nil // every local install has a slot; an empty one costs nothing
+		return nil // every local install has a slot; an empty one starts nothing and writes nothing
 	}
 	env := worker.Environ(os.Environ(), "")
 	s.holder = pool.NewHolder()
