@@ -2,10 +2,13 @@ package worker
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +53,9 @@ func fakeWorker(mode string) {
 	if d, err := time.ParseDuration(os.Getenv("FAKE_START_DELAY")); err == nil {
 		time.Sleep(d)
 	}
+	if mode == "stderr-flood-start" {
+		os.Stderr.WriteString(strings.Repeat("x", 2<<20) + "\n")
+	}
 	fmt.Fprintln(out, "starting up") // stray output before the handshake is skipped
 	send(Handshake{Cortex: Protocol, Hooks: []string{"request"}, Enforce: mode == "enforce"})
 	if mode == "deaf" {
@@ -71,6 +77,10 @@ func fakeWorker(mode string) {
 		switch mode {
 		case "hang", "spawn-child":
 			time.Sleep(time.Hour)
+		case "stderr-flood-call":
+			os.Stderr.WriteString(strings.Repeat("x", 2<<20) + "\n")
+		case "stderr-flood-unterminated":
+			os.Stderr.WriteString(strings.Repeat("x", 2<<20))
 		case "slow":
 			time.Sleep(300 * time.Millisecond)
 		case "crash-after-one":
@@ -320,6 +330,57 @@ func TestWorker_AnOverloadedScriptAnswersOnlyCallersStillWaiting(t *testing.T) {
 	if ok.Load() == 0 {
 		t.Error("no call succeeded")
 	}
+}
+
+// A script's stderr is read to the end whatever its line lengths, so a line longer
+// than the logger keeps does not leave the script blocked writing the next one.
+func TestWorker_LongStderrLinesDoNotStallTheScript(t *testing.T) {
+	for _, mode := range []string{"stderr-flood-start", "stderr-flood-call", "stderr-flood-unterminated"} {
+		t.Run(mode, func(t *testing.T) {
+			w := New(fake(t, mode))
+			t.Cleanup(w.Stop)
+			if _, err := w.Start(context.Background()); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			for i := range 3 {
+				if _, err := w.Call(context.Background(), map[string]any{}); err != nil {
+					t.Fatalf("call %d: %v", i, err)
+				}
+			}
+		})
+	}
+}
+
+// Lines after one too long to keep are still logged, and the long one is logged cut.
+func TestLogStderr_KeepsLoggingAfterALongLine(t *testing.T) {
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(lockedWriter{&mu, &buf}, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	logStderr(strings.NewReader("before\n"+strings.Repeat("x", 2<<20)+"\n\nafter\n"+strings.Repeat("y", 2<<20)), "s")
+	mu.Lock()
+	out := buf.String()
+	mu.Unlock()
+	for _, want := range []string{"line=before", "line=after", "line=xxx", "line=yyy", `line=""`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log lacks %q:\n%.300s", want, out)
+		}
+	}
+	if n := strings.Count(out, "script stderr"); n != 5 {
+		t.Errorf("logged %d lines, want 5", n)
+	}
+}
+
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 // A caller that goes away mid-call stops waiting without killing the script.

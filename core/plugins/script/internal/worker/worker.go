@@ -514,11 +514,38 @@ func (p *process) kill() {
 	<-p.done
 }
 
+// logStderr logs r a line at a time until it ends. A line is kept to maxLogBytes and
+// the rest of it read and dropped, so stderr is drained whatever its line lengths.
 func logStderr(r io.Reader, name string) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	for sc.Scan() {
-		slog.Info("script stderr", "script", name, "line", truncate(sc.Text()))
+	br := bufio.NewReaderSize(r, 64<<10)
+	for {
+		var line []byte
+		cut := false
+		var err error
+		for {
+			var chunk []byte
+			chunk, err = br.ReadSlice('\n')
+			if room := maxLogBytes + 1 - len(line); room > 0 {
+				line = append(line, chunk[:min(len(chunk), room)]...)
+			}
+			if len(line) > maxLogBytes {
+				cut = true
+			}
+			if err != bufio.ErrBufferFull {
+				break
+			}
+		}
+		line = bytes.TrimRight(line, "\r\n")
+		if err == nil || len(line) > 0 {
+			text := string(line)
+			if cut {
+				text = string(line[:maxLogBytes]) + "…"
+			}
+			slog.Info("script stderr", "script", name, "line", text)
+		}
+		if err != nil {
+			return
+		}
 	}
 }
 
