@@ -2,7 +2,8 @@
 
 Customize the Cortex running on your laptop with a small script, without
 writing a Go plugin or rebuilding anything. A script can read, change or block
-each request the agent sends, and keeps its own state between requests.
+each request the agent sends and each response it gets back, and keeps its own
+state between them.
 
 Go plugins remain the way to build anything permanent, shared, or on the hot
 path. Script plugins are for the quick, personal customization.
@@ -38,6 +39,39 @@ chmod +x ~/.cortex/plugins/10-secrets.py
 Cortex starts it within a second, in **shadow mode**. That is the whole
 installation: no config edit, no restart. `from cortex import ...` resolves to
 `~/.cortex/plugins/_sdk/cortex.py`, which Cortex keeps up to date itself.
+
+## Responses
+
+A script can read every response, and change or block one:
+
+```python
+@on.response
+def watch(flow):                       # read only
+    if "BEGIN PRIVATE KEY" in flow.completion:
+        print("the model wrote a key")
+
+@on.response(rewrite=True)             # may change and block
+def scrub(flow):
+    flow.replace_text(r"\b[\w-]+\.corp\.internal\b", "[internal-host]")
+```
+
+`flow.completion` is the text the model wrote, joined from the whole response —
+JSON or streamed, Anthropic or OpenAI chat. `flow.response` has `status`,
+`headers`, `body`, `streamed` and, for a stream, `frames`.
+
+The two kinds cost different things:
+
+- **`@on.response` keeps streaming.** The agent gets each token as it arrives,
+  and the hook runs once the response is complete — after the agent has it.
+  It can read and record; a deny is recorded as late, and an edit is refused.
+- **`@on.response(rewrite=True)` holds responses back.** While a script that
+  declares it is loaded, Cortex buffers every streamed response in its slot
+  until it is complete, then runs the hook, then sends it — so the agent sees
+  no output until the model has finished. That is the price of changing what it
+  receives. A pattern split across two of the stream's chunks is still matched:
+  each block's text is joined before the replacement and sent back as one chunk.
+
+Response headers cannot be changed — by a script or by any Go plugin.
 
 ## Test it on what you already sent
 
@@ -118,9 +152,10 @@ Completions and OpenAI Responses bodies. Other formats are in `flow.json`.
 - **A broken script does not break your agent.** An exception, a crash or a
   timeout is shown on the request's row and the request continues. To block
   instead, see `fail_closed` below.
-- **What Cortex records is what the agent sent.** Cortex's parsers read the
-  request before any script runs, so the session view and archive keep the
-  original text, even where a script masked it on the wire.
+- **What Cortex records is what the upstream exchanged.** Cortex's parsers read
+  each request before any script runs, and each streamed response before a
+  rewriting script does, so the session view and archive keep the original
+  text, even where a script masked it on the wire.
 - **Scripts run as you,** with your login shell's `PATH`, and only on a local
   install. A sidecar with the same config runs none of them.
 - **Your script's own HTTP calls do not go through Cortex.** Proxy variables
@@ -172,10 +207,14 @@ while IFS= read -r line; do
 done
 ```
 
-A message carries `hook`, `session` and `request` (`method`, `host`, `path`,
-`headers`, `body` or `body_base64`, and the parsers' `inference` / `mcp` /
-`a2a`). A reply may carry `deny` (`reason`, `status`, `code`), `request`
-(`body` or `body_base64`, `set_headers`, `remove_headers`), and `invocation`
-(`action`, `reason`, `details`). An empty reply, `{"id": N}`, means continue
+A message carries `hook` (`request` or `response`), `session` and `request`
+(`method`, `host`, `path`, `headers`, `body` or `body_base64`, and the parsers'
+`inference` / `mcp` / `a2a`). A response hook's message also carries `response`
+(`status`, `headers`, `body` or `body_base64`, `streamed`, and for a stream
+`frames`). The handshake lists the hooks the script implements in `hooks`, and
+says `"rewrite_response": true` if it may change responses. A reply may carry
+`deny` (`reason`, `status`, `code`), `request` or `response` (`body` or
+`body_base64`, and for a request `set_headers`, `remove_headers`), and
+`invocation` (`action`, `reason`, `details`). An empty reply, `{"id": N}`, means continue
 unchanged. Any line that is not a reply is treated as the script's output and
 shown on the row.

@@ -263,8 +263,129 @@ func (s *Script) OnRequest(ctx context.Context, pctx *pipeline.Context) pipeline
 	return pipeline.Action{Type: pipeline.Continue}
 }
 
-func (s *Script) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+// OnResponse is never called: the pipeline sends a StreamingResponder's responses
+// to OnResponseFrame instead, buffered or streamed. It exists for the Plugin
+// interface, and runs the hooks should a caller use it directly.
+func (s *Script) OnResponse(ctx context.Context, pctx *pipeline.Context) pipeline.Action {
+	return s.responseHooks(ctx, pctx, false, nil)
+}
+
+// streamState carries one response's frames to its last one.
+type streamState struct {
+	frames [][]byte
+	size   int
+	cut    bool
+}
+
+// maxStreamCopy bounds what the plugin keeps of a streamed response for its
+// scripts: the forward proxy's own cap on a buffered body.
+const maxStreamCopy = 10 << 20
+
+// OnResponseFrame is how responses reach scripts. A buffered response arrives as
+// one last frame with the whole body; a streamed one as each SSE event's payload,
+// then an empty last frame — by then every byte is with the client, so the
+// scripts read it and cannot change or block it. A script that rewrites
+// responses narrows this plugin to WritesResponseBody, which sends streamed
+// responses down the buffered path, where its edits apply.
+func (s *Script) OnResponseFrame(ctx context.Context, pctx *pipeline.Context, frame []byte, last bool) pipeline.Action {
+	if !s.hasResponseHooks() {
+		return pipeline.Action{Type: pipeline.Continue}
+	}
+	// The listeners mark a response delivered before its last frame only when they
+	// relayed it as it arrived. A buffered one — JSON, or SSE held back for a
+	// response writer — reaches its last frame unsent, with pctx.ResponseBody whole,
+	// so the scripts get the body and their edits and denies apply.
+	if last && !pctx.ResponseDelivered() {
+		pipeline.SetState[streamState](pctx, Name, nil)
+		return s.responseHooks(ctx, pctx, false, nil)
+	}
+	st := pipeline.GetState[streamState](pctx, Name)
+	if st == nil {
+		st = &streamState{}
+		pipeline.SetState(pctx, Name, st)
+	}
+	if !last {
+		if !st.cut && st.size+len(frame) <= maxStreamCopy {
+			st.frames = append(st.frames, append([]byte(nil), frame...))
+			st.size += len(frame)
+		} else {
+			st.cut = true
+		}
+		return pipeline.Action{Type: pipeline.Continue}
+	}
+	pipeline.SetState[streamState](pctx, Name, nil)
+	return s.responseHooks(ctx, pctx, true, st)
+}
+
+func (s *Script) hasResponseHooks() bool {
+	for _, l := range s.loaded {
+		if l.hs.Has("response") {
+			return true
+		}
+	}
+	return false
+}
+
+// responseHooks runs the response hooks. st is the copied stream for a response
+// already delivered, nil for one that is still the pipeline's to change.
+func (s *Script) responseHooks(ctx context.Context, pctx *pipeline.Context, streamed bool, st *streamState) pipeline.Action {
+	var msg map[string]any
+	for i := len(s.loaded) - 1; i >= 0; i-- {
+		l := s.loaded[i]
+		if !l.hs.Has("response") {
+			continue
+		}
+		// Built once, and again only after an applied edit, which the next script
+		// must see. The request goes along without its body: a response hook rarely
+		// reads it, and on a long conversation it is the largest thing in the message.
+		if msg == nil {
+			msg = responseMessage(pctx, streamed, st)
+		}
+		msg["plugin"] = l.name
+		a, stop, edited := s.run(ctx, pctx, l, msg, true)
+		if stop {
+			if streamed {
+				// The client already has the response; record the refusal, which the
+				// pipeline marks late, and let it stand.
+				return pipeline.Action{Type: pipeline.Continue}
+			}
+			return a
+		}
+		if edited {
+			msg = nil
+		}
+	}
 	return pipeline.Action{Type: pipeline.Continue}
+}
+
+func responseMessage(pctx *pipeline.Context, streamed bool, st *streamState) map[string]any {
+	msg := requestMessage(pctx)
+	msg["hook"] = "response"
+	delete(msg["request"].(map[string]any), "body")
+	delete(msg["request"].(map[string]any), "body_base64")
+	resp := map[string]any{
+		"status":   pctx.StatusCode,
+		"headers":  flatten(pctx.ResponseHeaders),
+		"streamed": streamed,
+	}
+	if streamed {
+		resp["frames"] = frameStrings(st.frames)
+		if st.cut {
+			resp["truncated"] = true
+		}
+	} else {
+		putBody(resp, pctx.ResponseBody)
+	}
+	msg["response"] = resp
+	return msg
+}
+
+func frameStrings(frames [][]byte) []string {
+	out := make([]string, len(frames))
+	for i, f := range frames {
+		out[i] = string(f)
+	}
+	return out
 }
 
 // run calls one script and applies its reply. stop is true when the chain ends
@@ -337,6 +458,12 @@ func (s *Script) apply(pctx *pipeline.Context, l *loaded, rep reply, logs []stri
 	e := rep.Request
 	if response {
 		e = rep.Response
+		if e.changed() && !l.hs.RewriteResponse {
+			return fail(fmt.Errorf("edited a response without declaring rewrite_response"))
+		}
+		if e.changed() && pctx.ResponseDelivered() {
+			return fail(fmt.Errorf("edited a response the client already has"))
+		}
 	}
 	if !e.changed() {
 		pctx.Record(inv)

@@ -52,9 +52,10 @@ func fakeScript(mode string) {
 			ID       uint64                `json:"id"`
 			Request  struct{ Body string } `json:"request"`
 			Response struct {
-				Body     string `json:"body"`
-				Streamed bool   `json:"streamed"`
-				Status   int    `json:"status"`
+				Body     string   `json:"body"`
+				Streamed bool     `json:"streamed"`
+				Status   int      `json:"status"`
+				Frames   []string `json:"frames"`
 			} `json:"response"`
 		}
 		json.Unmarshal(in.Bytes(), &msg)
@@ -88,10 +89,11 @@ func fakeScript(mode string) {
 			r["response"] = map[string]any{"body": "x"}
 		case "resp-seen":
 			r["invocation"] = map[string]any{"action": "observe", "reason": "resp", "details": map[string]string{
-				"body": msg.Response.Body, "streamed": fmt.Sprint(msg.Response.Streamed), "status": fmt.Sprint(msg.Response.Status)}}
+				"body": msg.Response.Body, "streamed": fmt.Sprint(msg.Response.Streamed), "status": fmt.Sprint(msg.Response.Status),
+				"frames": strings.Join(msg.Response.Frames, "|")}}
 		case "resp-rewrite":
 			r["response"] = map[string]any{"body": strings.ToUpper(msg.Response.Body)}
-		case "resp-edit-norewrite":
+		case "resp-edit-undeclared":
 			r["response"] = map[string]any{"body": "changed"}
 		case "resp-deny":
 			r["deny"] = map[string]any{"reason": "bad output"}
@@ -703,5 +705,129 @@ func TestCapabilities_AnEmptyLocalSlotDeclaresTheRequestWriterFloor(t *testing.T
 	}
 	if caps.ReadsBody || caps.WritesResponseBody {
 		t.Errorf("an empty local slot declares %+v; it must not cost responses their streaming", caps)
+	}
+}
+
+func response(body string) *pipeline.Context {
+	pctx := request(`{"q":1}`)
+	pctx.StatusCode = 200
+	pctx.ResponseHeaders = http.Header{"Content-Type": {"application/json"}, "Set-Cookie": {"s=1"}}
+	pctx.ResponseBody = []byte(body)
+	return pctx
+}
+
+// A buffered response reaches the script whole, as one last frame — the dispatch
+// every listener makes to a StreamingResponder.
+func TestResponse_BufferedIsReadWhole(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "seen", "resp-seen")
+	s := configured(t, true, "")
+	pctx := response(`{"answer":"hi"}`)
+	if a := s.OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true); a.Type != pipeline.Continue {
+		t.Fatalf("action %+v", a)
+	}
+	inv := invocations(pctx)[0]
+	if inv.Details["body"] != `{"answer":"hi"}` || inv.Details["streamed"] != "false" || inv.Details["status"] != "200" {
+		t.Errorf("the script saw %+v", inv.Details)
+	}
+	if caps := s.Capabilities(); !caps.ReadsBody || caps.WritesResponseBody {
+		t.Errorf("a response reader declares %+v; it must not cost streaming", caps)
+	}
+}
+
+// A streamed response is read after it is delivered: the frames, and nothing the
+// script answers can change it.
+func TestResponse_StreamedIsReadAfterDelivery(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "seen", "resp-seen")
+	s := configured(t, true, "")
+	pctx := response("")
+	for _, f := range []string{`{"delta":"he"}`, `{"delta":"llo"}`} {
+		s.OnResponseFrame(context.Background(), pctx, []byte(f), false)
+	}
+	pctx.MarkResponseDelivered()
+	s.OnResponseFrame(context.Background(), pctx, nil, true)
+	inv := invocations(pctx)[0]
+	if inv.Details["streamed"] != "true" || inv.Details["frames"] != `{"delta":"he"}|{"delta":"llo"}` {
+		t.Errorf("the script saw %+v", inv.Details)
+	}
+}
+
+func TestResponse_RewriteApplies(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "up", "resp-rewrite")
+	s := configured(t, true, "")
+	if !s.Capabilities().WritesResponseBody {
+		t.Fatal("a rewriting script did not narrow the slot to WritesResponseBody")
+	}
+	pctx := response(`{"answer":"hi"}`)
+	s.OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true)
+	if got := string(pctx.ResponseBody); got != `{"ANSWER":"HI"}` || !pctx.ResponseBodyMutated() {
+		t.Errorf("response body = %s (mutated %v)", got, pctx.ResponseBodyMutated())
+	}
+	invs := invocations(pctx)
+	if len(invs) != 1 || invs[0].Plugin != "up" || invs[0].Action != pipeline.ActionModify {
+		t.Errorf("invocations = %+v", invs)
+	}
+}
+
+// A response edit from a script that never said it rewrites responses is refused,
+// as is any edit to a response the client already has.
+func TestResponse_UndeclaredOrLateEditsAreRefused(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "x", "resp-edit-undeclared")
+	pctx := response("orig")
+	configured(t, true, "").OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true)
+	if string(pctx.ResponseBody) != "orig" || invocations(pctx)[0].Reason != "script_error" {
+		t.Errorf("undeclared edit: body %s, invocations %+v", pctx.ResponseBody, invocations(pctx))
+	}
+
+	dir = home(t)
+	script(t, dir, "up", "resp-rewrite")
+	s := configured(t, true, "")
+	pctx = response("")
+	s.OnResponseFrame(context.Background(), pctx, []byte("frame"), false)
+	pctx.MarkResponseDelivered()
+	s.OnResponseFrame(context.Background(), pctx, nil, true)
+	if pctx.ResponseBodyMutated() || invocations(pctx)[0].Reason != "script_error" {
+		t.Errorf("late edit: invocations %+v", invocations(pctx))
+	}
+}
+
+func TestResponse_DenyBlocksABufferedResponseOnly(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "d", "resp-deny")
+	s := configured(t, true, "")
+	pctx := response("x")
+	if a := s.OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true); a.Type != pipeline.Reject {
+		t.Fatalf("a buffered response was not blocked: %+v", a)
+	}
+	pctx = response("")
+	pctx.MarkResponseDelivered()
+	if a := s.OnResponseFrame(context.Background(), pctx, nil, true); a.Type != pipeline.Continue {
+		t.Fatal("a delivered response was 'blocked'")
+	}
+	if inv := invocations(pctx)[0]; inv.Action != pipeline.ActionDeny || !inv.Late {
+		t.Errorf("a late deny is recorded as %+v, want a late deny", inv)
+	}
+}
+
+// Response hooks run in reverse file order, like the pipeline's own response pass.
+func TestResponse_RunsInReverseOrder(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "10-a", "resp-seen")
+	script(t, dir, "20-b", "resp-seen")
+	pctx := response("x")
+	configured(t, true, "").OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true)
+	invs := invocations(pctx)
+	if len(invs) != 2 || invs[0].Plugin != "b" || invs[1].Plugin != "a" {
+		t.Errorf("order = %+v", invs)
+	}
+}
+
+// Set-Cookie is a credential too, and never reaches a script.
+func TestResponse_HeadersHideCookies(t *testing.T) {
+	if _, ok := flatten(response("").ResponseHeaders)["set-cookie"]; ok {
+		t.Error("set-cookie reached the script")
 	}
 }

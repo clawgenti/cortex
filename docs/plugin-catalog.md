@@ -35,7 +35,7 @@ AuthBridge pipeline YAML, not whether it is compiled into the binary
 | [`opa`](#opa) | [OPA](https://www.openpolicyagent.org/docs) policy enforcement for inbound and outbound requests. | Alpha | Both | No |
 | [`sparc`](#sparc) | Pre-tool reflection: blocks ungrounded/hallucinated tool calls. | Alpha | Outbound | No |
 | [`static-inject`](#static-inject) | Swaps a placeholder credential for a real static credential on outbound requests. | Alpha | Outbound | No |
-| [`script`](#script) | Runs the scripts in `~/.cortex/plugins` as pipeline steps, so a small Python or shell script can read, change or block traffic. Laptop only. | Alpha | Outbound | No |
+| [`script`](#script) | Runs the scripts in `~/.cortex/plugins` as pipeline steps, so a small Python or shell script can read, change or block requests and responses. Laptop only. | Alpha | Outbound | No |
 | [`session-budget`](#session-budget) | Enforces per-session token, call, and duration budgets via Redis. | Alpha | Outbound | No |
 | [`token-broker`](#token-broker) | Exchanges incoming tokens against a configured IdP via a broker service. | Alpha | Outbound | No |
 | [`token-exchange`](#token-exchange) | RFC 8693 outbound token exchange per route. | Ready | Outbound | YES |
@@ -226,6 +226,14 @@ writer wherever scripts run, empty or not, so the chain is refused at build
 time rather than by the first script dropped into it. Anywhere but a local
 install a `script` entry loads nothing, so a config naming it cannot run
 commands in a sidecar.
+
+A script may also read each response, and, if its handshake declares
+`rewrite_response`, change or block it. Response readers run once a response
+is complete and keep streaming; a response rewriter holds every streamed
+response in its slot's pipeline back until it is complete.
+
+Declares what its loaded scripts need, on top of the request-writer floor:
+response streaming is unaffected unless a loaded script rewrites responses.
 
 | Field | Default | Meaning |
 |---|---|---|
