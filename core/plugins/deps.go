@@ -87,12 +87,10 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 			return nil, fmt.Errorf("unknown plugin %q (registered: %v)", e.Name, pluginNames)
 		}
 		p := factory()
-
-		// Before anything is injected or configured: a plugin the listener cannot honor
-		// is refused before it can build state or start work.
-		if c := deps.Listener.Unsupported(p.Capabilities()); c != "" {
-			return nil, fmt.Errorf("plugin %q declares %s, which the %s does not honor", e.Name, c, deps.Listener.Name())
-		}
+		// Read before Configure: what an unconfigured instance reports is the ceiling
+		// the catalog advertises for this name, and the configured instance is held to
+		// it below.
+		ceiling := p.Capabilities()
 
 		if c, ok := p.(spiffe.ProviderConsumer); ok && deps.SPIFFE != nil {
 			c.SetSPIFFEProvider(deps.SPIFFE)
@@ -115,6 +113,18 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 			p = pipeline.WrapConfigured(p, e.Config)
 		} else if len(e.Config) > 0 {
 			return nil, fmt.Errorf("plugin %q does not accept configuration", e.Name)
+		}
+		if c := deps.Listener.Unsupported(p.Capabilities()); c != "" {
+			return nil, fmt.Errorf("plugin %q declares %s, which the %s does not honor", e.Name, c, deps.Listener.Name())
+		}
+		// A configured instance may narrow its capabilities. One the catalog does not
+		// describe — it declares more than the ceiling, or a chain the catalog accepts
+		// could refuse it — is reported, but not refused: the rule before narrowing existed
+		// said capabilities never vary, nothing enforced it, and a plugin outside this
+		// tree that widens from config would stop building if it were refused now.
+		if diff := p.Capabilities().WithinCeiling(ceiling); diff != "" {
+			slog.Warn("plugin's capabilities once configured differ from its unconfigured instance's; the catalog misdescribes it",
+				"plugin", e.Name, "difference", diff)
 		}
 		ps = append(ps, p)
 		policies = append(policies, e.OnError.Resolved())
