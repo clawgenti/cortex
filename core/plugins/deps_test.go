@@ -372,6 +372,13 @@ func TestBuildWithDeps_RefusesADestinationWriterThatWidensIntoIt(t *testing.T) {
 	}
 }
 
+func TestBuildWithDeps_AdmitsAPluginThatNarrowsAwayWhatTheListenerCannotHonor(t *testing.T) {
+	entries := registerNarrowing(t, "test-narrow-dest", pipeline.PluginCapabilities{WritesDestination: true}, pipeline.PluginCapabilities{})
+	if _, err := BuildWithDeps(entries, Deps{Listener: pipeline.ListenerSupport{Listener: "reverse proxy"}}); err != nil {
+		t.Fatalf("a plugin whose config drops WritesDestination was refused: %v", err)
+	}
+}
+
 // The pipeline a narrowed plugin is built into sees the narrower set, so a plugin whose
 // config turns off its response rewriting no longer buffers every response.
 func TestBuildWithDeps_AConfiguredPluginMayNarrowItsCapabilities(t *testing.T) {

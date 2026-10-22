@@ -92,12 +92,6 @@ func BuildWithDeps(entries []config.PluginEntry, deps Deps, opts ...pipeline.Opt
 		// it below.
 		ceiling := p.Capabilities()
 
-		// Before anything is injected or configured: a plugin the listener cannot honor
-		// is refused before it can build state or start work.
-		if c := deps.Listener.Unsupported(ceiling); c != "" {
-			return nil, fmt.Errorf("plugin %q declares %s, which the %s does not honor", e.Name, c, deps.Listener.Name())
-		}
-
 		if c, ok := p.(spiffe.ProviderConsumer); ok && deps.SPIFFE != nil {
 			c.SetSPIFFEProvider(deps.SPIFFE)
 		}

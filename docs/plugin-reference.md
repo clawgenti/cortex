@@ -818,8 +818,8 @@ Anything else, `plugins.BuildWithDeps` logs as a WARN naming the difference,
 because the catalog no longer describes the plugin. It warns rather than refuses
 because the older rule — capabilities never vary — was never enforced. The
 listener check is the exception: a listener-dependent capability such as
-`WritesDestination` is checked against the ceiling and against the configured
-set, and refused if either declares it where the listener cannot honor it.
+`WritesDestination` is checked against the configured set, and refused where
+the listener cannot honor it.
 
 ```go
 func (p *Redactor) Capabilities() pipeline.PluginCapabilities {

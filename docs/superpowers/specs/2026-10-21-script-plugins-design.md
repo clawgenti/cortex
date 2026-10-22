@@ -71,7 +71,7 @@ run()                 # shadow; run(enforce=True) applies edits and denies
 | Step | The user | Cortex |
 |---|---|---|
 | Write | saves the file | starts it within a second, in shadow mode |
-| Test | `python3 mask.py --replay <session-id>` | nothing: replay reads the session API |
+| Test | `PYTHONPATH=~/.cortex/plugins/_sdk python3 mask.py --replay <session-id>` | nothing: replay reads the session API |
 | Watch | agentop timeline | rows named after the file; `print` output on the row |
 | Enable | `run(enforce=True)` and save | restarts that one worker |
 | Disable | deletes it, or renames it to `_mask.py` | stops it |
@@ -254,7 +254,7 @@ run(enforce=False)
 `print()` inside a hook is captured and recorded on that request's invocation.
 An exception becomes a `script_error`, never a dead worker.
 
-`python3 mask.py --replay <session-id>` reads the session from
+`PYTHONPATH=~/.cortex/plugins/_sdk python3 mask.py --replay <session-id>` reads the session from
 `http://127.0.0.1:47601` (bypassing any proxy), rebuilds each recorded inference
 request from its parsed messages, runs the request hooks and prints what would
 be changed or denied. Replay covers text-level hooks; recorded events do not
