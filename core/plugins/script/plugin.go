@@ -100,11 +100,8 @@ func (s *Script) Capabilities() pipeline.PluginCapabilities {
 	}
 	caps.ReadsBody, caps.WritesRequestBody, caps.WritesResponseBody = false, false, false
 	for _, l := range s.loaded {
-		if l.hs.Has("request") {
+		if l.hs.Has("request") || l.hs.Has("response") {
 			caps.ReadsBody, caps.WritesRequestBody = true, true
-		}
-		if l.hs.Has("response") {
-			caps.ReadsBody = true
 		}
 		if l.hs.RewriteResponse {
 			caps.WritesResponseBody = true

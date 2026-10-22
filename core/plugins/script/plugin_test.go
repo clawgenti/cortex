@@ -558,13 +558,12 @@ func TestDenyStatus(t *testing.T) {
 	}
 }
 
-// A request-only slot declares nothing on the response side, and a response-only one
-// does not claim to rewrite requests.
+// A response reader declares no response rewriting, so it costs no streaming.
 func TestCapabilities_FollowTheHooks(t *testing.T) {
 	dir := home(t)
 	script(t, dir, "seen", "resp-seen")
 	caps := configured(t, true, "").Capabilities()
-	if caps.WritesRequestBody || caps.WritesResponseBody || !caps.ReadsBody {
+	if caps.WritesResponseBody || !caps.ReadsBody {
 		t.Errorf("a response reader declares %+v", caps)
 	}
 }
@@ -596,6 +595,36 @@ func TestRun_ObservePolicyRefusalsAreShadow(t *testing.T) {
 			}
 			if out := pipeline.OutcomeFromContext(pctx); out.FinalAction == pipeline.OutcomeDeny {
 				t.Errorf("the outcome says denied for a forwarded request: %+v", out)
+			}
+		})
+	}
+}
+
+// writer is a request-body writer, the shape of tool-prune, which the preset puts
+// ahead of the auto-appended slot.
+type writer struct{}
+
+func (writer) Name() string { return "writer" }
+func (writer) Capabilities() pipeline.PluginCapabilities {
+	return pipeline.PluginCapabilities{WritesRequestBody: true}
+}
+func (writer) OnRequest(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (writer) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+
+// Whatever its scripts' hooks, a slot can follow a request writer: the preset puts
+// it there, and a slot the pipeline refuses there stops the proxy from starting.
+func TestCapabilities_ASlotCanFollowARequestWriter(t *testing.T) {
+	for _, mode := range []string{"mask", "resp-seen", "resp-rewrite"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := home(t)
+			script(t, dir, "s", mode)
+			s := configured(t, true, "")
+			if _, err := pipeline.New([]pipeline.Plugin{writer{}, s}); err != nil {
+				t.Fatalf("a slot running a %s script cannot follow a request writer: %v", mode, err)
 			}
 		})
 	}
