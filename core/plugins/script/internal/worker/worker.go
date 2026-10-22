@@ -327,8 +327,23 @@ func spawn(ctx context.Context, cfg Config, name string) (*process, Handshake, e
 
 func (p *process) call(ctx context.Context, line []byte, id uint64) (Reply, error) {
 	var reply Reply
-	if _, err := p.stdin.Write(line); err != nil {
-		return reply, fmt.Errorf("worker: write: %w", err)
+	// The write is bounded by ctx like the read: a script that is not reading fills
+	// the pipe, and a body larger than its buffer would otherwise block here for
+	// good. Killing the process is what ends a blocked write.
+	wrote := make(chan error, 1)
+	go func() {
+		_, err := p.stdin.Write(line)
+		wrote <- err
+	}()
+	select {
+	case err := <-wrote:
+		if err != nil {
+			return reply, fmt.Errorf("worker: write: %w", err)
+		}
+	case <-ctx.Done():
+		killProcessGroup(p.cmd)
+		<-wrote
+		return reply, fmt.Errorf("worker: script did not read its input in time: %w", ctx.Err())
 	}
 	for {
 		got, err := p.readLine(ctx)

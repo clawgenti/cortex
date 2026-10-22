@@ -47,6 +47,9 @@ func fakeWorker(mode string) {
 	}
 	fmt.Fprintln(out, "starting up") // stray output before the handshake is skipped
 	send(Handshake{Cortex: Protocol, Hooks: []string{"request"}, Enforce: mode == "enforce"})
+	if mode == "deaf" {
+		time.Sleep(time.Hour) // handshakes, then never reads stdin
+	}
 	if mode == "spawn-child" {
 		// A grandchild in the same process group; the test checks a timeout kills it.
 		child := exec.Command("sleep", "3600")
@@ -409,4 +412,37 @@ func TestPool_AnAbandonedBuildIsSweptWhenALaterOneStarts(t *testing.T) {
 	p.Activate(next)
 	waitStopped(t, orphan, "a refused build's worker")
 	call(t, kept, "the running build's worker")
+}
+
+// The call deadline bounds the whole exchange, the write included. A script that
+// stops reading fills the pipe; a body larger than the pipe buffer — which every
+// inference request is — must still time out rather than block the request.
+func TestWorker_TimeoutCoversTheWrite(t *testing.T) {
+	cfg := fake(t, "deaf")
+	cfg.CallTimeout = 200 * time.Millisecond
+	w := New(cfg)
+	t.Cleanup(w.Stop)
+	if _, err := w.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.Call(context.Background(), map[string]any{"body": strings.Repeat("x", 2<<20)})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a call to a script that does not read succeeded")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the call blocked past its 200ms deadline")
+	}
+	// The worker is not wedged: the next call is answered at once, not queued
+	// behind a write that never finishes.
+	start := time.Now()
+	w.Call(context.Background(), map[string]any{})
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("the next call waited %v behind the stuck one", d)
+	}
 }
