@@ -233,6 +233,9 @@ commands in a sidecar.
 | `timeout` | `2s` | How long one script may take to answer one hook |
 | `fail_closed` | `false` | Deny a request when an enforcing script errors on it |
 
+Full guide, including the Python SDK and replaying a script over a recorded
+session: [`script-plugin.md`](script-plugin.md).
+
 ## `tool-prune`
 
 Removes unused tool definitions from the outbound inference manifest, so

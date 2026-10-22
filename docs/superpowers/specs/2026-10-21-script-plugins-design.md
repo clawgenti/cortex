@@ -287,7 +287,7 @@ carry raw bodies.
 | 1 | `feat/script-plugins-1-capabilities` | this spec; capability narrowing |
 | 2 | `feat/script-plugins-2-worker` | the worker and pool |
 | 3 | `feat/script-plugins-3-host` | host plugin, request side; folder; gate; preset; reloader watch; profiles |
-| 4 | `feat/script-plugins-4-sdk` | SDK request side, replay, embedding, `docs/plugins/scripting.md` |
+| 4 | `feat/script-plugins-4-sdk` | SDK request side, replay, embedding, `docs/script-plugin.md` |
 | 5 | `feat/script-plugins-5-responses` | response side in host and SDK |
 
 ## Testing
