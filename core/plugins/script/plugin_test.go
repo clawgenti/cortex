@@ -655,3 +655,53 @@ func TestRun_ObservePolicyAppliesHeadersOnly(t *testing.T) {
 		t.Errorf("invocations = %+v, want the header edit applied and the body edit shadow", invs)
 	}
 }
+
+// reader is a body reader, the shape of the parsers, which the preset puts ahead
+// of the auto-appended slot.
+type reader struct{}
+
+func (reader) Name() string { return "reader" }
+func (reader) Capabilities() pipeline.PluginCapabilities {
+	return pipeline.PluginCapabilities{ReadsBody: true}
+}
+func (reader) OnRequest(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (reader) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+
+// A slot is a request writer wherever scripts run, empty or not: what the folder
+// holds must not decide whether the proxy starts. A slot listed before a body
+// reader is refused while the folder is still empty — not by the first script
+// dropped into it, which is how a running proxy used to become one that would
+// not restart.
+func TestCapabilities_AnEmptyLocalSlotBeforeABodyReaderIsRefused(t *testing.T) {
+	home(t)
+	s := built(t, true, "")
+	if _, err := pipeline.New([]pipeline.Plugin{s, reader{}}); err == nil {
+		t.Fatal("an empty local slot before a body reader built; the first script dropped into the folder would refuse the chain and crash-loop the next restart")
+	}
+}
+
+// Where no scripts run the slot declares nothing, so its placement stays free.
+func TestCapabilities_ANonLocalSlotBuildsBeforeABodyReader(t *testing.T) {
+	home(t)
+	s := built(t, false, "")
+	if _, err := pipeline.New([]pipeline.Plugin{s, reader{}}); err != nil {
+		t.Fatalf("a non-local slot before a body reader was refused: %v", err)
+	}
+}
+
+// The floor an empty slot declares: a request writer, and nothing that would
+// cost a streamed response its streaming.
+func TestCapabilities_AnEmptyLocalSlotDeclaresTheRequestWriterFloor(t *testing.T) {
+	home(t)
+	caps := built(t, true, "").Capabilities()
+	if !caps.WritesRequestBody {
+		t.Errorf("an empty local slot declares %+v; which scripts load depends on the folder, so the build must not", caps)
+	}
+	if caps.ReadsBody || caps.WritesResponseBody {
+		t.Errorf("an empty local slot declares %+v; it must not cost responses their streaming", caps)
+	}
+}

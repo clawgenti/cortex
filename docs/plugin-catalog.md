@@ -221,8 +221,11 @@ On a local install the preset appends one `script` entry to the end of the
 outbound chain, so a file dropped into the folder runs with no YAML edit;
 adding, editing or removing a script reloads the pipelines. List `script`
 yourself, with `config.dir`, to place a second slot elsewhere — between two Go
-plugins, for example. Anywhere but a local install a `script` entry loads
-nothing, so a config naming it cannot run commands in a sidecar.
+plugins, for example, as long as no body reader follows it: a slot is a request
+writer wherever scripts run, empty or not, so the chain is refused at build
+time rather than by the first script dropped into it. Anywhere but a local
+install a `script` entry loads nothing, so a config naming it cannot run
+commands in a sidecar.
 
 | Field | Default | Meaning |
 |---|---|---|

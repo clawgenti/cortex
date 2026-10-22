@@ -85,9 +85,10 @@ func New() *Script { return &Script{} }
 
 func (s *Script) Name() string { return Name }
 
-// Capabilities is the ceiling until Configure, and after it only what the loaded
-// scripts need: response rewriting only when one of them asked for it, so a slot
-// of request scripts does not cost every streamed response its streaming.
+// Capabilities is the ceiling until Configure, and after it what the slot is
+// wherever scripts run: a request writer, empty or not. Response rewriting is
+// the one part that still narrows to what the loaded scripts asked for, so a
+// slot of request scripts does not cost every streamed response its streaming.
 func (s *Script) Capabilities() pipeline.PluginCapabilities {
 	caps := pipeline.PluginCapabilities{
 		ReadsBody:          true,
@@ -99,6 +100,14 @@ func (s *Script) Capabilities() pipeline.PluginCapabilities {
 		return caps
 	}
 	caps.ReadsBody, caps.WritesRequestBody, caps.WritesResponseBody = false, false, false
+	if s.local {
+		// The floor: which scripts load depends on the folder, and a slot that
+		// runs them is a request writer — every script with a hook is one.
+		// Holding that back until a script loads would let a slot build before a
+		// body reader while its folder is empty, then refuse the chain — and
+		// crash-loop the next restart — when the first script is dropped in.
+		caps.WritesRequestBody = true
+	}
 	for _, l := range s.loaded {
 		if l.hs.Has("request") || l.hs.Has("response") {
 			caps.ReadsBody, caps.WritesRequestBody = true, true
