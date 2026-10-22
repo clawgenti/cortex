@@ -568,3 +568,35 @@ func TestCapabilities_FollowTheHooks(t *testing.T) {
 		t.Errorf("a response reader declares %+v", caps)
 	}
 }
+
+// Under on_error: observe nothing the slot does takes effect, so neither of its
+// refusals — a script's deny, a fail_closed failure — may be recorded as a denial.
+// Each must leave one row, under the file's name, marked shadow, and the request's
+// outcome must not say it was denied.
+func TestRun_ObservePolicyRefusalsAreShadow(t *testing.T) {
+	for _, tc := range []struct{ mode, raw string }{
+		{"deny", ""},
+		{"error", `{"fail_closed": true}`},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			dir := home(t)
+			script(t, dir, "s", tc.mode)
+			s := configured(t, true, tc.raw)
+			p, err := pipeline.New([]pipeline.Plugin{s}, pipeline.WithPolicies(pipeline.ErrorPolicyObserve))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pctx := request("x")
+			if a := p.Run(context.Background(), pctx); a.Type != pipeline.Continue {
+				t.Fatalf("an observed slot rejected the request: %+v", a.Violation)
+			}
+			invs := invocations(pctx)
+			if len(invs) != 1 || invs[0].Plugin != "s" || !invs[0].Shadow {
+				t.Fatalf("invocations = %+v, want one shadow row for s", invs)
+			}
+			if out := pipeline.OutcomeFromContext(pctx); out.FinalAction == pipeline.OutcomeDeny {
+				t.Errorf("the outcome says denied for a forwarded request: %+v", out)
+			}
+		})
+	}
+}

@@ -289,7 +289,9 @@ func (s *Script) apply(pctx *pipeline.Context, l *loaded, rep reply, logs []stri
 		inv.Details = rep.Invocation.Details
 	}
 	inv.Details = withLogs(inv.Details, logs)
-	shadow := !l.hs.Enforce
+	// Shadow when the script has not turned enforcement on, or when the slot itself
+	// runs under on_error: observe, where nothing it does takes effect.
+	shadow := !l.hs.Enforce || pctx.Observing()
 	fail := func(err error) (pipeline.Action, bool, bool) {
 		a, stop := s.failed(pctx, l, err, logs)
 		return a, stop, false
@@ -351,9 +353,6 @@ func (s *Script) apply(pctx *pipeline.Context, l *loaded, rep reply, logs []stri
 	// write must not show as two, so that row is dropped in favour of inv.
 	truncateInvocations(pctx, before)
 	if !applied {
-		// The write was a shadow: the slot itself runs under on_error: observe.
-		// Saying so is the point — a row that read "modify" would claim a redaction
-		// the wire never saw.
 		s.m.shadows.Add(1)
 		inv.Shadow = true
 	} else {
@@ -420,9 +419,9 @@ func (s *Script) failed(pctx *pipeline.Context, l *loaded, err error, logs []str
 		Action:  pipeline.ActionObserve,
 		Reason:  "script_error",
 		Details: withLogs(map[string]string{"error": err.Error()}, logs),
-		Shadow:  !l.hs.Enforce,
+		Shadow:  !l.hs.Enforce || pctx.Observing(),
 	}
-	if s.cfg.FailClosed && l.hs.Enforce {
+	if s.cfg.FailClosed && !inv.Shadow {
 		inv.Action = pipeline.ActionDeny
 		pctx.Record(inv)
 		v := &pipeline.Violation{Code: "plugin.script-failed", Reason: "script " + l.name + " failed", Status: 502, PluginName: l.name}
