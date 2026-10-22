@@ -31,7 +31,7 @@ type Pool struct {
 }
 
 // key is what a running child is made from. A build that changes any of it gets a
-// new worker; the call timeout is not in it, and a reused worker takes the new one.
+// new child; the call timeout is not in it, and each build's Worker carries its own.
 type key struct {
 	path, hash, args, env string
 	start                 time.Duration
@@ -46,7 +46,7 @@ func keyOf(cfg Config, hash string) key {
 }
 
 type poolEntry struct {
-	w       *Worker
+	c       *child
 	holders map[int]bool
 }
 
@@ -70,13 +70,11 @@ func (p *Pool) Acquire(holder int, cfg Config, hash string) *Worker {
 	k := keyOf(cfg, hash)
 	e, ok := p.entries[k]
 	if !ok {
-		e = &poolEntry{w: New(cfg), holders: map[int]bool{}}
+		e = &poolEntry{c: New(cfg).child, holders: map[int]bool{}}
 		p.entries[k] = e
-	} else {
-		e.w.setCallTimeout(cfg.CallTimeout)
 	}
 	e.holders[holder] = true
-	return e.w
+	return e.c.with(cfg.CallTimeout)
 }
 
 // Activate marks holder's pipeline as running, and stops every worker held only by
@@ -113,5 +111,5 @@ func (p *Pool) reap(k key, e *poolEntry) {
 		return
 	}
 	delete(p.entries, k)
-	go e.w.Stop()
+	go e.c.Stop()
 }

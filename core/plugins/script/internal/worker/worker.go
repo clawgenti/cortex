@@ -12,12 +12,12 @@
 //     print, a library's warning — and is returned with the reply as Logs, so
 //     stray output cannot corrupt the exchange.
 //   - Calls are serialised: a script is a plain read-reply loop, and its state
-//     cannot race. A call's deadline covers its wait for the calls ahead of it,
-//     so a slow script delays requests by at most the call timeout, never by the
-//     length of a queue.
-//   - A call that overruns its deadline kills the child's whole process group,
-//     because a reply arriving later could no longer be matched to its request.
-//     So does a child that exits. Either way a new one is started in the
+//     cannot race. A caller waits at most the call timeout, its wait for the calls
+//     ahead of it included, so a slow script delays requests by at most the call
+//     timeout, never by the length of a queue. A caller that gives up first leaves
+//     its message to finish without it.
+//   - A script that takes longer than the call timeout to answer a message it was
+//     sent has its whole process group killed. So does a child that exits. Either way a new one is started in the
 //     background after a backoff, and the script's in-memory state is gone. A call
 //     never waits for a start: one that finds no running child fails at once
 //     (ErrStarting), so a slow-starting script costs requests nothing.
@@ -35,7 +35,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sync/atomic"
 	"time"
 )
 
@@ -105,13 +104,17 @@ type Reply struct {
 }
 
 // Worker is one script's child process, restarted as needed. Safe for concurrent
-// use; calls are serialised.
+// use; calls are serialised. Workers from one Pool entry share a child and differ
+// only in their call timeout.
 type Worker struct {
+	*child
+	callTimeout time.Duration
+}
+
+// child is the process state Workers share.
+type child struct {
 	cfg  Config
 	name string
-	// callTimeout is cfg.CallTimeout, settable while calls run: a pool hands a
-	// running worker to a build whose timeout may differ.
-	callTimeout atomic.Int64
 
 	// sem serialises everything that touches the child. A channel rather than a
 	// mutex so that waiting for it can give up when a call's deadline passes.
@@ -143,19 +146,19 @@ func New(cfg Config) *Worker {
 	if cfg.CallTimeout <= 0 {
 		cfg.CallTimeout = DefaultCallTimeout
 	}
-	w := &Worker{cfg: cfg, name: filepath.Base(cfg.Path), sem: make(chan struct{}, 1), now: time.Now}
-	w.callTimeout.Store(int64(cfg.CallTimeout))
-	return w
+	c := &child{cfg: cfg, name: filepath.Base(cfg.Path), sem: make(chan struct{}, 1), now: time.Now}
+	return c.with(cfg.CallTimeout)
 }
 
-func (w *Worker) setCallTimeout(d time.Duration) {
+// with returns a Worker on c whose calls are bounded by d.
+func (w *child) with(d time.Duration) *Worker {
 	if d <= 0 {
 		d = DefaultCallTimeout
 	}
-	w.callTimeout.Store(int64(d))
+	return &Worker{child: w, callTimeout: d}
 }
 
-func (w *Worker) lock(ctx context.Context) error {
+func (w *child) lock(ctx context.Context) error {
 	select {
 	case w.sem <- struct{}{}:
 		return nil
@@ -164,12 +167,12 @@ func (w *Worker) lock(ctx context.Context) error {
 	}
 }
 
-func (w *Worker) unlock() { <-w.sem }
+func (w *child) unlock() { <-w.sem }
 
 // Start runs the child and waits for its handshake, or for the start already in
 // progress. Calling it on a running worker returns the running child's handshake.
 // ctx bounds the wait; the start itself is bounded by StartTimeout.
-func (w *Worker) Start(ctx context.Context) (Handshake, error) {
+func (w *child) Start(ctx context.Context) (Handshake, error) {
 	for {
 		if err := w.lock(ctx); err != nil {
 			return Handshake{}, err
@@ -201,22 +204,27 @@ func (w *Worker) Start(ctx context.Context) (Handshake, error) {
 }
 
 // Handshake returns the last handshake the child sent; zero before the first start.
-func (w *Worker) Handshake() Handshake {
+func (w *child) Handshake() Handshake {
 	w.sem <- struct{}{}
 	defer w.unlock()
 	return w.handshake
 }
 
 // Call sends msg with a fresh "id" and returns the child's reply to it. msg must
-// marshal to a JSON object.
+// marshal to a JSON object. Call returns when ctx ends or the call timeout passes,
+// whichever is first; the message, once sent, is answered or timed out without it.
 func (w *Worker) Call(ctx context.Context, msg map[string]any) (Reply, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(w.callTimeout.Load()))
+	ctx, cancel := context.WithTimeout(ctx, w.callTimeout)
 	defer cancel()
 	if err := w.lock(ctx); err != nil {
 		return Reply{}, err
 	}
-	defer w.unlock()
+	if err := ctx.Err(); err != nil {
+		w.unlock()
+		return Reply{}, fmt.Errorf("worker: %s: %w", w.name, err)
+	}
 	if err := w.ready(); err != nil {
+		w.unlock()
 		return Reply{}, err
 	}
 	w.nextID++
@@ -225,19 +233,36 @@ func (w *Worker) Call(ctx context.Context, msg map[string]any) (Reply, error) {
 	line, err := json.Marshal(msg)
 	delete(msg, "id")
 	if err != nil {
+		w.unlock()
 		return Reply{}, fmt.Errorf("worker: encode: %w", err)
 	}
-	reply, err := w.proc.call(ctx, append(line, '\n'), id)
-	if err != nil {
-		w.fail(err)
-		return reply, err
+	type result struct {
+		reply Reply
+		err   error
 	}
-	w.failures = 0
-	return reply, nil
+	ch := make(chan result, 1)
+	go func() {
+		defer w.unlock()
+		sctx, cancel := context.WithTimeout(context.Background(), w.callTimeout)
+		defer cancel()
+		reply, err := w.proc.call(sctx, append(line, '\n'), id)
+		if err != nil {
+			w.fail(err)
+		} else {
+			w.failures = 0
+		}
+		ch <- result{reply, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.reply, r.err
+	case <-ctx.Done():
+		return Reply{}, fmt.Errorf("worker: %s gave up waiting for a reply: %w", w.name, ctx.Err())
+	}
 }
 
 // Stop ends the child and refuses further calls.
-func (w *Worker) Stop() {
+func (w *child) Stop() {
 	w.sem <- struct{}{}
 	defer w.unlock()
 	w.stopped = true
@@ -252,7 +277,7 @@ func (w *Worker) Stop() {
 
 // ready reports whether a child is running to take a call, and when none is, starts
 // one in the background rather than making this call wait for it. Caller holds sem.
-func (w *Worker) ready() error {
+func (w *child) ready() error {
 	running, err := w.runnable()
 	if running {
 		return nil
@@ -267,7 +292,7 @@ func (w *Worker) ready() error {
 // runnable reports whether a child is running, and when none is, the reason a start
 // cannot begin now: stopped, ErrStarting, or ErrBackoff. A nil error with running
 // false means the caller may begin one. Caller holds sem.
-func (w *Worker) runnable() (running bool, err error) {
+func (w *child) runnable() (running bool, err error) {
 	if w.stopped {
 		return false, errStopped
 	}
@@ -288,7 +313,7 @@ func (w *Worker) runnable() (running bool, err error) {
 
 // begin starts the child in the background, bounded by StartTimeout. The spawn runs
 // without sem; sem is taken again only to install the child. Caller holds sem.
-func (w *Worker) begin() {
+func (w *child) begin() {
 	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.StartTimeout)
 	s := &startup{done: make(chan struct{}), cancel: cancel}
 	w.start = s
@@ -317,7 +342,7 @@ func (w *Worker) begin() {
 // fail kills the child, if any, and schedules the next start. Caller holds sem.
 // Killed rather than asked to stop: a child that overran a call may still write
 // that call's reply, and nothing could match it to a request any more.
-func (w *Worker) fail(err error) {
+func (w *child) fail(err error) {
 	if w.proc != nil {
 		w.proc.kill()
 		w.proc = nil

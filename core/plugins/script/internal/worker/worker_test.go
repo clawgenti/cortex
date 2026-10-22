@@ -70,6 +70,8 @@ func fakeWorker(mode string) {
 		switch mode {
 		case "hang", "spawn-child":
 			time.Sleep(time.Hour)
+		case "slow":
+			time.Sleep(300 * time.Millisecond)
 		case "crash-after-one":
 			if count > 1 {
 				os.Exit(2)
@@ -198,7 +200,7 @@ func TestWorker_TimeoutKillsAndRestarts(t *testing.T) {
 	}
 	start := time.Now()
 	_, err := w.Call(context.Background(), map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "no reply in time") {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Call error = %v", err)
 	}
 	if d := time.Since(start); d > 2*time.Second {
@@ -258,6 +260,83 @@ func TestWorker_CallsDuringAStartFailAtOnce(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Calls queued behind a slow script may give up waiting, but a script that answers
+// each call within the call timeout is not killed for it: its state survives.
+func TestWorker_AQueueThatOutlastsACallerKeepsTheScript(t *testing.T) {
+	cfg := fake(t, "slow")
+	cfg.CallTimeout = time.Second
+	w := New(cfg)
+	t.Cleanup(w.Stop)
+	if _, err := w.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 6 { // 6 x 300ms queues past a 1s timeout; no one call comes near it
+		wg.Add(1)
+		go func() { defer wg.Done(); w.Call(context.Background(), map[string]any{}) }()
+	}
+	wg.Wait()
+	got := callKept(t, w)
+	if got["count"].(float64) < 2 {
+		t.Errorf("reply %v: the script was restarted", got)
+	}
+}
+
+// A caller that goes away mid-call stops waiting without killing the script.
+func TestWorker_ACallerThatGivesUpKeepsTheScript(t *testing.T) {
+	for name, mk := range map[string]func() (context.Context, context.CancelFunc){
+		"cancelled mid-call": func() (context.Context, context.CancelFunc) {
+			ctx, c := context.WithCancel(context.Background())
+			time.AfterFunc(50*time.Millisecond, c)
+			return ctx, c
+		},
+		"its own deadline": func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), 50*time.Millisecond)
+		},
+		"cancelled before it": func() (context.Context, context.CancelFunc) {
+			ctx, c := context.WithCancel(context.Background())
+			c()
+			return ctx, c
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := New(fake(t, "slow"))
+			t.Cleanup(w.Stop)
+			if _, err := w.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			for range 5 {
+				ctx, cancel := mk()
+				t0 := time.Now()
+				_, err := w.Call(ctx, map[string]any{})
+				cancel()
+				if err == nil {
+					t.Fatal("a call whose caller gave up succeeded")
+				}
+				if d := time.Since(t0); d > 250*time.Millisecond {
+					t.Fatalf("the call outlived its caller by %v", d)
+				}
+			}
+			callKept(t, w)
+		})
+	}
+}
+
+// sameChild reports whether a and b drive one child process.
+func sameChild(a, b *Worker) bool { return a.child == b.child }
+
+// callKept calls w and fails unless the running script answers it.
+func callKept(t *testing.T, w *Worker) map[string]any {
+	t.Helper()
+	r, err := w.Call(context.Background(), map[string]any{})
+	if err != nil {
+		t.Fatalf("the next call = %v: the script was killed", err)
+	}
+	var got map[string]any
+	json.Unmarshal(r.Line, &got)
+	return got
 }
 
 func TestWorker_TimeoutKillsTheWholeProcessGroup(t *testing.T) {
@@ -445,7 +524,7 @@ func TestPool_ReusesAnUnchangedScript(t *testing.T) {
 	p.Activate(one)
 	// The next build, same file: the same worker, with its state.
 	two := p.NewHolder()
-	if b := p.Acquire(two, cfg, "h1"); b != a {
+	if b := p.Acquire(two, cfg, "h1"); !sameChild(a, b) {
 		t.Fatal("an unchanged script got a new worker")
 	}
 	p.Activate(two)
@@ -469,15 +548,42 @@ func TestPool_AReusedWorkerTakesTheNewCallTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.CallTimeout = 200 * time.Millisecond
-	if b := p.Acquire(p.NewHolder(), cfg, "h1"); b != a {
+	b := p.Acquire(p.NewHolder(), cfg, "h1")
+	if !sameChild(a, b) {
 		t.Fatal("a changed timeout restarted the script")
 	}
 	t0 := time.Now()
-	if _, err := a.Call(context.Background(), map[string]any{}); err == nil {
+	if _, err := b.Call(context.Background(), map[string]any{}); err == nil {
 		t.Fatal("call to a hanging script succeeded")
 	}
 	if d := time.Since(t0); d > 2*time.Second {
 		t.Errorf("call took %v: the new 200ms timeout was not applied", d)
+	}
+}
+
+// A build's timeout governs that build's calls only: one configured and then refused,
+// or one still draining beside a newer one, leaves the other's calls as they were.
+func TestPool_ABuildsCallTimeoutStaysWithThatBuild(t *testing.T) {
+	p := NewPool()
+	cfg := fake(t, "slow") // answers in 300ms
+	running := p.NewHolder()
+	a := p.Acquire(running, cfg, "h1")
+	t.Cleanup(a.Stop)
+	if _, err := a.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	p.Activate(running)
+	cfg.CallTimeout = 50 * time.Millisecond
+	refused := p.NewHolder()
+	p.Acquire(refused, cfg, "h1") // configured, never started
+	if _, err := a.Call(context.Background(), map[string]any{}); err != nil {
+		t.Fatalf("the running build's call = %v: it took the refused build's timeout", err)
+	}
+	next := p.NewHolder()
+	p.Acquire(next, cfg, "h1")
+	p.Activate(next) // the old build drains beside it
+	if _, err := a.Call(context.Background(), map[string]any{}); err != nil {
+		t.Fatalf("the draining build's call = %v: it took the newer build's timeout", err)
 	}
 }
 
@@ -491,7 +597,7 @@ func TestPool_AChangedEnvironmentGetsANewWorker(t *testing.T) {
 	cfg.Env = append(slices.Clone(cfg.Env), "PATH=/elsewhere")
 	b := p.Acquire(p.NewHolder(), cfg, "h1")
 	t.Cleanup(b.Stop)
-	if b == a {
+	if sameChild(a, b) {
 		t.Fatal("a changed environment kept the old worker")
 	}
 }
@@ -508,7 +614,7 @@ func TestPool_AnEditedScriptKeepsItsOldWorkerUntilTheOldBuildIsReleased(t *testi
 	two := p.NewHolder()
 	edited := p.Acquire(two, cfg, "h2")
 	t.Cleanup(edited.Stop)
-	if edited == old {
+	if sameChild(edited, old) {
 		t.Fatal("an edited script kept its old worker")
 	}
 	call(t, old, "still serving") // the running pipeline still works
