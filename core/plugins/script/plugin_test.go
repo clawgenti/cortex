@@ -862,6 +862,22 @@ func TestResponse_StreamedCopyIsPerSlot(t *testing.T) {
 	}
 }
 
+// A slot that only reads responses is ordered against a response-rewriting slot
+// ahead of it: the reverse response pass would run the reader first, so its
+// hooks would see the upstream's bytes instead of the client's.
+func TestResponse_AReadingSlotAfterARewritingSlotIsRefused(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "a", "resp-rewrite")
+	if err := os.MkdirAll(filepath.Join(dir, "b"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script(t, filepath.Join(dir, "b"), "b", "resp-seen")
+	first, second := configured(t, true, ""), configured(t, true, `{"dir":"b"}`)
+	if _, err := pipeline.New([]pipeline.Plugin{first, second}); err == nil {
+		t.Fatal("a response-reading slot after a response-rewriting one built; on the reverse response pass its hooks would see the upstream's bytes, not the client's")
+	}
+}
+
 // A reload that lands mid-stream hands the rest of the stream to the new build of the
 // slot, which carries on with the copy the old build kept.
 func TestResponse_StreamedCopySurvivesAReload(t *testing.T) {

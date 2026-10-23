@@ -647,12 +647,22 @@ func validateCapabilities(plugins []Plugin) error {
 	var destinationWriter string
 	var firstMutator, firstResponseMutator, readerAfterMutator string
 	for _, plugin := range plugins {
-		caps := plugin.Capabilities().Normalize()
+		raw := plugin.Capabilities()
+		caps := raw.Normalize()
 		if caps.WritesDestination {
 			if destinationWriter != "" {
 				return fmt.Errorf("pipeline: two plugins declare WritesDestination: %q and %q — a request goes to one place; at most one destination writer per pipeline is allowed", destinationWriter, plugin.Name())
 			}
 			destinationWriter = plugin.Name()
+		}
+		// A response reader — one that reads response bodies without rewriting
+		// them — must not follow a response mutator: the mutator runs after it on
+		// the reverse response pass, so the reader would see the upstream's bytes
+		// instead of the client's. Declared capabilities, not Normalize's:
+		// promotion turns a request writer into a response reader, and a plugin
+		// may be both.
+		if raw.ReadsResponseBody && !raw.WritesResponseBody && firstResponseMutator != "" && readerAfterMutator == "" {
+			readerAfterMutator, firstMutator = plugin.Name(), firstResponseMutator
 		}
 		if caps.WritesRequestBody || caps.WritesResponseBody {
 			if firstMutator == "" {
@@ -677,9 +687,6 @@ func validateCapabilities(plugins []Plugin) error {
 		// pctx.ResponseBody itself.
 		if caps.ReadsBody && firstMutator != "" && readerAfterMutator == "" {
 			readerAfterMutator = plugin.Name()
-		}
-		if caps.ReadsResponseBody && !caps.ReadsBody && firstResponseMutator != "" && readerAfterMutator == "" {
-			readerAfterMutator, firstMutator = plugin.Name(), firstResponseMutator
 		}
 	}
 	if readerAfterMutator != "" {
