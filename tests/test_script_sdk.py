@@ -770,3 +770,147 @@ def test_the_sdk_docstrings_replay_command_runs_from_a_shell(cortex, tmp_path, s
     proc = run_in_shell(cmd.replace("<session-id>", "s1 " + session_api), tmp_path, plugins)
     assert proc.returncode == 0, proc.stderr
     assert "replayed 1 requests: 1 modified" in proc.stdout
+def sse(*events):
+    return "".join("event: e\ndata: %s\n\n" % json.dumps(e) for e in events)
+
+
+ANTHROPIC_STREAM = [
+    {"type": "message_start", "message": {"id": "m"}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "the host is db"}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "1.corp.internal ok"}},
+    {"type": "message_stop"},
+]
+
+
+def response_msg(body=None, frames=None, streamed=False):
+    part = {"status": 200, "headers": {}, "streamed": streamed}
+    if body is not None:
+        part["body"] = body
+    if frames is not None:
+        part["frames"] = frames
+    return {"hook": "response", "session": {"id": "s"}, "request": {"body": "{}"}, "response": part}
+
+
+def test_response_decorator_and_handshake(cortex):
+    @cortex.on.response
+    def read(flow):
+        pass
+
+    assert "response" in cortex.on.hooks and cortex.on.rewrite_response is False
+
+    @cortex.on.response(rewrite=True)
+    def write(flow):
+        pass
+
+    assert cortex.on.rewrite_response is True
+    assert len(cortex.on.hooks["response"]) == 2
+
+
+def test_completion_from_a_streamed_anthropic_response(cortex):
+    seen = []
+
+    @cortex.on.response
+    def read(flow):
+        seen.append((flow.response.streamed, flow.completion))
+
+    frames = [json.dumps(e) for e in ANTHROPIC_STREAM]
+    cortex.handle(response_msg(frames=frames, streamed=True))
+    assert seen == [(True, "the host is db1.corp.internal ok")]
+
+
+def test_completion_from_json_openai(cortex):
+    seen = []
+
+    @cortex.on.response
+    def read(flow):
+        seen.append(flow.completion)
+
+    cortex.handle(response_msg(body=json.dumps({"choices": [{"message": {"content": "hello"}}]})))
+    assert seen == ["hello"]
+
+
+# A pattern split across two deltas is still found: the block's text is joined
+# before the replacement, then put back as one delta.
+def test_rewrite_a_buffered_stream_across_deltas(cortex):
+    @cortex.on.response(rewrite=True)
+    def scrub(flow):
+        flow.replace_text(r"\b[\w-]+\.corp\.internal\b", "[host]")
+
+    reply, _ = cortex.handle(response_msg(body=sse(*ANTHROPIC_STREAM)))
+    body = reply["response"]["body"]
+    events = [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+    deltas = [e["delta"]["text"] for e in events if e.get("type") == "content_block_delta"]
+    assert deltas == ["the host is [host] ok", ""]
+    assert "event: e" in body  # the event: lines survive
+
+
+def test_rewrite_a_json_anthropic_response(cortex):
+    @cortex.on.response(rewrite=True)
+    def scrub(flow):
+        flow.replace_text("secret", "***")
+
+    body = {"content": [{"type": "text", "text": "a secret"}, {"type": "tool_use", "input": {"q": "secret"}}]}
+    reply, _ = cortex.handle(response_msg(body=json.dumps(body)))
+    out = json.loads(reply["response"]["body"])
+    assert out["content"][0]["text"] == "a ***"
+    assert out["content"][1]["input"]["q"] == "secret"  # tool input is not model prose
+
+
+def test_an_unchanged_response_sends_no_body(cortex):
+    @cortex.on.response(rewrite=True)
+    def scrub(flow):
+        flow.replace_text("absent", "x")
+
+    reply, _ = cortex.handle(response_msg(body=json.dumps({"content": [{"type": "text", "text": "fine"}]})))
+    assert reply == {}
+
+
+def test_response_deny(cortex):
+    @cortex.on.response
+    def gate(flow):
+        if "password" in flow.completion:
+            flow.deny("leaked a password")
+
+    body = json.dumps({"content": [{"type": "text", "text": "the password is x"}]})
+    reply, _ = cortex.handle(response_msg(body=body))
+    assert reply["deny"]["reason"] == "leaked a password"
+
+
+def test_response_edits_compound(cortex):
+    @cortex.on.response(rewrite=True)
+    def two(flow):
+        flow.replace_text("AKIA", "[a]")
+        flow.replace_text("SECRET", "[s]")
+
+    body = json.dumps({"content": [{"type": "text", "text": "key AKIA and SECRET"}]})
+    reply, _ = cortex.handle(response_msg(body=body))
+    assert json.loads(reply["response"]["body"])["content"][0]["text"] == "key [a] and [s]"
+
+
+# JSON whose text contains "data:" is still JSON.
+def test_json_response_mentioning_data_is_not_sse(cortex):
+    seen = []
+
+    @cortex.on.response(rewrite=True)
+    def scrub(flow):
+        seen.append(flow.completion)
+        flow.replace_text("secret", "***")
+
+    body = json.dumps({"content": [{"type": "text", "text": "metadata: a secret data:image/png"}]})
+    reply, _ = cortex.handle(response_msg(body=body))
+    assert seen == ["metadata: a secret data:image/png"]
+    assert json.loads(reply["response"]["body"])["content"][0]["text"] == "metadata: a *** data:image/png"
+
+
+def test_sse_known_by_content_type(cortex):
+    seen = []
+
+    @cortex.on.response
+    def read(flow):
+        seen.append(flow.completion)
+
+    msg = response_msg(body=sse(*ANTHROPIC_STREAM))
+    msg["response"]["headers"] = {"content-type": "text/event-stream"}
+    cortex.handle(msg)
+    assert seen == ["the host is db1.corp.internal ok"]

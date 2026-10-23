@@ -198,17 +198,27 @@ scripts running across that rebuild.
    as it was before the shadow script ran.
 
 **Responses.** For each loaded script with a response hook, in reverse order —
-the same order the pipeline's own response pass uses:
-- Buffered response: `OnResponse` sends
+the same order the pipeline's own response pass uses. The host is a
+`StreamingResponder`, so the pipeline sends it every response through
+`OnResponseFrame`, never `OnResponse`:
+- Not yet delivered (`!pctx.ResponseDelivered()` at the last frame): JSON, or
+  SSE held back for a response writer. The hook gets
   `{"hook": "response", ..., "response": {"status", "headers", "body"}}` and
-  applies `deny` and `body` (through `pctx.SetResponseBody`).
-- Streamed response: the host implements `StreamingResponder`. While any loaded
-  script has a response hook it copies each frame; on `last` it sends the
-  assembled stream with `"streamed": true` and `"delivered": true`. Edits and
-  denies there are refused with a recorded error, because the client already has
-  every byte.
-- A script that declared `rewrite_response` forces the buffered path
-  (`WritesResponseBody`), so its edits always apply.
+  its `deny` and `body` apply (through `pctx.SetResponseBody`).
+- Delivered: SSE relayed as it arrived. The host copies each frame (up to
+  10MiB) and on `last` sends them as `frames` with `"streamed": true`. Edits
+  are refused with a recorded error and a deny is recorded late, because the
+  client already has every byte.
+- A script that declared `rewrite_response` narrows the slot to
+  `WritesResponseBody`, which sends SSE down the buffered path, so its edits
+  always apply.
+
+Finding from the end-to-end run: on that buffered SSE path the listener folds
+the upstream's frames through the parsers before the last frame reaches the
+host, so the parser's recorded completion is the upstream's text and not the
+rewrite the client received. This is the same boundary as on requests — what
+Cortex records is what was exchanged with the upstream — and is documented
+rather than changed.
 
 **Errors.** A timeout, crash, malformed reply or an edit to something the
 script did not declare (a response body from a script without

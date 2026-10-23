@@ -28,6 +28,12 @@ type PluginCapabilities struct {
 	// a read silently sees "no body."
 	ReadsBody bool
 
+	// ReadsResponseBody: the plugin reads pctx.ResponseBody and never pctx.Body.
+	// The listener buffers the response body, not the request body, and
+	// Pipeline.New orders it against response mutators only: a request mutator
+	// before it changes nothing it reads.
+	ReadsResponseBody bool
+
 	// WritesRequestBody: the plugin may mutate pctx.Body (call
 	// pctx.SetBody or pctx.SetRequestModel). Implies ReadsBody —
 	// Normalize() auto-promotes. Listener propagates the mutation to the
@@ -157,6 +163,7 @@ func (c PluginCapabilities) WithinCeiling(ceiling PluginCapabilities) string {
 		got, have bool
 	}{
 		{"ReadsBody", c.ReadsBody, ceiling.ReadsBody},
+		{"ReadsResponseBody", c.ReadsResponseBody, ceiling.ReadsResponseBody},
 		{"WritesRequestBody", c.WritesRequestBody, ceiling.WritesRequestBody},
 		{"WritesResponseBody", c.WritesResponseBody, ceiling.WritesResponseBody},
 		{"WritesDestination", c.WritesDestination, ceiling.WritesDestination},
@@ -197,13 +204,17 @@ func (c PluginCapabilities) WithinCeiling(ceiling PluginCapabilities) string {
 	return ""
 }
 
-// Normalize applies WritesRequestBody-implies-ReadsBody promotion.
+// Normalize applies the promotions: either write implies ReadsBody, and ReadsBody
+// implies ReadsResponseBody.
 // Called by Pipeline.New for every plugin's declared capabilities so the
 // rest of the framework reads a normalized form. Plugins never need to
 // call this themselves.
 func (c PluginCapabilities) Normalize() PluginCapabilities {
 	if c.WritesRequestBody || c.WritesResponseBody {
 		c.ReadsBody = true
+	}
+	if c.ReadsBody {
+		c.ReadsResponseBody = true
 	}
 	return c
 }

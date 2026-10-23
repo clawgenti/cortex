@@ -52,9 +52,10 @@ func fakeScript(mode string) {
 			ID       uint64                `json:"id"`
 			Request  struct{ Body string } `json:"request"`
 			Response struct {
-				Body     string `json:"body"`
-				Streamed bool   `json:"streamed"`
-				Status   int    `json:"status"`
+				Body     string   `json:"body"`
+				Streamed bool     `json:"streamed"`
+				Status   int      `json:"status"`
+				Frames   []string `json:"frames"`
 			} `json:"response"`
 		}
 		json.Unmarshal(in.Bytes(), &msg)
@@ -88,10 +89,11 @@ func fakeScript(mode string) {
 			r["response"] = map[string]any{"body": "x"}
 		case "resp-seen":
 			r["invocation"] = map[string]any{"action": "observe", "reason": "resp", "details": map[string]string{
-				"body": msg.Response.Body, "streamed": fmt.Sprint(msg.Response.Streamed), "status": fmt.Sprint(msg.Response.Status)}}
+				"body": msg.Response.Body, "streamed": fmt.Sprint(msg.Response.Streamed), "status": fmt.Sprint(msg.Response.Status),
+				"frames": strings.Join(msg.Response.Frames, "|")}}
 		case "resp-rewrite":
 			r["response"] = map[string]any{"body": strings.ToUpper(msg.Response.Body)}
-		case "resp-edit-norewrite":
+		case "resp-edit-undeclared":
 			r["response"] = map[string]any{"body": "changed"}
 		case "resp-deny":
 			r["deny"] = map[string]any{"reason": "bad output"}
@@ -563,7 +565,7 @@ func TestCapabilities_FollowTheHooks(t *testing.T) {
 	dir := home(t)
 	script(t, dir, "seen", "resp-seen")
 	caps := configured(t, true, "").Capabilities()
-	if caps.WritesResponseBody || !caps.ReadsBody {
+	if caps.WritesResponseBody || caps.ReadsBody || !caps.ReadsResponseBody {
 		t.Errorf("a response reader declares %+v", caps)
 	}
 }
@@ -703,5 +705,275 @@ func TestCapabilities_AnEmptyLocalSlotDeclaresTheRequestWriterFloor(t *testing.T
 	}
 	if caps.ReadsBody || caps.WritesResponseBody {
 		t.Errorf("an empty local slot declares %+v; it must not cost responses their streaming", caps)
+	}
+}
+
+func response(body string) *pipeline.Context {
+	pctx := request(`{"q":1}`)
+	pctx.StatusCode = 200
+	pctx.ResponseHeaders = http.Header{"Content-Type": {"application/json"}, "Set-Cookie": {"s=1"}}
+	pctx.ResponseBody = []byte(body)
+	return pctx
+}
+
+// A buffered response reaches the script whole, as one last frame — the dispatch
+// every listener makes to a StreamingResponder.
+func TestResponse_BufferedIsReadWhole(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "seen", "resp-seen")
+	s := configured(t, true, "")
+	pctx := response(`{"answer":"hi"}`)
+	if a := s.OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true); a.Type != pipeline.Continue {
+		t.Fatalf("action %+v", a)
+	}
+	inv := invocations(pctx)[0]
+	if inv.Details["body"] != `{"answer":"hi"}` || inv.Details["streamed"] != "false" || inv.Details["status"] != "200" {
+		t.Errorf("the script saw %+v", inv.Details)
+	}
+	if caps := s.Capabilities(); !caps.ReadsResponseBody || caps.WritesResponseBody {
+		t.Errorf("a response reader declares %+v; it must not cost streaming", caps)
+	}
+}
+
+// A streamed response is read after it is delivered: the frames, and nothing the
+// script answers can change it.
+func TestResponse_StreamedIsReadAfterDelivery(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "seen", "resp-seen")
+	s := configured(t, true, "")
+	pctx := response("")
+	for _, f := range []string{`{"delta":"he"}`, `{"delta":"llo"}`} {
+		s.OnResponseFrame(context.Background(), pctx, []byte(f), false)
+	}
+	pctx.MarkResponseDelivered()
+	s.OnResponseFrame(context.Background(), pctx, nil, true)
+	inv := invocations(pctx)[0]
+	if inv.Details["streamed"] != "true" || inv.Details["frames"] != `{"delta":"he"}|{"delta":"llo"}` {
+		t.Errorf("the script saw %+v", inv.Details)
+	}
+}
+
+func TestResponse_RewriteApplies(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "up", "resp-rewrite")
+	s := configured(t, true, "")
+	if !s.Capabilities().WritesResponseBody {
+		t.Fatal("a rewriting script did not narrow the slot to WritesResponseBody")
+	}
+	pctx := response(`{"answer":"hi"}`)
+	s.OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true)
+	if got := string(pctx.ResponseBody); got != `{"ANSWER":"HI"}` || !pctx.ResponseBodyMutated() {
+		t.Errorf("response body = %s (mutated %v)", got, pctx.ResponseBodyMutated())
+	}
+	invs := invocations(pctx)
+	if len(invs) != 1 || invs[0].Plugin != "up" || invs[0].Action != pipeline.ActionModify {
+		t.Errorf("invocations = %+v", invs)
+	}
+}
+
+// A response edit from a script that never said it rewrites responses is refused,
+// as is any edit to a response the client already has.
+func TestResponse_UndeclaredOrLateEditsAreRefused(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "x", "resp-edit-undeclared")
+	pctx := response("orig")
+	configured(t, true, "").OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true)
+	if string(pctx.ResponseBody) != "orig" || invocations(pctx)[0].Reason != "script_error" {
+		t.Errorf("undeclared edit: body %s, invocations %+v", pctx.ResponseBody, invocations(pctx))
+	}
+
+	dir = home(t)
+	script(t, dir, "up", "resp-rewrite")
+	s := configured(t, true, "")
+	pctx = response("")
+	s.OnResponseFrame(context.Background(), pctx, []byte("frame"), false)
+	pctx.MarkResponseDelivered()
+	s.OnResponseFrame(context.Background(), pctx, nil, true)
+	if pctx.ResponseBodyMutated() || invocations(pctx)[0].Reason != "script_error" {
+		t.Errorf("late edit: invocations %+v", invocations(pctx))
+	}
+}
+
+func TestResponse_DenyBlocksABufferedResponseOnly(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "d", "resp-deny")
+	s := configured(t, true, "")
+	pctx := response("x")
+	if a := s.OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true); a.Type != pipeline.Reject {
+		t.Fatalf("a buffered response was not blocked: %+v", a)
+	}
+	pctx = response("")
+	pctx.MarkResponseDelivered()
+	if a := s.OnResponseFrame(context.Background(), pctx, nil, true); a.Type != pipeline.Continue {
+		t.Fatal("a delivered response was 'blocked'")
+	}
+	if inv := invocations(pctx)[0]; inv.Action != pipeline.ActionDeny || !inv.Late {
+		t.Errorf("a late deny is recorded as %+v, want a late deny", inv)
+	}
+}
+
+// Response hooks run in reverse file order, like the pipeline's own response pass.
+func TestResponse_RunsInReverseOrder(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "10-a", "resp-seen")
+	script(t, dir, "20-b", "resp-seen")
+	pctx := response("x")
+	configured(t, true, "").OnResponseFrame(context.Background(), pctx, pctx.ResponseBody, true)
+	invs := invocations(pctx)
+	if len(invs) != 2 || invs[0].Plugin != "b" || invs[1].Plugin != "a" {
+		t.Errorf("order = %+v", invs)
+	}
+}
+
+// lastFrame is the shape of the parsers: a streaming reader ahead of the slot,
+// which the response pass reaches only after the slot's scripts are done.
+type lastFrame struct{ got bool }
+
+func (lastFrame) Name() string { return "lastFrame" }
+func (lastFrame) Capabilities() pipeline.PluginCapabilities {
+	return pipeline.PluginCapabilities{ReadsBody: true}
+}
+func (lastFrame) OnRequest(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (lastFrame) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (l *lastFrame) OnResponseFrame(_ context.Context, _ *pipeline.Context, _ []byte, last bool) pipeline.Action {
+	if last {
+		l.got = true
+	}
+	return pipeline.Action{Type: pipeline.Continue}
+}
+
+// A slow response script must leave the tail of the dispatch deadline for the
+// plugins after the slot. The listener gives one final response dispatch a
+// shared deadline, the slot runs first on the reverse pass, and the parsers
+// after it turn the folded state into the charge — a script that spends the
+// whole deadline leaves them refused with pipeline.cancelled, which sends the
+// agent a 499 for a response that arrived complete and drops the settle.
+func TestResponse_SlowScriptsLeaveTheDeadlineForTheParsersAfterTheSlot(t *testing.T) {
+	dir := home(t)
+	// Answers the handshake, then never replies.
+	body := "#!/bin/sh\nprintf '{\"cortex\":1,\"hooks\":[\"response\"],\"enforce\":true}\\n'\nexec sleep 3600\n"
+	if err := os.WriteFile(filepath.Join(dir, "hang"), []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A timeout larger than the dispatch deadline, so only the reserve can stop it.
+	s := configured(t, true, `{"timeout": "30s"}`)
+	rec := &lastFrame{}
+	p, err := pipeline.New([]pipeline.Plugin{rec, s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx := response(`{"answer":"hi"}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	a := p.RunResponseFrame(ctx, pctx, pctx.ResponseBody, true)
+	if a.Type != pipeline.Continue {
+		t.Fatalf("action %+v", a)
+	}
+	if !rec.got {
+		t.Fatal("the parser after the slot never saw its last frame")
+	}
+	if d, ok := ctx.Deadline(); !ok || time.Until(d) <= 0 {
+		t.Fatal("the scripts spent the whole dispatch deadline")
+	}
+}
+
+// Once the reserve is all that remains of the deadline, the scripts are skipped
+// at once rather than called into it — recorded as a script error, like any
+// other failure, so the parsers after the slot still run.
+func TestResponse_AnExhaustedDeadlineSkipsTheScripts(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "seen", "resp-seen")
+	s := configured(t, true, "")
+	rec := &lastFrame{}
+	p, err := pipeline.New([]pipeline.Plugin{rec, s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx := response(`{"answer":"hi"}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	a := p.RunResponseFrame(ctx, pctx, pctx.ResponseBody, true)
+	if a.Type != pipeline.Continue {
+		t.Fatalf("action %+v", a)
+	}
+	if !rec.got {
+		t.Fatal("the parser after the slot never saw its last frame")
+	}
+	if inv := invocations(pctx)[0]; inv.Reason != "script_error" || inv.Shadow {
+		t.Errorf("the skipped script is recorded as %+v", inv)
+	}
+}
+
+// Set-Cookie is a credential too, and never reaches a script.
+func TestResponse_HeadersHideCookies(t *testing.T) {
+	if _, ok := flatten(response("").ResponseHeaders)["set-cookie"]; ok {
+		t.Error("set-cookie reached the script")
+	}
+}
+
+// Two slots in one chain each keep their own copy of a streamed response: the
+// pipeline hands every frame to both, and each slot's scripts see it once.
+func TestResponse_StreamedCopyIsPerSlot(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "a", "resp-seen")
+	if err := os.MkdirAll(filepath.Join(dir, "b"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script(t, filepath.Join(dir, "b"), "b", "resp-seen")
+	first, second := configured(t, true, ""), configured(t, true, `{"dir":"b"}`)
+	pctx := response("")
+	// The response pass runs in reverse chain order: the later slot first.
+	for _, f := range []string{"f1", "f2"} {
+		second.OnResponseFrame(context.Background(), pctx, []byte(f), false)
+		first.OnResponseFrame(context.Background(), pctx, []byte(f), false)
+	}
+	pctx.MarkResponseDelivered()
+	second.OnResponseFrame(context.Background(), pctx, nil, true)
+	first.OnResponseFrame(context.Background(), pctx, nil, true)
+	invs := invocations(pctx)
+	if len(invs) != 2 {
+		t.Fatalf("invocations = %+v", invs)
+	}
+	for _, inv := range invs {
+		if inv.Details["frames"] != "f1|f2" {
+			t.Errorf("script %s saw frames %q, want f1|f2", inv.Plugin, inv.Details["frames"])
+		}
+	}
+}
+
+// A slot that only reads responses is ordered against a response-rewriting slot
+// ahead of it: the reverse response pass would run the reader first, so its
+// hooks would see the upstream's bytes instead of the client's.
+func TestResponse_AReadingSlotAfterARewritingSlotIsRefused(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "a", "resp-rewrite")
+	if err := os.MkdirAll(filepath.Join(dir, "b"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script(t, filepath.Join(dir, "b"), "b", "resp-seen")
+	first, second := configured(t, true, ""), configured(t, true, `{"dir":"b"}`)
+	if _, err := pipeline.New([]pipeline.Plugin{first, second}); err == nil {
+		t.Fatal("a response-reading slot after a response-rewriting one built; on the reverse response pass its hooks would see the upstream's bytes, not the client's")
+	}
+}
+
+// A reload that lands mid-stream hands the rest of the stream to the new build of the
+// slot, which carries on with the copy the old build kept.
+func TestResponse_StreamedCopySurvivesAReload(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "a", "resp-seen")
+	old := configured(t, true, "")
+	pctx := response("")
+	old.OnResponseFrame(context.Background(), pctx, []byte("f1"), false)
+	rebuilt := configured(t, true, "")
+	rebuilt.OnResponseFrame(context.Background(), pctx, []byte("f2"), false)
+	pctx.MarkResponseDelivered()
+	rebuilt.OnResponseFrame(context.Background(), pctx, nil, true)
+	if invs := invocations(pctx); len(invs) != 1 || invs[0].Details["frames"] != "f1|f2" {
+		t.Errorf("invocations = %+v, want one that saw f1|f2", invs)
 	}
 }

@@ -67,6 +67,10 @@ type Script struct {
 	holder int
 	loaded []*loaded
 	m      metrics
+	// stateKey is where this slot keeps a streamed response's frames on the
+	// request's context. Per folder: two slots in one chain see the same frames,
+	// and a reload's rebuild of a slot carries on with the copy the old build kept.
+	stateKey string
 }
 
 // loaded is one file whose worker started.
@@ -86,9 +90,10 @@ func New() *Script { return &Script{} }
 func (s *Script) Name() string { return Name }
 
 // Capabilities is the ceiling until Configure, and after it what the slot is
-// wherever scripts run: a request writer, empty or not. Response rewriting is
-// the one part that still narrows to what the loaded scripts asked for, so a
-// slot of request scripts does not cost every streamed response its streaming.
+// wherever scripts run: a request writer, empty or not. The response side is
+// what still narrows to what the loaded scripts asked for — reading or
+// rewriting responses — so a slot of request scripts does not cost every
+// streamed response its streaming.
 func (s *Script) Capabilities() pipeline.PluginCapabilities {
 	caps := pipeline.PluginCapabilities{
 		ReadsBody:          true,
@@ -102,15 +107,18 @@ func (s *Script) Capabilities() pipeline.PluginCapabilities {
 	caps.ReadsBody, caps.WritesRequestBody, caps.WritesResponseBody = false, false, false
 	if s.local {
 		// The floor: which scripts load depends on the folder, and a slot that
-		// runs them is a request writer — every script with a hook is one.
-		// Holding that back until a script loads would let a slot build before a
-		// body reader while its folder is empty, then refuse the chain — and
-		// crash-loop the next restart — when the first script is dropped in.
+		// runs them is a request writer whatever their hooks. Holding that back
+		// until a script loads would let a slot build before a body reader while
+		// its folder is empty, then refuse the chain — and crash-loop the next
+		// restart — when the first script is dropped in.
 		caps.WritesRequestBody = true
 	}
 	for _, l := range s.loaded {
-		if l.hs.Has("request") || l.hs.Has("response") {
+		if l.hs.Has("request") {
 			caps.ReadsBody, caps.WritesRequestBody = true, true
+		}
+		if l.hs.Has("response") {
+			caps.ReadsResponseBody = true
 		}
 		if l.hs.RewriteResponse {
 			caps.WritesResponseBody = true
@@ -149,6 +157,7 @@ func (s *Script) Configure(raw json.RawMessage) error {
 		return err
 	}
 	s.dir = dir
+	s.stateKey = Name + "#" + dir
 	if !s.local {
 		slog.Warn("script plugin: not a local install, so no scripts are run", "dir", dir)
 		return nil
@@ -263,8 +272,174 @@ func (s *Script) OnRequest(ctx context.Context, pctx *pipeline.Context) pipeline
 	return pipeline.Action{Type: pipeline.Continue}
 }
 
-func (s *Script) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+// OnResponse is never called: the pipeline sends a StreamingResponder's responses
+// to OnResponseFrame instead, buffered or streamed. It exists for the Plugin
+// interface, and runs the hooks should a caller use it directly.
+func (s *Script) OnResponse(ctx context.Context, pctx *pipeline.Context) pipeline.Action {
+	return s.responseHooks(ctx, pctx, false, nil)
+}
+
+// streamState carries one response's frames to its last one.
+type streamState struct {
+	frames [][]byte
+	size   int
+	cut    bool
+}
+
+// maxStreamCopy bounds what the plugin keeps of a streamed response for its
+// scripts: the forward proxy's own cap on a buffered body.
+const maxStreamCopy = 10 << 20
+
+// OnResponseFrame is how responses reach scripts. A buffered response arrives as
+// one last frame with the whole body; a streamed one as each SSE event's payload,
+// then an empty last frame — by then every byte is with the client, so the
+// scripts read it and cannot change or block it. A script that rewrites
+// responses narrows this plugin to WritesResponseBody, which sends streamed
+// responses down the buffered path, where its edits apply.
+func (s *Script) OnResponseFrame(ctx context.Context, pctx *pipeline.Context, frame []byte, last bool) pipeline.Action {
+	if !s.hasResponseHooks() {
+		return pipeline.Action{Type: pipeline.Continue}
+	}
+	// The listeners mark a response delivered before its last frame only when they
+	// relayed it as it arrived. A buffered one — JSON, or SSE held back for a
+	// response writer — reaches its last frame unsent, with pctx.ResponseBody whole,
+	// so the scripts get the body and their edits and denies apply.
+	if last && !pctx.ResponseDelivered() {
+		pipeline.SetState[streamState](pctx, s.stateKey, nil)
+		return s.responseHooks(ctx, pctx, false, nil)
+	}
+	st := pipeline.GetState[streamState](pctx, s.stateKey)
+	if st == nil {
+		st = &streamState{}
+		pipeline.SetState(pctx, s.stateKey, st)
+	}
+	if !last {
+		if !st.cut && st.size+len(frame) <= maxStreamCopy {
+			st.frames = append(st.frames, append([]byte(nil), frame...))
+			st.size += len(frame)
+		} else {
+			st.cut = true
+		}
+		return pipeline.Action{Type: pipeline.Continue}
+	}
+	pipeline.SetState[streamState](pctx, s.stateKey, nil)
+	return s.responseHooks(ctx, pctx, true, st)
+}
+
+func (s *Script) hasResponseHooks() bool {
+	for _, l := range s.loaded {
+		if l.hs.Has("response") {
+			return true
+		}
+	}
+	return false
+}
+
+// finalReserve is the part of a response dispatch's deadline that response
+// hooks may not spend. Every final response dispatch — the listener's teardown
+// context — is one budget shared with the plugins after the slot, which the
+// reverse pass reaches only once the slot's scripts are done: the parsers turn
+// the folded state into the charge, and a script that spends the whole deadline
+// leaves them refused with pipeline.cancelled, which sends the agent a 499 for
+// a response that arrived complete and drops the settle. So each call is
+// narrowed to what remains minus this reserve, and once the reserve is all that
+// is left the script is skipped and recorded like any other script failure. A
+// context with no deadline is left alone: nothing after the slot waits on it.
+const finalReserve = time.Second
+
+// errReserveSpent names a script skipped to keep finalReserve for the plugins
+// after the slot.
+var errReserveSpent = errors.New("skipped to leave the response deadline's reserve for the plugins after the slot")
+
+// responseBudget narrows ctx to the part of its deadline one response-hook call
+// may spend. ok is false when the reserve is all that remains.
+func responseBudget(ctx context.Context) (context.Context, context.CancelFunc, bool) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return ctx, func() {}, true
+	}
+	budget := time.Until(deadline) - finalReserve
+	if budget <= 0 {
+		return nil, nil, false
+	}
+	narrowed, cancel := context.WithTimeout(ctx, budget)
+	return narrowed, cancel, true
+}
+
+// responseHooks runs the response hooks. st is the copied stream for a response
+// already delivered, nil for one that is still the pipeline's to change.
+func (s *Script) responseHooks(ctx context.Context, pctx *pipeline.Context, streamed bool, st *streamState) pipeline.Action {
+	var msg map[string]any
+	for i := len(s.loaded) - 1; i >= 0; i-- {
+		l := s.loaded[i]
+		if !l.hs.Has("response") {
+			continue
+		}
+		callCtx, cancel, ok := responseBudget(ctx)
+		if !ok {
+			a, stop := s.failed(pctx, l, errReserveSpent, nil)
+			if stop {
+				if streamed {
+					// The client already has the response; record the refusal, which the
+					// pipeline marks late, and let it stand.
+					return pipeline.Action{Type: pipeline.Continue}
+				}
+				return a
+			}
+			continue
+		}
+		// Built once, and again only after an applied edit, which the next script
+		// must see. The request goes along without its body: a response hook rarely
+		// reads it, and on a long conversation it is the largest thing in the message.
+		if msg == nil {
+			msg = responseMessage(pctx, streamed, st)
+		}
+		msg["plugin"] = l.name
+		a, stop, edited := s.run(callCtx, pctx, l, msg, true)
+		cancel()
+		if stop {
+			if streamed {
+				// The client already has the response; record the refusal, which the
+				// pipeline marks late, and let it stand.
+				return pipeline.Action{Type: pipeline.Continue}
+			}
+			return a
+		}
+		if edited {
+			msg = nil
+		}
+	}
 	return pipeline.Action{Type: pipeline.Continue}
+}
+
+func responseMessage(pctx *pipeline.Context, streamed bool, st *streamState) map[string]any {
+	msg := requestMessage(pctx)
+	msg["hook"] = "response"
+	delete(msg["request"].(map[string]any), "body")
+	delete(msg["request"].(map[string]any), "body_base64")
+	resp := map[string]any{
+		"status":   pctx.StatusCode,
+		"headers":  flatten(pctx.ResponseHeaders),
+		"streamed": streamed,
+	}
+	if streamed {
+		resp["frames"] = frameStrings(st.frames)
+		if st.cut {
+			resp["truncated"] = true
+		}
+	} else {
+		putBody(resp, pctx.ResponseBody)
+	}
+	msg["response"] = resp
+	return msg
+}
+
+func frameStrings(frames [][]byte) []string {
+	out := make([]string, len(frames))
+	for i, f := range frames {
+		out[i] = string(f)
+	}
+	return out
 }
 
 // run calls one script and applies its reply. stop is true when the chain ends
@@ -337,6 +512,12 @@ func (s *Script) apply(pctx *pipeline.Context, l *loaded, rep reply, logs []stri
 	e := rep.Request
 	if response {
 		e = rep.Response
+		if e.changed() && !l.hs.RewriteResponse {
+			return fail(fmt.Errorf("edited a response without declaring rewrite_response"))
+		}
+		if e.changed() && pctx.ResponseDelivered() {
+			return fail(fmt.Errorf("edited a response the client already has"))
+		}
 	}
 	if !e.changed() {
 		pctx.Record(inv)

@@ -516,6 +516,9 @@ func main() {
 		if err := config.Validate(c); err != nil {
 			return nil, nil, nil, err
 		}
+		if err := checkScriptSlots(c); err != nil {
+			return nil, nil, nil, err
+		}
 		config.WarnEmptyPipelines(c, slog.Default())
 		// Rates reload with the rest of the config. Swapped BEFORE the pipelines are
 		// built so a plugin's Configure sees the new table, and swapped in place so

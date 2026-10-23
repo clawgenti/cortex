@@ -66,6 +66,21 @@ class _Registry:
         self.hooks.setdefault("request", []).append(fn)
         return fn
 
+    def response(self, fn=None, rewrite=False):
+        """Run fn(flow) on every response. Plain @on.response reads: a streamed
+        response reaches it after the agent has it, and it cannot change or block
+        that one. @on.response(rewrite=True) may change and block responses, at a
+        price: Cortex then holds every streamed response back until it is complete,
+        so the agent sees no output until the model has finished."""
+        if rewrite:
+            self.rewrite_response = True
+
+        def reg(f):
+            self.hooks.setdefault("response", []).append(f)
+            return f
+
+        return reg(fn) if fn is not None else reg
+
 
 on = _Registry()
 
@@ -187,11 +202,152 @@ def _replacer(pattern, repl):
     return lambda text: pattern.sub(repl, text)
 
 
+# ---- responses ----------------------------------------------------------------
+#
+# A response is JSON, or a stream of server-sent events. In both shapes the text
+# the model wrote is spread over several places — content blocks, choices, and in
+# a stream one small delta per event — so the helpers below put it back together.
+
+
+def _sse_events(text):
+    """Split an SSE body into events: (lines, data) pairs, data parsed when it is
+    JSON. Lines other than data: (event:, id:, comments) are kept as they were."""
+    events = []
+    for block in re.split(r"\r?\n\r?\n", text):
+        if not block.strip():
+            continue
+        lines, data = [], None
+        for line in block.splitlines():
+            if line.startswith("data:"):
+                raw = line[5:].strip()
+                try:
+                    data = json.loads(raw)
+                except ValueError:
+                    data = raw
+            else:
+                lines.append(line)
+        events.append((lines, data))
+    return events
+
+
+def _render_sse(events):
+    out = []
+    for lines, data in events:
+        block = list(lines)
+        if data is not None:
+            block.append("data: " + (data if isinstance(data, str) else json.dumps(data, separators=(",", ":"))))
+        out.append("\n".join(block))
+    return "\n\n".join(out) + "\n\n"
+
+
+def _delta_slots(data):
+    """Where one stream event carries model text: (key, holder, field) for each
+    text delta in it. key names the block the text belongs to, so a block's
+    deltas can be joined. Anthropic: content_block_delta / text_delta. OpenAI
+    chat: choices[].delta.content."""
+    slots = []
+    if not isinstance(data, dict):
+        return slots
+    delta = data.get("delta")
+    if data.get("type") == "content_block_delta" and isinstance(delta, dict) and delta.get("type") == "text_delta":
+        slots.append((("a", data.get("index")), delta, "text"))
+    for c in data.get("choices") or []:
+        d = c.get("delta") if isinstance(c, dict) else None
+        if isinstance(d, dict) and isinstance(d.get("content"), str):
+            slots.append((("o", c.get("index")), d, "content"))
+    return slots
+
+
+def _stream_texts(events):
+    """The text of each block in a stream, in the order the blocks started."""
+    joined, order = {}, []
+    for _, data in events:
+        for key, holder, field in _delta_slots(data):
+            if key not in joined:
+                joined[key] = []
+                order.append(key)
+            joined[key].append(holder[field])
+    return [(k, "".join(joined[k])) for k in order]
+
+
+def _rewrite_stream(events, fn):
+    """Apply fn to each block's whole text, then put it back as that block's first
+    delta, emptying the rest — so a pattern split across two deltas still
+    matches. Returns how many blocks changed."""
+    new = {}
+    for key, text in _stream_texts(events):
+        out = fn(text)
+        if out != text:
+            new[key] = out
+    seen = set()
+    for _, data in events:
+        for key, holder, field in _delta_slots(data):
+            if key in new:
+                holder[field] = new[key] if key not in seen else ""
+                seen.add(key)
+    return len(new)
+
+
+def _json_response_slots(body):
+    """Where a JSON response carries model text: Anthropic content blocks, OpenAI
+    chat choices."""
+    slots = []
+    if not isinstance(body, dict):
+        return slots
+    for block in body.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+            slots.append((block, "text"))
+    for c in body.get("choices") or []:
+        msg = c.get("message") if isinstance(c, dict) else None
+        if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+            slots.append((msg, "content"))
+    return slots
+
+
+class Response:
+    """The response half of a response hook's flow.
+
+    status, headers   as the upstream sent them (cookies removed)
+    body              the whole body, when Cortex holds it; "" for a stream the
+                      agent already has
+    streamed          True when the response was relayed as it arrived: read-only
+    frames            for a streamed response, each event's data, in order
+    """
+
+    def __init__(self, part):
+        self.status = part.get("status")
+        self.headers = dict(part.get("headers") or {})
+        self.body = _body_of(part)
+        self.streamed = bool(part.get("streamed"))
+        self.frames = list(part.get("frames") or [])
+        self.truncated = bool(part.get("truncated"))
+
+    def _events(self, body):
+        """The response as SSE events, or None when it is not a stream. A stream is
+        known by its frames, its Content-Type, or failing that by not being JSON —
+        never by containing "data:", which plenty of JSON text does."""
+        if self.streamed:
+            return _sse_events("\n\n".join("data: " + f for f in self.frames))
+        ctype = (self.headers.get("content-type") or "").lower()
+        if "text/event-stream" in ctype:
+            return _sse_events(body)
+        if "json" in ctype:
+            return None
+        try:
+            json.loads(body)
+            return None
+        except ValueError:
+            return _sse_events(body) if "data:" in body else None
+
+
 # ---- one request ------------------------------------------------------------
 
 
 class Flow:
     """One request (or response) as a hook sees it.
+
+    In a response hook flow.response holds the response, flow.completion the text
+    the model wrote, and replace_text / set_body act on the response body.
 
     flow.session      the session id, when Cortex resolved one
     flow.host, .path, .method, .headers
@@ -215,6 +371,7 @@ class Flow:
         self.mcp = req.get("mcp")
         self.a2a = req.get("a2a")
         self.body = _body_of(req)
+        self.response = Response(msg["response"]) if self.hook == "response" and msg.get("response") else None
         self._json = _UNSET
         self._set_headers = {}
         self._remove_headers = []
@@ -222,12 +379,30 @@ class Flow:
         self.invocation = None
 
     def _current(self):
-        """The body as edits so far have left it: every helper works on this, so
-        two edits compound instead of the second undoing the first."""
+        """The body as edits so far have left it — the response's in a response
+        hook, the request's otherwise. Every helper works on this, so two edits
+        compound instead of the second undoing the first."""
         b = self._new_body
         if b is None:
-            return self.body
+            return self.response.body if self.response is not None else self.body
         return b.decode("utf-8", "replace") if isinstance(b, bytes) else b
+
+    @property
+    def completion(self):
+        """The text the model wrote, joined from every block of the response:
+        JSON or streamed, Anthropic or OpenAI chat. "" outside a response hook."""
+        r = self.response
+        if r is None:
+            return ""
+        cur = self._current()
+        events = r._events(cur)
+        if events is not None:
+            return "".join(t for _, t in _stream_texts(events))
+        try:
+            body = json.loads(cur) if cur else None
+        except ValueError:
+            return ""
+        return "".join(holder[field] for holder, field in _json_response_slots(body))
 
     @property
     def json(self):
@@ -254,6 +429,8 @@ class Flow:
         its replacement. Keep it deterministic: a replacement that differs from
         turn to turn defeats the provider's prompt cache on every request."""
         fn = _replacer(pattern, repl)
+        if self.response is not None:
+            return self._replace_response_text(fn)
         body = self.json
         if body is None:
             return 0
@@ -268,7 +445,32 @@ class Flow:
         _walk_body(body, apply)
         if changed[0]:
             self._new_body = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+            self._json = _UNSET
         return changed[0]
+
+    def _replace_response_text(self, fn):
+        r = self.response
+        cur = self._current()
+        events = r._events(cur)
+        if events is not None:
+            n = _rewrite_stream(events, fn)
+            if n:
+                self._new_body = _render_sse(events)
+            return n
+        try:
+            body = json.loads(cur) if cur else None
+        except ValueError:
+            return 0
+        n = 0
+        for holder, field in _json_response_slots(body):
+            out = fn(holder[field])
+            if out != holder[field]:
+                holder[field] = out
+                n += 1
+        if n:
+            self._new_body = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+            self._json = _UNSET
+        return n
 
     def set_body(self, body):
         """Replace the body outright: a str, bytes, or anything JSON-encodable."""
