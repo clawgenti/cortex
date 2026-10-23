@@ -335,6 +335,37 @@ func (s *Script) hasResponseHooks() bool {
 	return false
 }
 
+// finalReserve is the part of a response dispatch's deadline that response
+// hooks may not spend. Every final response dispatch — the listener's teardown
+// context — is one budget shared with the plugins after the slot, which the
+// reverse pass reaches only once the slot's scripts are done: the parsers turn
+// the folded state into the charge, and a script that spends the whole deadline
+// leaves them refused with pipeline.cancelled, which sends the agent a 499 for
+// a response that arrived complete and drops the settle. So each call is
+// narrowed to what remains minus this reserve, and once the reserve is all that
+// is left the script is skipped and recorded like any other script failure. A
+// context with no deadline is left alone: nothing after the slot waits on it.
+const finalReserve = time.Second
+
+// errReserveSpent names a script skipped to keep finalReserve for the plugins
+// after the slot.
+var errReserveSpent = errors.New("skipped to leave the response deadline's reserve for the plugins after the slot")
+
+// responseBudget narrows ctx to the part of its deadline one response-hook call
+// may spend. ok is false when the reserve is all that remains.
+func responseBudget(ctx context.Context) (context.Context, context.CancelFunc, bool) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return ctx, func() {}, true
+	}
+	budget := time.Until(deadline) - finalReserve
+	if budget <= 0 {
+		return nil, nil, false
+	}
+	narrowed, cancel := context.WithTimeout(ctx, budget)
+	return narrowed, cancel, true
+}
+
 // responseHooks runs the response hooks. st is the copied stream for a response
 // already delivered, nil for one that is still the pipeline's to change.
 func (s *Script) responseHooks(ctx context.Context, pctx *pipeline.Context, streamed bool, st *streamState) pipeline.Action {
@@ -344,6 +375,19 @@ func (s *Script) responseHooks(ctx context.Context, pctx *pipeline.Context, stre
 		if !l.hs.Has("response") {
 			continue
 		}
+		callCtx, cancel, ok := responseBudget(ctx)
+		if !ok {
+			a, stop := s.failed(pctx, l, errReserveSpent, nil)
+			if stop {
+				if streamed {
+					// The client already has the response; record the refusal, which the
+					// pipeline marks late, and let it stand.
+					return pipeline.Action{Type: pipeline.Continue}
+				}
+				return a
+			}
+			continue
+		}
 		// Built once, and again only after an applied edit, which the next script
 		// must see. The request goes along without its body: a response hook rarely
 		// reads it, and on a long conversation it is the largest thing in the message.
@@ -351,7 +395,8 @@ func (s *Script) responseHooks(ctx context.Context, pctx *pipeline.Context, stre
 			msg = responseMessage(pctx, streamed, st)
 		}
 		msg["plugin"] = l.name
-		a, stop, edited := s.run(ctx, pctx, l, msg, true)
+		a, stop, edited := s.run(callCtx, pctx, l, msg, true)
+		cancel()
 		if stop {
 			if streamed {
 				// The client already has the response; record the refusal, which the

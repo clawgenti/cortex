@@ -825,6 +825,89 @@ func TestResponse_RunsInReverseOrder(t *testing.T) {
 	}
 }
 
+// lastFrame is the shape of the parsers: a streaming reader ahead of the slot,
+// which the response pass reaches only after the slot's scripts are done.
+type lastFrame struct{ got bool }
+
+func (lastFrame) Name() string { return "lastFrame" }
+func (lastFrame) Capabilities() pipeline.PluginCapabilities {
+	return pipeline.PluginCapabilities{ReadsBody: true}
+}
+func (lastFrame) OnRequest(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (lastFrame) OnResponse(context.Context, *pipeline.Context) pipeline.Action {
+	return pipeline.Action{Type: pipeline.Continue}
+}
+func (l *lastFrame) OnResponseFrame(_ context.Context, _ *pipeline.Context, _ []byte, last bool) pipeline.Action {
+	if last {
+		l.got = true
+	}
+	return pipeline.Action{Type: pipeline.Continue}
+}
+
+// A slow response script must leave the tail of the dispatch deadline for the
+// plugins after the slot. The listener gives one final response dispatch a
+// shared deadline, the slot runs first on the reverse pass, and the parsers
+// after it turn the folded state into the charge — a script that spends the
+// whole deadline leaves them refused with pipeline.cancelled, which sends the
+// agent a 499 for a response that arrived complete and drops the settle.
+func TestResponse_SlowScriptsLeaveTheDeadlineForTheParsersAfterTheSlot(t *testing.T) {
+	dir := home(t)
+	// Answers the handshake, then never replies.
+	body := "#!/bin/sh\nprintf '{\"cortex\":1,\"hooks\":[\"response\"],\"enforce\":true}\\n'\nexec sleep 3600\n"
+	if err := os.WriteFile(filepath.Join(dir, "hang"), []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A timeout larger than the dispatch deadline, so only the reserve can stop it.
+	s := configured(t, true, `{"timeout": "30s"}`)
+	rec := &lastFrame{}
+	p, err := pipeline.New([]pipeline.Plugin{rec, s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx := response(`{"answer":"hi"}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	a := p.RunResponseFrame(ctx, pctx, pctx.ResponseBody, true)
+	if a.Type != pipeline.Continue {
+		t.Fatalf("action %+v", a)
+	}
+	if !rec.got {
+		t.Fatal("the parser after the slot never saw its last frame")
+	}
+	if d, ok := ctx.Deadline(); !ok || time.Until(d) <= 0 {
+		t.Fatal("the scripts spent the whole dispatch deadline")
+	}
+}
+
+// Once the reserve is all that remains of the deadline, the scripts are skipped
+// at once rather than called into it — recorded as a script error, like any
+// other failure, so the parsers after the slot still run.
+func TestResponse_AnExhaustedDeadlineSkipsTheScripts(t *testing.T) {
+	dir := home(t)
+	script(t, dir, "seen", "resp-seen")
+	s := configured(t, true, "")
+	rec := &lastFrame{}
+	p, err := pipeline.New([]pipeline.Plugin{rec, s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx := response(`{"answer":"hi"}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	a := p.RunResponseFrame(ctx, pctx, pctx.ResponseBody, true)
+	if a.Type != pipeline.Continue {
+		t.Fatalf("action %+v", a)
+	}
+	if !rec.got {
+		t.Fatal("the parser after the slot never saw its last frame")
+	}
+	if inv := invocations(pctx)[0]; inv.Reason != "script_error" || inv.Shadow {
+		t.Errorf("the skipped script is recorded as %+v", inv)
+	}
+}
+
 // Set-Cookie is a credential too, and never reaches a script.
 func TestResponse_HeadersHideCookies(t *testing.T) {
 	if _, ok := flatten(response("").ResponseHeaders)["set-cookie"]; ok {
