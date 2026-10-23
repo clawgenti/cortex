@@ -161,7 +161,11 @@ func (s *Script) Configure(raw json.RawMessage) error {
 	if len(files) == 0 {
 		return nil // every local install has a slot; an empty one starts nothing and writes nothing
 	}
-	env := worker.Environ(os.Environ(), "")
+	sdk, err := installSDK()
+	if err != nil {
+		slog.Warn("script plugin: cannot write the Python SDK; `import cortex` will fail", "error", err)
+	}
+	env := worker.Environ(os.Environ(), sdk)
 	s.holder = pool.NewHolder()
 	// Started together, so a slot of slow starters costs one start timeout, not one
 	// per script. Results are kept in file order.
