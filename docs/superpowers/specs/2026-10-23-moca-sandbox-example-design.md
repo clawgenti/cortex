@@ -1,6 +1,6 @@
 # moca without a project settings.json: a Cortex example script
 
-Status: approved in conversation 2026-10-23. Covers one Cortex PR and one moca PR.
+Status: Cortex PR approved 2026-10-23. The moca PR is deferred (see its section).
 
 ## Problem
 
@@ -109,9 +109,17 @@ One PR, about 800-1,000 added lines across about 12 files, two-thirds of it test
   1. copy the script to `~/.cortex/plugins/moca-sandbox/`;
   2. add `{name: script, config: {dir: moca-sandbox, fail_closed: true}}` as the last outbound entry.
 
-## moca PR
+## moca PR (deferred)
 
-After the Cortex PR merges. It changes `sbx up`'s agent-config step and `sbx rm`'s take-back; push, binding and pull are unchanged.
+**Deferred, 2026-10-23.** Cortex is not installed by moca by default, so `sbx up` must not require it. Undecided: how much moca knows about Cortex. Options:
+
+- an opt-in flag that only skips the deny list and registers the MCP server, with no Cortex knowledge;
+- the same flag plus one check of Cortex's pipeline API;
+- the flag also installs the script and slot (the sketch below).
+
+Today's `sbx doctor` fails its agent-config check on a repo with no deny list; any option needs doctor to accept that.
+
+The sketch below is the third option, kept for reference. After the Cortex PR merges. It changes `sbx up`'s agent-config step and `sbx rm`'s take-back; push, binding and pull are unchanged.
 
 1. **Check Cortex first.** Before creating anything, `sbx up` checks:
    - Cortex answers on its session API, `127.0.0.1:47601/v1/pipeline`;
