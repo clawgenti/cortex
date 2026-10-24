@@ -229,6 +229,9 @@ time rather than by the first script dropped into it. Anywhere but a local
 install a `script` entry loads nothing, so a config naming it cannot run
 commands in a sidecar.
 
+A chain whose `script` entries all name a `dir` still gets the default slot,
+inserted just before the first of them.
+
 A script may also read each response, and, if its handshake declares
 `rewrite_response`, change or block it. Response readers run once a response
 is complete and keep streaming; a response rewriter holds every streamed

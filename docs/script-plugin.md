@@ -171,8 +171,9 @@ not part of the name. Each sees the request as the one before it left it. A
 script in shadow mode changes nothing, so the next one sees what it saw.
 
 All of `~/.cortex/plugins/` is one slot, which Cortex appends to the end of the
-outbound pipeline. To put scripts somewhere else — between two Go plugins, for
-example — list the slot yourself and give it a folder of its own:
+outbound pipeline. A folder inside it is a slot of its own once the config names
+it. To put scripts somewhere else — between two Go plugins, for example — list
+the slot yourself and give it a folder of its own:
 
 ```yaml
 pipeline:
@@ -186,8 +187,14 @@ pipeline:
       - name: script            # ~/.cortex/plugins/ itself
 ```
 
-Once the config names `script` anywhere, Cortex appends nothing. A slot must
-come after the parsers: it rewrites requests, and readers go first.
+- **Naming a slot keeps the default one.** When every `script` entry names a
+  `dir`, Cortex adds the `~/.cortex/plugins/` slot just before the first of them.
+  It goes first because a script that reads responses must come before one that
+  rewrites them.
+- **To place the default slot yourself,** list `- name: script` with no `dir`.
+  Cortex then adds nothing. With `on_error: off` it is switched off.
+- **A slot must come after the parsers:** it rewrites requests, and readers go
+  first.
 
 | Field | Default | Meaning |
 |---|---|---|
