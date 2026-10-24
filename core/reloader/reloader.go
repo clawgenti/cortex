@@ -349,9 +349,7 @@ func (r *Reloader) watchLoop(ctx context.Context, watcher *fsnotify.Watcher) {
 			// goroutine, which owns the watcher; fsnotify's inotify and kqueue
 			// backends send no event while holding the lock Add takes, so this
 			// cannot block on the channel this loop drains.
-			if cfg := r.reloadOnce(ctx); cfg != nil && r.extraDirs != nil {
-				r.watchExtra(watcher, r.extraDirs(cfg))
-			}
+			r.reloadOnce(ctx, watcher)
 		}
 	}
 }
@@ -359,21 +357,20 @@ func (r *Reloader) watchLoop(ctx context.Context, watcher *fsnotify.Watcher) {
 // reloadOnce runs one reload attempt from start to finish. Any error
 // leaves the currently-active pipelines untouched and is reported via
 // Status. Only the debounced timer fires this, so two reloadOnce calls
-// cannot overlap. It returns the config it put into effect, or nil when it
-// changed nothing.
-func (r *Reloader) reloadOnce(parent context.Context) *config.Config {
+// cannot overlap.
+func (r *Reloader) reloadOnce(parent context.Context, watcher *fsnotify.Watcher) {
 	attempt := time.Now()
 
 	// Content-hash dedup: ignore mtime-only changes (e.g., a touch).
 	data, err := os.ReadFile(r.configPath)
 	if err != nil {
 		r.recordFailure(attempt, fmt.Errorf("read: %w", err))
-		return nil
+		return
 	}
 	hash := r.hash(data)
 	if hash == r.lastHash {
 		slog.Debug("reloader: content unchanged, skipping reload", "sha256", hash[:12])
-		return nil
+		return
 	}
 
 	// Build + validate a new pair of pipelines. build() does Load +
@@ -382,7 +379,7 @@ func (r *Reloader) reloadOnce(parent context.Context) *config.Config {
 	newIn, newOut, newCfg, err := r.build()
 	if err != nil {
 		r.recordFailure(attempt, fmt.Errorf("build: %w", err))
-		return nil
+		return
 	}
 
 	// Refuse changes to unreloadable fields. Listener addresses and
@@ -391,7 +388,7 @@ func (r *Reloader) reloadOnce(parent context.Context) *config.Config {
 	// held by the session store. Operator needs a pod restart for those.
 	if err := validateReloadable(r.activeCfg.Load(), newCfg); err != nil {
 		r.recordFailure(attempt, err)
-		return nil
+		return
 	}
 
 	// Start the new pipelines. On failure, Stop any partial state so
@@ -400,7 +397,7 @@ func (r *Reloader) reloadOnce(parent context.Context) *config.Config {
 	defer cancel()
 	if err := newIn.Start(startCtx); err != nil {
 		r.recordFailure(attempt, fmt.Errorf("inbound Start: %w", err))
-		return nil
+		return
 	}
 	if err := newOut.Start(startCtx); err != nil {
 		// Inbound started cleanly; unwind it before bailing.
@@ -408,7 +405,7 @@ func (r *Reloader) reloadOnce(parent context.Context) *config.Config {
 		defer unwindCancel()
 		newIn.Stop(unwindCtx)
 		r.recordFailure(attempt, fmt.Errorf("outbound Start: %w", err))
-		return nil
+		return
 	}
 
 	// Commit: swap Holders and update active-config snapshot. From
@@ -449,8 +446,10 @@ func (r *Reloader) reloadOnce(parent context.Context) *config.Config {
 		slog.Info("reloader: drained old pipelines", "sha256", hash[:12])
 	}()
 
+	if r.extraDirs != nil {
+		r.watchExtra(watcher, r.extraDirs(newCfg))
+	}
 	r.recordSuccess(attempt, hash)
-	return newCfg
 }
 
 // hash is what decides whether a reload has anything to do: the config's bytes,

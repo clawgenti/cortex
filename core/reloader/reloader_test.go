@@ -757,6 +757,9 @@ func TestReloader_WatchesAFolderAReloadAdds(t *testing.T) {
 	}
 	dirs := func(c *config.Config) []string {
 		if c != nil && len(c.Pipeline.Outbound.Plugins) > 0 {
+			// Slow, so an edit made as soon as the reload reports success would
+			// land before the folder is watched if success came first.
+			time.Sleep(100 * time.Millisecond)
 			return []string{early, late}
 		}
 		return []string{early}
