@@ -215,7 +215,9 @@ credentials, body, and the parsers' fields) and may change its headers or body,
 or deny it. A new script runs in **shadow mode**, recording what it would do,
 until its handshake says `enforce`. A script that crashes, times out or answers
 nonsense lets the request through, with the error on its timeline row, unless
-the slot sets `fail_closed: true`.
+the slot sets `fail_closed: true`. Under `fail_closed`, a script that did not
+start makes the slot refuse every request with a 502 until a reload in which it
+starts.
 
 On a local install the preset appends one `script` entry to the end of the
 outbound chain, so a file dropped into the folder runs with no YAML edit;
@@ -239,7 +241,7 @@ response streaming is unaffected unless a loaded script rewrites responses.
 |---|---|---|
 | `dir` | (empty) | Folder inside `~/.cortex/plugins` this slot runs; empty is that folder itself |
 | `timeout` | `2s` | How long one script may take to answer one hook |
-| `fail_closed` | `false` | Deny a request when an enforcing script errors on it |
+| `fail_closed` | `false` | Deny a request when an enforcing script errors on it, and every request while a script in the slot did not start |
 
 Full guide, including the Python SDK and replaying a script over a recorded
 session: [`script-plugin.md`](script-plugin.md).

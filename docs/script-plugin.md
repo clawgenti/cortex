@@ -151,7 +151,10 @@ Completions and OpenAI Responses bodies. Other formats are in `flow.json`.
   `timeout` (2s) is restarted, and the request goes through.
 - **A broken script does not break your agent.** An exception, a crash or a
   timeout is shown on the request's row and the request continues. To block
-  instead, see `fail_closed` below.
+  instead, see `fail_closed` below. Under `fail_closed`, a script that does not
+  start at all — a syntax error, a missing interpreter — blocks every request
+  through its slot. Cortex tries it again when you save a change to it, or when
+  Cortex restarts.
 - **What Cortex records is what the upstream exchanged.** Cortex's parsers read
   each request before any script runs, and each streamed response before a
   rewriting script does, so the session view and archive keep the original
@@ -190,7 +193,7 @@ come after the parsers: it rewrites requests, and readers go first.
 |---|---|---|
 | `dir` | (empty) | Folder inside `~/.cortex/plugins` this slot runs |
 | `timeout` | `2s` | How long one script may take to answer one request |
-| `fail_closed` | `false` | Block a request when an enforcing script fails on it |
+| `fail_closed` | `false` | Block a request when an enforcing script fails on it, and every request while a script in the slot did not start |
 
 ## Without the SDK
 
