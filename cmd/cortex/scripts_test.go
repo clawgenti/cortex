@@ -34,6 +34,8 @@ func TestAddScriptSlot(t *testing.T) {
 	prune := config.PluginEntry{Name: "tool-prune"}
 	moca := config.PluginEntry{Name: "script", Config: []byte(`{"dir":"moca-sandbox","fail_closed":true}`)}
 	early := config.PluginEntry{Name: "script", Config: []byte(`{"dir":"early"}`)}
+	mocaOff := config.PluginEntry{Name: "script", Config: moca.Config, OnError: pipeline.ErrorPolicyOff}
+	earlyOff := config.PluginEntry{Name: "script", Config: early.Config, OnError: pipeline.ErrorPolicyOff}
 	def := config.PluginEntry{Name: "script"}
 	defOff := config.PluginEntry{Name: "script", OnError: pipeline.ErrorPolicyOff}
 	emptyDir := config.PluginEntry{Name: "script", Config: []byte(`{"dir":""}`)}
@@ -51,6 +53,8 @@ func TestAddScriptSlot(t *testing.T) {
 		{"the user's default after a named slot: left alone", true, []config.PluginEntry{parser, moca, def}, []string{"inference-parser", "script:moca-sandbox", "script"}},
 		{"the user's default switched off: left alone", true, []config.PluginEntry{defOff, parser, moca}, []string{"script", "inference-parser", "script:moca-sandbox"}},
 		{"an explicit empty dir is the default slot", true, []config.PluginEntry{parser, moca, emptyDir}, []string{"inference-parser", "script:moca-sandbox", "script"}},
+		{"a named slot switched off: not a place to insert", true, []config.PluginEntry{mocaOff, parser}, []string{"script:moca-sandbox", "inference-parser", "script"}},
+		{"a switched-off slot first: before the first built one", true, []config.PluginEntry{earlyOff, parser, prune, moca}, []string{"script:early", "inference-parser", "tool-prune", "script", "script:moca-sandbox"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := chain(slices.Clone(tc.in)...)

@@ -21,7 +21,7 @@ const scriptPlugin = "script"
 //
 // A chain that names no script entry gets it appended. A chain whose script entries
 // all name a dir — a slot another tool added, such as the moca-sandbox example's —
-// gets it just before the first of them, so adding a slot does not switch the
+// gets it just before the first built one, so adding a slot does not switch the
 // user's own scripts off. Before, not after: a slot that rewrites responses must
 // come after every response reader, and the default slot's scripts may read them.
 // A chain that already has an entry for the default slot, under any on_error,
@@ -40,7 +40,7 @@ func addScriptSlot(c *config.Config, local bool) {
 		if entryDir(e) == "" {
 			return
 		}
-		if first < 0 {
+		if first < 0 && e.OnError.Resolved() != pipeline.ErrorPolicyOff {
 			first = i
 		}
 	}
