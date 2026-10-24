@@ -202,6 +202,75 @@ pipeline:
 | `timeout` | `2s` | How long one script may take to answer one request |
 | `fail_closed` | `false` | Block a request when an enforcing script fails on it, and every request while a script in the slot did not start |
 
+## Examples
+
+Scripts written for a particular setup live in
+[`examples/script-plugins/`](../examples/script-plugins/). Cortex does not install
+them; copy the ones you want.
+
+### moca-sandbox.py: keep Claude Code on moca's sandbox tools
+
+[moca](https://github.com/rossoctl/moca) runs an agent's tools in a remote
+sandbox. To keep Claude Code off its local tools, `mocactl sbx up` denies them in
+the repo's `.claude/settings.json`. That deny also stops Claude Code loading
+`CLAUDE.md` (rossoctl/moca#568).
+
+This script does the deny's job instead, in sessions that carry moca's
+`mcp__sandbox__` tools:
+
+- it removes the local tools from the list the model sees;
+- it renames a local tool call the model makes anyway, so Claude Code runs
+  nothing;
+- it replaces the result of a local call that already ran with an error.
+
+Other sessions are untouched.
+
+Install it in a slot of its own, failing closed:
+
+1. Copy the script, from a checkout of this repo:
+
+   ```sh
+   mkdir -p ~/.cortex/plugins/moca-sandbox
+   cp examples/script-plugins/moca-sandbox.py ~/.cortex/plugins/moca-sandbox/
+   chmod +x ~/.cortex/plugins/moca-sandbox/moca-sandbox.py
+   ```
+
+2. Add the slot as the last outbound entry of `~/.cortex/config.yaml`:
+
+   ```yaml
+         - name: script
+           config:
+             dir: moca-sandbox
+             fail_closed: true
+   ```
+
+   Cortex reloads it; no restart.
+
+3. In the repo, create the sandbox without the settings file, and register the
+   sandbox server for this repo only:
+
+   ```sh
+   mocactl sbx up --no-agent-config
+   claude mcp add -s local sandbox -- mocactl sbx mcp
+   ```
+
+Check it in agentop's plugin pane: the `moca-sandbox` slot shows `scripts loaded`
+1 and `scripts not started` 0.
+
+What it costs, and what it does not cover:
+
+- **Streams are held back for every session.** The script rewrites responses, so
+  Cortex buffers each streamed response until it is complete, not only moca's.
+- **No Cortex, no protection.** Claude Code must reach the model through Cortex
+  (`HTTPS_PROXY`).
+- **A script that does not start blocks all traffic** through its slot, by
+  `fail_closed`, until it is fixed.
+- **Claude Code's own tools stay visible:** `Skill`, `SendMessage`, the `Cron`
+  tools and others are not on moca's list.
+- **Approve each sandbox tool once,** or run in auto mode. "Don't ask again" in a
+  prompt writes `.claude/settings.local.json` in the repo. Headless runs need
+  `--allowedTools 'mcp__sandbox__*'`.
+
 ## Without the SDK
 
 The SDK is a convenience; the protocol is one JSON object per line on stdin and
