@@ -248,7 +248,8 @@ cortex/
 │   ├── session-budget/               #   Redis-backed budget tracking
 │   └── context-guru/                 #   Opt-in context-guru plugin
 │
-├── tests/                            # Python tests (keycloak_sync)
+├── examples/script-plugins/          # Example script plugins; copied by hand, not installed
+├── tests/                            # Python tests
 ├── go.work                           # Workspace linking 8 of the 11 Go modules
 ├── .github/
 │   ├── workflows/                    # CI/CD (ci.yaml, build.yaml, release-binaries.yaml,

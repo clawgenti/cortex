@@ -97,9 +97,10 @@ def test_a_local_result_is_replaced_and_a_sandbox_result_kept(sdk):
 # Claude Code sends a tool_result's content as blocks too, and a request may carry
 # no session id; neither may let a local result through.
 def test_a_block_list_result_without_a_session_is_replaced(sdk):
+    blocks = [{"type": "text", "text": "file text"}]
     history = [
         {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Read", "input": {}}]},
-        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "file text"}]}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": blocks}]},
     ]
     reply, _ = sdk.handle(request([SANDBOX_TOOL], history, session=None))
     result = sent(reply)["messages"][1]["content"][0]

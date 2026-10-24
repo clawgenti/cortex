@@ -1,6 +1,6 @@
 # moca without a project settings.json: a Cortex example script
 
-Status: Cortex PR approved 2026-10-23. The moca PR is deferred (see its section).
+Status: Design approved 2026-10-23. The moca PR is deferred (see its section).
 
 ## Problem
 

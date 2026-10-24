@@ -264,7 +264,14 @@ What it costs, and what it does not cover:
 - **No Cortex, no protection.** Claude Code must reach the model through Cortex
   (`HTTPS_PROXY`).
 - **A script that does not start blocks all traffic** through its slot, by
-  `fail_closed`, until it is fixed.
+  `fail_closed`, even when it was only slow to start. Cortex tries it again when
+  you save a change to it, or when Cortex restarts.
+- **It reads only Anthropic responses:** JSON, and event streams whose events
+  each carry one `data:` line ending in `\n`. A response in another format
+  passes unchanged, so a local tool call in it is not renamed, and Claude Code
+  runs it.
+- **Other MCP servers you configured are not blocked:** the script blocks only
+  the tools on moca's list.
 - **Claude Code's own tools stay visible:** `Skill`, `SendMessage`, the `Cron`
   tools and others are not on moca's list.
 - **Approve each sandbox tool once,** or run in auto mode. "Don't ask again" in a
