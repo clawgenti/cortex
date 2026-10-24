@@ -258,7 +258,9 @@ func SlotDir(dir string) (string, error) {
 // are not applied and so are not seen.
 func (s *Script) OnRequest(ctx context.Context, pctx *pipeline.Context) pipeline.Action {
 	if s.cfg.FailClosed && len(s.missing) > 0 {
-		return s.notStarted(pctx)
+		if a := s.notStarted(pctx); a.Type != pipeline.Continue {
+			return a
+		}
 	}
 	var msg map[string]any
 	for _, l := range s.loaded {

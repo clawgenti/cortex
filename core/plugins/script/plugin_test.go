@@ -529,6 +529,7 @@ func TestOnRequest_FailClosedRefusesAScriptThatNeverAnswers(t *testing.T) {
 func TestRun_ObservePolicyDoesNotRefuseForAScriptThatDidNotStart(t *testing.T) {
 	dir := home(t)
 	broken(t, dir, "guard")
+	script(t, dir, "count", "count")
 	s := configured(t, true, `{"fail_closed": true}`)
 	p, err := pipeline.New([]pipeline.Plugin{s}, pipeline.WithPolicies(pipeline.ErrorPolicyObserve))
 	if err != nil {
@@ -538,8 +539,10 @@ func TestRun_ObservePolicyDoesNotRefuseForAScriptThatDidNotStart(t *testing.T) {
 	if a := p.Run(context.Background(), pctx); a.Type != pipeline.Continue {
 		t.Fatalf("an observed slot refused: %+v", a.Violation)
 	}
-	if invs := invocations(pctx); len(invs) != 1 || invs[0].Plugin != "guard" || !invs[0].Shadow {
-		t.Errorf("invocations = %+v, want one shadow row for guard", invs)
+	// The slot's loaded script still runs: observe records what the slot would do.
+	invs := invocations(pctx)
+	if len(invs) != 2 || invs[0].Plugin != "guard" || !invs[0].Shadow || invs[1].Plugin != "count" {
+		t.Errorf("invocations = %+v, want a shadow row for guard, then count's", invs)
 	}
 }
 
