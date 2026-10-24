@@ -230,7 +230,7 @@ install a `script` entry loads nothing, so a config naming it cannot run
 commands in a sidecar.
 
 A chain whose `script` entries all name a `dir` still gets the default slot,
-inserted just before the first of them.
+inserted just before the first of them that is not `on_error: off`.
 
 A script may also read each response, and, if its handshake declares
 `rewrite_response`, change or block it. Response readers run once a response

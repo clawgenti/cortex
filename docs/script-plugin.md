@@ -188,9 +188,9 @@ pipeline:
 ```
 
 - **Naming a slot keeps the default one.** When every `script` entry names a
-  `dir`, Cortex adds the `~/.cortex/plugins/` slot just before the first of them.
-  It goes first because a script that reads responses must come before one that
-  rewrites them.
+  `dir`, Cortex adds the `~/.cortex/plugins/` slot just before the first of them
+  that is not `on_error: off`. It goes first because a script that reads
+  responses must come before one that rewrites them.
 - **To place the default slot yourself,** list `- name: script` with no `dir`.
   Cortex then adds nothing. With `on_error: off` it is switched off.
 - **A slot must come after the parsers:** it rewrites requests, and readers go
@@ -254,8 +254,16 @@ Install it in a slot of its own, failing closed:
    claude mcp add -s local sandbox -- mocactl sbx mcp
    ```
 
-Check it in agentop's plugin pane: the `moca-sandbox` slot shows `scripts loaded`
-1 and `scripts not started` 0.
+Check that it loaded:
+
+```sh
+curl --noproxy '*' -s http://127.0.0.1:47601/v1/pipeline \
+  | jq '.outbound[] | select(.config.dir == "moca-sandbox") | .metrics[:2]'
+```
+
+It should show `scripts loaded` 1 and `scripts not started` 0. agentop's
+plugin pane cannot show it yet: it opens the first `script` slot whichever row
+you pick.
 
 What it costs, and what it does not cover:
 
