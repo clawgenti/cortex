@@ -743,8 +743,7 @@ func TestReloader_ExtraWatchFolderReloads(t *testing.T) {
 }
 
 // A folder named by a config that a reload accepted is watched from then on: an
-// edit in it reloads without a restart. The folder's content counts in the hash
-// from that reload, so the edit is a change. A folder created by hand before the
+// edit in it reloads without a restart. A folder created by hand before the
 // config names it — with the script already in it — is watched the same way.
 func TestReloader_WatchesAFolderAReloadAdds(t *testing.T) {
 	root := t.TempDir()
@@ -833,10 +832,11 @@ func TestReloader_ARefusedReloadWatchesNothingNew(t *testing.T) {
 		}
 		return nil
 	}
-	_, b, cfgPath, _, _ := setupWith(t, WithExtraWatch(dirs, func([]string) string { return "" }))
+	r, b, cfgPath, _, _ := setupWith(t, WithExtraWatch(dirs, func([]string) string { return "" }))
 	b.set(builderResult{err: errBuildRefused, cfg: withLateSlot()})
 	writeConfig(t, cfgPath, "mode: envoy-sidecar\n# with the late slot\n")
-	time.Sleep(200 * time.Millisecond)
+	waitFor(t, 2*time.Second, func() bool { return r.Status().ReloadsFailed >= 1 }, "the refused reload to run")
+	time.Sleep(50 * time.Millisecond)
 	if asked.Load() != 0 {
 		t.Fatal("a refused reload asked for the new config's folders")
 	}
@@ -860,4 +860,36 @@ func TestReloader_HashIsTheConfigSHA256WithoutAFingerprint(t *testing.T) {
 	if got := r.hash(data); got != hex.EncodeToString(sum[:]) {
 		t.Errorf("hash = %q, not the config's sha256", got)
 	}
+}
+
+// An edit that lands while Start adds its watches is reloaded: the hash Start
+// seeds comes from the config New read, not from the file as Start finds it.
+func TestReloader_AnEditDuringStartIsReloaded(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("mode: envoy-sidecar\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	extra := filepath.Join(dir, "plugins")
+	var edited atomic.Bool
+	// Start asks for the folders after it watches the config's directory, so the
+	// edit made here is one made while Start runs.
+	dirs := func(*config.Config) []string {
+		if !edited.Swap(true) {
+			writeConfig(t, cfgPath, "mode: envoy-sidecar\n# edited during Start\n")
+		}
+		return []string{extra}
+	}
+	initialCfg := &config.Config{Mode: "envoy-sidecar"}
+	b := &fakeBuilder{}
+	b.set(builderResult{inbound: emptyPipeline(t), outbound: emptyPipeline(t), cfg: initialCfg})
+	r := New(cfgPath, pipeline.NewHolder(emptyPipeline(t)), pipeline.NewHolder(emptyPipeline(t)), b.build, initialCfg,
+		WithDebounce(20*time.Millisecond), WithDrainWindow(0), WithStartTimeout(5*time.Second),
+		WithExtraWatch(dirs, func([]string) string { return "" }))
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := r.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return r.Status().ReloadsOK == 1 }, "the edit made during Start to reload")
 }

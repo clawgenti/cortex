@@ -90,8 +90,7 @@ func WithOnCommit(f func(*config.Config)) Option { return func(r *Reloader) { r.
 // reload accepts, so a folder a config edit adds is watched from that reload on.
 // A folder that does not exist yet is created so it can be watched: one the user
 // creates later would otherwise go unseen until the next config edit. A folder the
-// config stops naming stays watched until restart; an event there leaves the
-// fingerprint unchanged, so it reloads nothing. fingerprint is called on every
+// config stops naming stays watched until restart. fingerprint is called on every
 // candidate reload, with every folder watched so far.
 func WithExtraWatch(dirs func(*config.Config) []string, fingerprint func(dirs []string) string) Option {
 	return func(r *Reloader) { r.extraDirs, r.fingerprint = dirs, fingerprint }
@@ -130,6 +129,8 @@ type Reloader struct {
 
 	// serialized by the watch goroutine
 	lastHash string
+	// startData is the config file as New read it.
+	startData []byte
 }
 
 // New constructs a Reloader. initialCfg must be the config the caller
@@ -155,6 +156,7 @@ func New(configPath string, inbound, outbound *pipeline.Holder, build PipelineBu
 	// kubelet touching the mount) doesn't trigger a redundant rebuild.
 	if data, err := os.ReadFile(configPath); err == nil {
 		r.lastHash = r.hash(data)
+		r.startData = data
 	}
 
 	init := Status{LastAttempt: time.Time{}, LastSuccess: time.Now(), ActiveConfigSHA256: r.lastHash}
@@ -261,14 +263,13 @@ func (r *Reloader) watchExtra(watcher *fsnotify.Watcher, dirs []string) {
 	}
 }
 
-// seedHash sets the hash a reload compares against from what is on disk now, and
+// seedHash sets the hash a reload compares against from the config New read, and
 // publishes it as the active config's.
 func (r *Reloader) seedHash() {
-	data, err := os.ReadFile(r.configPath)
-	if err != nil {
+	if r.startData == nil {
 		return
 	}
-	r.lastHash = r.hash(data)
+	r.lastHash = r.hash(r.startData)
 	next := *r.status.Load()
 	next.ActiveConfigSHA256 = r.lastHash
 	r.status.Store(&next)
@@ -345,9 +346,9 @@ func (r *Reloader) watchLoop(ctx context.Context, watcher *fsnotify.Watcher) {
 
 		case <-trigger:
 			// A config that names a new folder is watched from here. Added on this
-			// goroutine, which owns the watcher; fsnotify sends no event while
-			// holding the lock Add takes, so this cannot block on the channel
-			// this loop drains.
+			// goroutine, which owns the watcher; fsnotify's inotify and kqueue
+			// backends send no event while holding the lock Add takes, so this
+			// cannot block on the channel this loop drains.
 			if cfg := r.reloadOnce(ctx); cfg != nil && r.extraDirs != nil {
 				r.watchExtra(watcher, r.extraDirs(cfg))
 			}
