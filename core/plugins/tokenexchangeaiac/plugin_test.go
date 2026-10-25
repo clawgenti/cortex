@@ -429,13 +429,66 @@ func TestNoTokenPolicies(t *testing.T) {
 		t.Errorf("allow: reason = %s, want %s", inv.Reason, reasonNoToken)
 	}
 
-	// deny is the default, as in token-exchange.
+	if n := kc.calls.Load(); n != 0 {
+		t.Errorf("allow: IdP calls = %d, want 0", n)
+	}
+
+	// deny is the default, as in token-exchange. It denies a target only: a
+	// destination the IdP has no client for still passes through, as it does
+	// with a bearer, and is never handed the workload's own token.
 	for name, extra := range map[string]string{"explicit": `,"no_token_policy":"deny"`, "default": ""} {
 		deny := configured(t, srv, extra)
-		a := deny.OnRequest(context.Background(), outbound("github-tool", ""))
+		target := outbound("github-tool", "")
+		a := deny.OnRequest(context.Background(), target)
 		if a.Type != pipeline.Reject || a.Violation.Status != http.StatusUnauthorized ||
 			a.Violation.Code != "auth.unauthorized" || a.Violation.Reason != "missing Authorization header" {
 			t.Errorf("deny (%s): action = %v %+v, want 401 auth.unauthorized", name, a.Type, a.Violation)
+		}
+		if got := target.Headers.Get("Authorization"); got != "" {
+			t.Errorf("deny (%s): denied request got Authorization %q", name, got)
+		}
+		if inv := lastInvocation(t, target); inv.Reason != reasonNoToken {
+			t.Errorf("deny (%s): reason = %s, want %s", name, inv.Reason, reasonNoToken)
+		}
+		// A second request is answered from the cache, still as a 401.
+		if a := deny.OnRequest(context.Background(), outbound("github-tool", "")); a.Type != pipeline.Reject ||
+			a.Violation.Status != http.StatusUnauthorized {
+			t.Errorf("deny (%s), cached: action = %v %+v, want 401", name, a.Type, a.Violation)
+		}
+
+		collector := outbound("otel-collector", "")
+		if a := deny.OnRequest(context.Background(), collector); a.Type != pipeline.Continue {
+			t.Errorf("deny (%s): non-target denied: %+v", name, a.Violation)
+		}
+		if got := collector.Headers.Get("Authorization"); got != "" {
+			t.Errorf("deny (%s): non-target got Authorization %q", name, got)
+		}
+		if inv := lastInvocation(t, collector); inv.Reason != reasonAudienceUnknown {
+			t.Errorf("deny (%s): non-target reason = %s, want %s", name, inv.Reason, reasonAudienceUnknown)
+		}
+	}
+}
+
+// A CONNECT tunnel, or a transparently redirected connection, carries opaque
+// bytes: nothing the plugin set would reach the destination, so it is never
+// gated, exchanged or sent to the IdP.
+func TestOpaqueTunnelIsSkipped(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	for _, policy := range []string{"deny", "client-credentials"} {
+		p := configured(t, srv, `,"no_token_policy":"`+policy+`"`)
+		for _, host := range []string{"github-tool.team1.svc:443", "hr-tool:443"} {
+			pctx := outbound(host, "")
+			pctx.Method = http.MethodConnect
+			pctx.Scheme = "tcp"
+			if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
+				t.Errorf("%s %s: action = %v %+v, want Continue", policy, host, a.Type, a.Violation)
+			}
+			if got := pctx.Headers.Get("Authorization"); got != "" {
+				t.Errorf("%s %s: tunnel got Authorization %q", policy, host, got)
+			}
+			if inv := lastInvocation(t, pctx); inv.Reason != reasonOpaqueTunnel {
+				t.Errorf("%s %s: reason = %s, want %s", policy, host, inv.Reason, reasonOpaqueTunnel)
+			}
 		}
 	}
 	if n := kc.calls.Load(); n != 0 {
@@ -580,6 +633,29 @@ func TestDeniesWhileCredentialsAreMissing(t *testing.T) {
 	// A non-target is unaffected by missing credentials.
 	if a := p.OnRequest(context.Background(), outbound("api.openai.com", "")); a.Type != pipeline.Continue {
 		t.Errorf("non-target denied while not ready: %+v", a.Violation)
+	}
+}
+
+// no_token_policy: allow forwards a bearer-less request whatever the
+// destination, so it does not wait for credentials it would never use.
+func TestAllowNeedsNoCredentials(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	p := New()
+	dir := t.TempDir()
+	cfg := fmt.Sprintf(`{"token_url":%q,"client_id_file":%q,"client_secret_file":%q,"no_token_policy":"allow"}`,
+		srv.URL, dir+"/id", dir+"/secret")
+	if err := p.Configure(json.RawMessage(cfg)); err != nil {
+		t.Fatal(err)
+	}
+	pctx := outbound("github-tool", "")
+	if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
+		t.Errorf("action = %v %+v, want Continue", a.Type, a.Violation)
+	}
+	if inv := lastInvocation(t, pctx); inv.Reason != reasonNoToken {
+		t.Errorf("reason = %s, want %s", inv.Reason, reasonNoToken)
+	}
+	if n := kc.calls.Load(); n != 0 {
+		t.Errorf("IdP calls = %d, want 0", n)
 	}
 }
 

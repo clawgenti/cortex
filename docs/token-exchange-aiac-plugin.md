@@ -191,13 +191,20 @@ it, spaces included. When there is none, `no_token_policy` decides:
 
 | `no_token_policy` | Result | Session event |
 |---|---|---|
-| `deny` (default) | **401** `auth.unauthorized`, "missing Authorization header" | `deny / no_token` |
+| `deny` (default) | a target: **401** `auth.unauthorized`, "missing Authorization header" | `deny / no_token` |
 | `allow` | forwarded unchanged, with no `Authorization` | `skip / no_token` |
 | `client-credentials` | exchanged with the workload's own token as the subject | `modify / token_exchanged` |
 
-Only a destination that is a target gets this far. A host outside the cluster,
-or a destination remembered as unknown, passes through before the policy is
-consulted.
+A host outside the cluster, or a destination remembered as unknown, passes
+through before the policy is consulted. `allow` then needs nothing else: it
+asks Keycloak nothing and does not wait for the credential files.
+
+`deny` denies a **target** only, so it has to find out whether the destination
+is one. It makes the same exchange `client-credentials` does, with the
+workload's own token as the subject, and uses only the answer: a token, or a
+cached one, means 401; "Audience not found" passes the request through without
+an `Authorization` header, as it would with a bearer; any other answer is the
+403 or 503 of the table at the top. The issued token is never forwarded.
 
 With `no_token_policy: client-credentials`, the plugin gets the
 workload's own token with `client_credentials` (cached until shortly before it
@@ -289,7 +296,15 @@ audiences the caller holds.
 - **Client-secret identity only.** No SPIFFE JWT-SVID client assertion yet.
 - **No scopes.** Grants have to be default client scopes, as described above.
 - **Plaintext HTTP only**, like every outbound plugin. An opaque HTTPS tunnel
-  reaches no plugin, so it is neither exchanged nor checked.
+  (a `CONNECT`, or a transparently redirected connection) is neither exchanged
+  nor checked: the plugin records `skip / opaque_tunnel` and asks Keycloak
+  nothing.
+- **The Host header is trusted to name the destination.** The forward proxy
+  dials the host it was given, so there the two cannot differ. Under
+  `cortex-envoy` the request goes to the address the workload dialed, so a
+  workload that sends `Host: github-tool` to another address gets a
+  `github-tool` token sent there. `token-exchange`'s routes trust the Host
+  header the same way.
 - **The service account and the Service must share a name** for SPIFFE-ID
   audiences. See [Choosing `audience_template`](#choosing-audience_template).
 

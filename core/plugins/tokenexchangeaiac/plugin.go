@@ -42,6 +42,7 @@ const (
 	reasonTargetDisabled    = "target_disabled"
 	reasonExchangeFailed    = "exchange_failed"
 	reasonCredentialsAbsent = "credentials_not_ready"
+	reasonOpaqueTunnel      = "opaque_tunnel"
 
 	reasonPlaceholderUnresolved = "placeholder_unresolved"
 )
@@ -282,6 +283,16 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 		subject = real
 	}
 
+	// A CONNECT tunnel, or a transparently redirected connection, carries
+	// opaque bytes: no header set here reaches the destination, and the
+	// destination's own Authorization travels inside the encrypted stream. Gate
+	// nothing on it, as the doc promises.
+	if pctx.Method == http.MethodConnect {
+		pctx.Record(pipeline.Invocation{Action: pipeline.ActionSkip, Reason: reasonOpaqueTunnel,
+			Details: map[string]string{"host": pctx.Host}})
+		return pipeline.Action{Type: pipeline.Continue}
+	}
+
 	t, why := p.targets.resolve(pctx.Host)
 	if why != "" {
 		p.notEligible.Add(1)
@@ -295,21 +306,26 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 		return p.passUnknown(pctx, details, true)
 	}
 
+	// allow forwards a bearer-less request unchanged whatever the
+	// destination is, so it needs neither credentials nor the IdP.
+	if subject == "" && p.cfg.NoTokenPolicy == auth.NoTokenPolicyAllow {
+		pctx.Record(pipeline.Invocation{Action: pipeline.ActionSkip, Reason: reasonNoToken, Details: details})
+		return pipeline.Action{Type: pipeline.Continue}
+	}
+
 	creds := p.creds.Load()
 	if creds == nil {
 		return p.deny(pctx, details, reasonCredentialsAbsent, http.StatusServiceUnavailable,
 			"upstream.token-exchange-failed", "client credentials are not loaded yet")
 	}
 
+	// With no bearer, both remaining policies exchange the workload's own
+	// token: only an exchange tells a target from a destination the IdP has no
+	// client for. client-credentials forwards the narrowed token; deny uses
+	// the exchange only to find out, so that a non-target still passes through
+	// and only a target answers 401.
+	probeOnly := false
 	if subject == "" {
-		switch p.cfg.NoTokenPolicy {
-		case auth.NoTokenPolicyAllow:
-			pctx.Record(pipeline.Invocation{Action: pipeline.ActionSkip, Reason: reasonNoToken, Details: details})
-			return pipeline.Action{Type: pipeline.Continue}
-		case auth.NoTokenPolicyDeny:
-			return p.deny(pctx, details, reasonNoToken, http.StatusUnauthorized,
-				"auth.unauthorized", "missing Authorization header")
-		}
 		self, err := p.selfToken(ctx, *creds)
 		if err != nil {
 			slog.Warn(PluginName+": client-credentials grant failed", "error", err)
@@ -317,11 +333,15 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 				"upstream.token-exchange-failed", "could not obtain this workload's own token")
 		}
 		subject = self
+		probeOnly = p.cfg.NoTokenPolicy == auth.NoTokenPolicyDeny
 	}
 
 	key := tokenKey(subject, t.audience)
 	if tok, ok := p.tokens.get(key); ok {
 		p.cacheHits.Add(1)
+		if probeOnly {
+			return p.denyNoToken(pctx, details)
+		}
 		return p.replace(pctx, details, tok, true)
 	}
 
@@ -329,6 +349,9 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 	if err == nil {
 		p.tokens.put(key, issued)
 		p.exchanged.Add(1)
+		if probeOnly {
+			return p.denyNoToken(pctx, details)
+		}
 		return p.replace(pctx, details, issued.accessToken, false)
 	}
 	switch classify(err) {
@@ -351,6 +374,13 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 		return p.deny(pctx, details, reasonExchangeFailed, http.StatusServiceUnavailable,
 			"upstream.token-exchange-failed", "token exchange failed")
 	}
+}
+
+// denyNoToken answers a bearer-less request to a target under
+// no_token_policy: deny.
+func (p *TokenExchangeAIAC) denyNoToken(pctx *pipeline.Context, details map[string]string) pipeline.Action {
+	return p.deny(pctx, details, reasonNoToken, http.StatusUnauthorized,
+		"auth.unauthorized", "missing Authorization header")
 }
 
 // resolvePlaceholder looks a handle up in the shared store. Returns ok=false
