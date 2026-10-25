@@ -14,13 +14,13 @@ import (
 	// advertises itself via init(); importing here makes the name
 	// resolvable to plugins.Build in these tests.
 	_ "github.com/rossoctl/cortex/core/plugins/a2aparser"
-	_ "github.com/rossoctl/cortex/core/plugins/discoveryexchange"
 	_ "github.com/rossoctl/cortex/core/plugins/inferenceparser"
 	jwtvalidation "github.com/rossoctl/cortex/core/plugins/jwtvalidation"
 	_ "github.com/rossoctl/cortex/core/plugins/mcpparser"
 	_ "github.com/rossoctl/cortex/core/plugins/opa"
 	_ "github.com/rossoctl/cortex/core/plugins/tokenbroker"
 	tokenexchange "github.com/rossoctl/cortex/core/plugins/tokenexchange"
+	_ "github.com/rossoctl/cortex/core/plugins/tokenexchangeaiac"
 )
 
 // TestBuiltinsRegistered verifies every in-tree plugin is discoverable
@@ -31,14 +31,14 @@ import (
 // this file drive what's present in the registry during the test run.
 func TestBuiltinsRegistered(t *testing.T) {
 	want := map[string]bool{
-		"jwt-validation":     true,
-		"token-exchange":     true,
-		"discovery-exchange": true,
-		"token-broker":       true,
-		"a2a-parser":         true,
-		"mcp-parser":         true,
-		"inference-parser":   true,
-		"opa":                true,
+		"jwt-validation":      true,
+		"token-exchange":      true,
+		"token-exchange-aiac": true,
+		"token-broker":        true,
+		"a2a-parser":          true,
+		"mcp-parser":          true,
+		"inference-parser":    true,
+		"opa":                 true,
 	}
 	got := plugins.RegisteredPlugins()
 	gotSet := make(map[string]bool, len(got))

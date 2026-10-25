@@ -1,4 +1,4 @@
-// Package discoveryexchange is an outbound token-exchange plugin that needs no
+// Package tokenexchangeaiac is an outbound token-exchange plugin that needs no
 // routes. It derives a target audience from the destination host and lets the
 // IdP decide what that destination is: a token comes back for a target this
 // caller is granted, "no such client" means the destination is not a target and
@@ -7,8 +7,8 @@
 // It shares no exchange code with token-exchange, by design: the two are
 // alternatives, and a fix to one must not silently change the other. Both read
 // the bearer and name their no-token policies through core/auth, so a request
-// carries the same meaning under either. See docs/discovery-exchange-plugin.md.
-package discoveryexchange
+// carries the same meaning under either. See docs/token-exchange-aiac-plugin.md.
+package tokenexchangeaiac
 
 import (
 	"bytes"
@@ -30,7 +30,7 @@ import (
 )
 
 // PluginName is the name the plugin registers under and is configured by.
-const PluginName = "discovery-exchange"
+const PluginName = "token-exchange-aiac"
 
 // Invocation reasons, machine-stable.
 const (
@@ -49,7 +49,7 @@ const (
 // collide with a tokenKey, which always starts with 64 hex digits.
 const selfTokenKey = "\x00self"
 
-type discoveryExchangeConfig struct {
+type tokenExchangeAIACConfig struct {
 	// TokenURL is the OAuth token endpoint. When empty it is derived from
 	// KeycloakURL and KeycloakRealm.
 	TokenURL      string `json:"token_url" description:"OAuth token endpoint. Required unless keycloak_url and keycloak_realm are set."`
@@ -74,7 +74,7 @@ type discoveryExchangeConfig struct {
 	ResolvePlaceholders bool `json:"resolve_placeholders" default:"false" description:"Resolve an outbound bearer carrying the placeholder prefix from the shared store to the real token before exchange. Unresolvable placeholders are denied (fail closed)."`
 }
 
-func (c *discoveryExchangeConfig) applyDefaults() {
+func (c *tokenExchangeAIACConfig) applyDefaults() {
 	if c.TokenURL == "" && c.KeycloakURL != "" && c.KeycloakRealm != "" {
 		c.TokenURL = strings.TrimSuffix(c.KeycloakURL, "/") + "/realms/" + c.KeycloakRealm + "/protocol/openid-connect/token"
 	}
@@ -107,7 +107,7 @@ type settings struct {
 	timeout    time.Duration
 }
 
-func (c *discoveryExchangeConfig) validate() (settings, error) {
+func (c *tokenExchangeAIACConfig) validate() (settings, error) {
 	var s settings
 	if c.TokenURL == "" {
 		return s, errors.New("token_url is required (or keycloak_url and keycloak_realm)")
@@ -128,10 +128,10 @@ func (c *discoveryExchangeConfig) validate() (settings, error) {
 	return s, nil
 }
 
-// DiscoveryExchange is the plugin. The zero value denies every request until
+// TokenExchangeAIAC is the plugin. The zero value denies every request until
 // Configure succeeds.
-type DiscoveryExchange struct {
-	cfg      discoveryExchangeConfig
+type TokenExchangeAIAC struct {
+	cfg      tokenExchangeAIACConfig
 	idp      *idpClient
 	targets  *targetResolver
 	tokens   *tokenCache
@@ -146,26 +146,26 @@ type DiscoveryExchange struct {
 }
 
 // New constructs an unconfigured plugin.
-func New() *DiscoveryExchange { return &DiscoveryExchange{now: time.Now} }
+func New() *TokenExchangeAIAC { return &TokenExchangeAIAC{now: time.Now} }
 
 func init() {
 	plugins.RegisterPlugin(PluginName, func() pipeline.Plugin { return New() })
 }
 
-func (p *DiscoveryExchange) Name() string { return PluginName }
+func (p *TokenExchangeAIAC) Name() string { return PluginName }
 
-func (p *DiscoveryExchange) Capabilities() pipeline.PluginCapabilities {
+func (p *TokenExchangeAIAC) Capabilities() pipeline.PluginCapabilities {
 	return pipeline.PluginCapabilities{
 		Description: "Exchanges outbound tokens for an audience derived from the destination host; the IdP decides which hosts are targets. No routes.",
 	}
 }
 
-func (p *DiscoveryExchange) ConfigSchema() []pipeline.FieldSchema {
-	return pipeline.SchemaOf(discoveryExchangeConfig{})
+func (p *TokenExchangeAIAC) ConfigSchema() []pipeline.FieldSchema {
+	return pipeline.SchemaOf(tokenExchangeAIACConfig{})
 }
 
-func (p *DiscoveryExchange) Configure(raw json.RawMessage) error {
-	var c discoveryExchangeConfig
+func (p *TokenExchangeAIAC) Configure(raw json.RawMessage) error {
+	var c tokenExchangeAIACConfig
 	if len(raw) > 0 {
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
@@ -225,7 +225,7 @@ func (p *DiscoveryExchange) Configure(raw json.RawMessage) error {
 // Init starts a background wait for credential files Configure could not read.
 // The wait runs on its own context, cancelled by Shutdown, because Init's ctx
 // only bounds pipeline start-up.
-func (p *DiscoveryExchange) Init(_ context.Context) error {
+func (p *TokenExchangeAIAC) Init(_ context.Context) error {
 	if p.creds.Load() != nil || p.bgCancel.Load() != nil {
 		return nil
 	}
@@ -235,7 +235,7 @@ func (p *DiscoveryExchange) Init(_ context.Context) error {
 	return nil
 }
 
-func (p *DiscoveryExchange) pollCredentials(ctx context.Context) {
+func (p *TokenExchangeAIAC) pollCredentials(ctx context.Context) {
 	id, secret := p.cfg.ClientID, p.cfg.ClientSecret
 	var err error
 	if id == "" {
@@ -252,7 +252,7 @@ func (p *DiscoveryExchange) pollCredentials(ctx context.Context) {
 	slog.Info(PluginName + ": credentials loaded")
 }
 
-func (p *DiscoveryExchange) Shutdown(_ context.Context) error {
+func (p *TokenExchangeAIAC) Shutdown(_ context.Context) error {
 	if cancel := p.bgCancel.Swap(nil); cancel != nil {
 		(*cancel)()
 	}
@@ -260,9 +260,9 @@ func (p *DiscoveryExchange) Shutdown(_ context.Context) error {
 }
 
 // Ready holds the pod out of service until client credentials are loaded.
-func (p *DiscoveryExchange) Ready() bool { return p.creds.Load() != nil }
+func (p *TokenExchangeAIAC) Ready() bool { return p.creds.Load() != nil }
 
-func (p *DiscoveryExchange) OnRequest(ctx context.Context, pctx *pipeline.Context) pipeline.Action {
+func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Context) pipeline.Action {
 	if p.idp == nil {
 		return pipeline.DenyStatus(http.StatusServiceUnavailable, "upstream.unreachable", PluginName+" not configured")
 	}
@@ -363,7 +363,7 @@ func resolvePlaceholder(pctx *pipeline.Context, handle string) (string, bool) {
 }
 
 // selfToken returns this workload's own client-credentials token, cached.
-func (p *DiscoveryExchange) selfToken(ctx context.Context, creds credentials) (string, error) {
+func (p *TokenExchangeAIAC) selfToken(ctx context.Context, creds credentials) (string, error) {
 	if tok, ok := p.tokens.get(selfTokenKey); ok {
 		return tok, nil
 	}
@@ -375,7 +375,7 @@ func (p *DiscoveryExchange) selfToken(ctx context.Context, creds credentials) (s
 	return issued.accessToken, nil
 }
 
-func (p *DiscoveryExchange) replace(pctx *pipeline.Context, details map[string]string, token string, cacheHit bool) pipeline.Action {
+func (p *TokenExchangeAIAC) replace(pctx *pipeline.Context, details map[string]string, token string, cacheHit bool) pipeline.Action {
 	pctx.Headers.Set("Authorization", "Bearer "+token)
 	reason := reasonExchanged
 	if cacheHit {
@@ -413,25 +413,25 @@ func recordDelegationHop(pctx *pipeline.Context, token, audience string, cacheHi
 
 // passUnknown forwards a request to a destination the IdP has no client for,
 // unchanged — including whatever Authorization header the workload sent.
-func (p *DiscoveryExchange) passUnknown(pctx *pipeline.Context, details map[string]string, cached bool) pipeline.Action {
+func (p *TokenExchangeAIAC) passUnknown(pctx *pipeline.Context, details map[string]string, cached bool) pipeline.Action {
 	p.unknownPassed.Add(1)
 	details["cached"] = boolString(cached)
 	pctx.Record(pipeline.Invocation{Action: pipeline.ActionSkip, Reason: reasonAudienceUnknown, Details: details})
 	return pipeline.Action{Type: pipeline.Continue}
 }
 
-func (p *DiscoveryExchange) deny(pctx *pipeline.Context, details map[string]string, reason string, status int, code, msg string) pipeline.Action {
+func (p *TokenExchangeAIAC) deny(pctx *pipeline.Context, details map[string]string, reason string, status int, code, msg string) pipeline.Action {
 	p.denied.Add(1)
 	pctx.Record(pipeline.Invocation{Action: pipeline.ActionDeny, Reason: reason, Details: details})
 	return pipeline.DenyStatus(status, code, msg)
 }
 
-func (p *DiscoveryExchange) OnResponse(_ context.Context, _ *pipeline.Context) pipeline.Action {
+func (p *TokenExchangeAIAC) OnResponse(_ context.Context, _ *pipeline.Context) pipeline.Action {
 	return pipeline.Action{Type: pipeline.Continue}
 }
 
 // Metrics reports counters since the pipeline was built.
-func (p *DiscoveryExchange) Metrics() []pipeline.Metric {
+func (p *TokenExchangeAIAC) Metrics() []pipeline.Metric {
 	return []pipeline.Metric{
 		{Name: PluginName + ".exchanged", Value: float64(p.exchanged.Load()), Unit: "count", Note: "tokens issued by the IdP"},
 		{Name: PluginName + ".cache_hits", Value: float64(p.cacheHits.Load()), Unit: "count"},
@@ -449,10 +449,10 @@ func boolString(b bool) string {
 }
 
 var (
-	_ pipeline.Configurable    = (*DiscoveryExchange)(nil)
-	_ pipeline.Initializer     = (*DiscoveryExchange)(nil)
-	_ pipeline.Shutdowner      = (*DiscoveryExchange)(nil)
-	_ pipeline.Readier         = (*DiscoveryExchange)(nil)
-	_ pipeline.SchemaProvider  = (*DiscoveryExchange)(nil)
-	_ pipeline.MetricsProvider = (*DiscoveryExchange)(nil)
+	_ pipeline.Configurable    = (*TokenExchangeAIAC)(nil)
+	_ pipeline.Initializer     = (*TokenExchangeAIAC)(nil)
+	_ pipeline.Shutdowner      = (*TokenExchangeAIAC)(nil)
+	_ pipeline.Readier         = (*TokenExchangeAIAC)(nil)
+	_ pipeline.SchemaProvider  = (*TokenExchangeAIAC)(nil)
+	_ pipeline.MetricsProvider = (*TokenExchangeAIAC)(nil)
 )

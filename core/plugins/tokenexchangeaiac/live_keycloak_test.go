@@ -1,4 +1,4 @@
-package discoveryexchange
+package tokenexchangeaiac
 
 import (
 	"bytes"
@@ -20,21 +20,21 @@ import (
 // pass every fake-server test while turning passthrough into deny. Run it
 // before upgrading Keycloak:
 //
-//	DISCOVERY_EXCHANGE_LIVE_KEYCLOAK=http://keycloak.localtest.me:8080 \
-//	  go test -run TestLiveKeycloak ./plugins/discoveryexchange/
+//	TOKEN_EXCHANGE_AIAC_LIVE_KEYCLOAK=http://keycloak.localtest.me:8080 \
+//	  go test -run TestLiveKeycloak ./plugins/tokenexchangeaiac/
 //
 // It creates a throwaway realm through the admin API (admin/admin unless
-// DISCOVERY_EXCHANGE_LIVE_ADMIN / _PASSWORD say otherwise) and deletes it at
+// TOKEN_EXCHANGE_AIAC_LIVE_ADMIN / _PASSWORD say otherwise) and deletes it at
 // the end. Requires Keycloak 26.2+ with standard token exchange.
 func TestLiveKeycloak(t *testing.T) {
-	base := os.Getenv("DISCOVERY_EXCHANGE_LIVE_KEYCLOAK")
+	base := os.Getenv("TOKEN_EXCHANGE_AIAC_LIVE_KEYCLOAK")
 	if base == "" {
-		t.Skip("DISCOVERY_EXCHANGE_LIVE_KEYCLOAK not set")
+		t.Skip("TOKEN_EXCHANGE_AIAC_LIVE_KEYCLOAK not set")
 	}
 	base = strings.TrimSuffix(base, "/")
-	adminUser := envOr("DISCOVERY_EXCHANGE_LIVE_ADMIN", "admin")
-	adminPass := envOr("DISCOVERY_EXCHANGE_LIVE_PASSWORD", "admin")
-	realm := fmt.Sprintf("discovery-exchange-test-%d", time.Now().UnixNano())
+	adminUser := envOr("TOKEN_EXCHANGE_AIAC_LIVE_ADMIN", "admin")
+	adminPass := envOr("TOKEN_EXCHANGE_AIAC_LIVE_PASSWORD", "admin")
+	realm := fmt.Sprintf("token-exchange-aiac-test-%d", time.Now().UnixNano())
 
 	kc := &liveAdmin{t: t, base: base, user: adminUser, pass: adminPass}
 	kc.do("POST", "", map[string]any{"realm": realm, "enabled": true})

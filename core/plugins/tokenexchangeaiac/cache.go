@@ -1,4 +1,4 @@
-package discoveryexchange
+package tokenexchangeaiac
 
 import (
 	"crypto/sha256"

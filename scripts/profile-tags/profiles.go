@@ -74,7 +74,7 @@ var membership = map[PluginName][]ProfileName{
 	"tokenexchange": {ProfileFull, ProfileFullCpex, ProfileLite, ProfileEnvoy, ProfileCpex},
 	// The route-free alternative to tokenexchange, so it ships wherever that does.
 	// Linked is not active: it changes no traffic until a pipeline names it.
-	"discoveryexchange":   {ProfileFull, ProfileFullCpex, ProfileLite, ProfileEnvoy, ProfileCpex},
+	"tokenexchangeaiac":   {ProfileFull, ProfileFullCpex, ProfileLite, ProfileEnvoy, ProfileCpex},
 	"litellm_budgettrack": {ProfileFull, ProfileFullCpex, ProfileLite},
 	"staticinject":        {ProfileFull, ProfileFullCpex, ProfileLite},
 

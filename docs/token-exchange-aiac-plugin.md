@@ -1,6 +1,6 @@
-# discovery-exchange plugin
+# `token-exchange-aiac` plugin
 
-`discovery-exchange` is an outbound token-exchange plugin that needs **no
+`token-exchange-aiac` is an outbound token-exchange plugin that needs **no
 routes**. It works out a target audience from the destination host, and lets
 Keycloak decide whether that destination is a target:
 
@@ -12,7 +12,7 @@ Adding a target is then a Keycloak change only. No `authproxy-routes`
 ConfigMap, no `routes.yaml`, no restart:
 
 ```yaml
-# Not needed with discovery-exchange
+# Not needed with token-exchange-aiac
 data:
   routes.yaml: |
     - host: "github-tool-mcp"
@@ -84,7 +84,7 @@ client. That is the trust every in-cluster caller already places in cluster DNS.
 pipeline:
   outbound:
     plugins:
-      - name: discovery-exchange
+      - name: token-exchange-aiac
         config:
           keycloak_url: "${KEYCLOAK_URL}"
           keycloak_realm: "${KEYCLOAK_REALM}"
@@ -207,7 +207,7 @@ required, not an optimisation: Keycloak ignores `audience` on
 Discovery works the same way without a user token. An unknown destination still
 passes through, and the workload's own token is never attached to it.
 
-This is where `discovery-exchange` deliberately differs from `token-exchange`,
+This is where `token-exchange-aiac` deliberately differs from `token-exchange`,
 whose `client-credentials` sends the `client_credentials` token itself. Here
 the second step is what makes discovery work: only an exchange tells "granted",
 "not granted" and "no such client" apart.
@@ -243,7 +243,7 @@ bearer and is sent to Keycloak as the subject, which rejects it.
 ## Policy input (opa)
 
 An exchanged request (`token_exchanged` or `cache_hit`) also appends one hop
-to the delegation chain, so an `opa` plugin placed **after** discovery-exchange
+to the delegation chain, so an `opa` plugin placed **after** `token-exchange-aiac`
 on the outbound chain sees `input.delegation` and an outbound `input.identity`
 in the same shape `token-exchange` produces:
 
@@ -253,7 +253,7 @@ in the same shape `token-exchange` produces:
 | `identity.client_id` | this workload's own client ID |
 | `identity.scopes` | `scope` of the issued token |
 | `identity.service_id` | the target audience |
-| `delegation.chain[].strategy` | `"discovery-exchange"` |
+| `delegation.chain[].strategy` | `"token-exchange-aiac"` |
 
 Subject and scopes are read from the token Keycloak just issued, not from the
 caller's bearer, so the workload cannot choose them. A request that is not
@@ -269,11 +269,11 @@ restart and on config reload:
 
 | Metric | Counts |
 |---|---|
-| `discovery-exchange.exchanged` | tokens Keycloak issued |
-| `discovery-exchange.cache_hits` | requests served from the token cache |
-| `discovery-exchange.unknown_passthrough` | requests to destinations Keycloak has no client for |
-| `discovery-exchange.not_eligible` | requests to hosts never offered to Keycloak |
-| `discovery-exchange.denied` | requests denied, for any reason |
+| `token-exchange-aiac.exchanged` | tokens Keycloak issued |
+| `token-exchange-aiac.cache_hits` | requests served from the token cache |
+| `token-exchange-aiac.unknown_passthrough` | requests to destinations Keycloak has no client for |
+| `token-exchange-aiac.not_eligible` | requests to hosts never offered to Keycloak |
+| `token-exchange-aiac.denied` | requests denied, for any reason |
 
 The WARN log for a failed exchange includes Keycloak's error. The 503 body sent
 to the workload deliberately doesn't, because that error can name other
@@ -298,7 +298,7 @@ On the bearer, the two plugins behave the same: same extraction, same
 `no_token_policy` values and default, same `resolve_placeholders`. These
 differences remain on purpose:
 
-| | `token-exchange` | `discovery-exchange` | Why |
+| | `token-exchange` | `token-exchange-aiac` | Why |
 |---|---|---|---|
 | `client-credentials` with no bearer | sends the `client_credentials` token | exchanges it, narrowed to the destination | Only an exchange discovers whether the destination is a target. See [No bearer token on the request](#no-bearer-token-on-the-request). |
 | `input.identity.subject` | `sub` of the incoming bearer, unverified | `sub` of the token Keycloak issued | The workload cannot choose it. |
@@ -309,7 +309,7 @@ differences remain on purpose:
 ## Moving the github-issue demo to it
 
 1. In the agent's runtime config, replace the `token-exchange` entry with the
-   `discovery-exchange` example above.
+   `token-exchange-aiac` example above.
    - If the agent calls tools without a user token, set
      `no_token_policy: client-credentials`; the default, `deny`, answers 401.
 2. Delete the `authproxy-routes` ConfigMap.
@@ -332,10 +332,10 @@ throwaway realm through the admin API and deletes it afterwards:
 
 ```sh
 cd core
-DISCOVERY_EXCHANGE_LIVE_KEYCLOAK=http://keycloak.localtest.me:8080 \
-  go test -run TestLiveKeycloak -v ./plugins/discoveryexchange/
+TOKEN_EXCHANGE_AIAC_LIVE_KEYCLOAK=http://keycloak.localtest.me:8080 \
+  go test -run TestLiveKeycloak -v ./plugins/tokenexchangeaiac/
 ```
 
-It logs in as `admin`/`admin` unless `DISCOVERY_EXCHANGE_LIVE_ADMIN` and
-`DISCOVERY_EXCHANGE_LIVE_PASSWORD` say otherwise. It is skipped when the variable
+It logs in as `admin`/`admin` unless `TOKEN_EXCHANGE_AIAC_LIVE_ADMIN` and
+`TOKEN_EXCHANGE_AIAC_LIVE_PASSWORD` say otherwise. It is skipped when the variable
 is unset, so CI never runs it.

@@ -1,4 +1,4 @@
-package discoveryexchange
+package tokenexchangeaiac
 
 import (
 	"context"
@@ -108,7 +108,7 @@ func oauthError(w http.ResponseWriter, status int, code, desc string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "error_description": desc})
 }
 
-func configured(t *testing.T, srv *httptest.Server, extra string) *DiscoveryExchange {
+func configured(t *testing.T, srv *httptest.Server, extra string) *TokenExchangeAIAC {
 	t.Helper()
 	p := New()
 	cfg := fmt.Sprintf(`{"token_url":%q,"client_id":"agent","client_secret":"s3cret"%s}`, srv.URL, extra)

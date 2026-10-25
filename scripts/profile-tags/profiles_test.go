@@ -34,28 +34,28 @@ func TestTags_ReproduceTodaysDefaults(t *testing.T) {
 		want    []string
 	}{
 		{"full", []string{
-			"a2aparser", "discoveryexchange", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation", "lineage",
+			"a2aparser", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation", "lineage",
 			"litellm_budgettrack", "mcpparser", "opa", "script", "sparc", "staticinject",
-			"tokenbroker", "tokenexchange", "toolprune",
+			"tokenbroker", "tokenexchange", "tokenexchangeaiac", "toolprune",
 		}},
 		{"envoy", []string{
-			"a2aparser", "discoveryexchange", "ibac", "inferenceparser", "jwtvalidation", "lineage",
-			"mcpparser", "opa", "sparc", "tokenbroker", "tokenexchange", "toolprune",
+			"a2aparser", "ibac", "inferenceparser", "jwtvalidation", "lineage",
+			"mcpparser", "opa", "sparc", "tokenbroker", "tokenexchange", "tokenexchangeaiac", "toolprune",
 		}},
 		{"cpex", []string{
-			"a2aparser", "cpex", "discoveryexchange", "ibac", "inferenceparser", "jwtvalidation",
-			"mcpparser", "sparc", "tokenbroker", "tokenexchange",
+			"a2aparser", "cpex", "ibac", "inferenceparser", "jwtvalidation",
+			"mcpparser", "sparc", "tokenbroker", "tokenexchange", "tokenexchangeaiac",
 		}},
 		{"fullcpex", []string{
-			"a2aparser", "cpex", "discoveryexchange", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation",
+			"a2aparser", "cpex", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation",
 			"lineage", "litellm_budgettrack", "mcpparser", "opa", "script", "sparc", "staticinject",
-			"tokenbroker", "tokenexchange", "toolprune",
+			"tokenbroker", "tokenexchange", "tokenexchangeaiac", "toolprune",
 		}},
 		// lite reproduces the retired lite-tags generator's keep set exactly, so
 		// the published -lite artifact does not change in this refactor. It is a
 		// sidecar minimum and shares no plugin with `local`.
 		{"lite", []string{
-			"discoveryexchange", "jwtvalidation", "litellm_budgettrack", "staticinject", "tokenexchange",
+			"jwtvalidation", "litellm_budgettrack", "staticinject", "tokenexchange", "tokenexchangeaiac",
 		}},
 	} {
 		t.Run(tc.profile, func(t *testing.T) {
