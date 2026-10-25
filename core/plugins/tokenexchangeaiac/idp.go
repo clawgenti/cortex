@@ -36,6 +36,10 @@ const (
 	// outcomeNotGranted: the client exists but this caller holds no grant
 	// for it. Deny, loudly — that is a missing grant, not a stranger.
 	outcomeNotGranted
+	// outcomeTargetDisabled: the destination's client exists but is
+	// disabled. Deny as forbidden: a deliberate IdP answer, so retrying the
+	// same call cannot succeed.
+	outcomeTargetDisabled
 )
 
 // idpError is a non-200 answer from the token endpoint, carrying the RFC 6749
@@ -53,18 +57,21 @@ func (e *idpError) Error() string {
 	return fmt.Sprintf("token endpoint answered HTTP %d: %s", e.status, e.code)
 }
 
-// classify maps an IdP error to an outcome. The two recognised answers are
+// classify maps an IdP error to an outcome. The three recognised answers are
 // Keycloak's, from its standard token exchange provider, and were confirmed
 // against Keycloak 26.5:
 //
 //	audience names no client             400 invalid_client  "Audience not found"
 //	client exists, caller has no grant   400 invalid_request "Requested audience not available: <aud>"
+//	audience names a disabled client     400 invalid_client  "Client disabled"
 //
 // Both the code AND the description are matched. invalid_client alone also
-// covers "Client disabled" and bad client credentials, and invalid_request
-// alone also covers a subject token not issued to this caller; none of those
-// may become a passthrough. If a Keycloak upgrade rewords either message, the
-// match fails towards deny, never towards passthrough.
+// covers bad client credentials, and invalid_request alone also covers a
+// subject token not issued to this caller; none of those may become a
+// passthrough. A disabled caller is not "Client disabled": Keycloak answers it
+// 401 invalid_client "Invalid client or Invalid client credentials", so it stays
+// a failure. If a Keycloak upgrade rewords a message, the match fails towards
+// a 503 deny, never towards passthrough.
 func classify(err error) outcome {
 	var ie *idpError
 	if !errors.As(err, &ie) || ie.status != http.StatusBadRequest {
@@ -75,6 +82,8 @@ func classify(err error) outcome {
 		return outcomeUnknownAudience
 	case ie.code == "invalid_request" && strings.HasPrefix(ie.description, "Requested audience not available"):
 		return outcomeNotGranted
+	case ie.code == "invalid_client" && ie.description == "Client disabled":
+		return outcomeTargetDisabled
 	}
 	return outcomeFailed
 }

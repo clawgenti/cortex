@@ -39,6 +39,7 @@ const (
 	reasonAudienceUnknown   = "audience_unknown"
 	reasonNoToken           = "no_token"
 	reasonNotGranted        = "audience_not_granted"
+	reasonTargetDisabled    = "target_disabled"
 	reasonExchangeFailed    = "exchange_failed"
 	reasonCredentialsAbsent = "credentials_not_ready"
 
@@ -339,6 +340,10 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 			"host", pctx.Host, "audience", t.audience)
 		return p.deny(pctx, details, reasonNotGranted, http.StatusForbidden,
 			"policy.forbidden", "this workload is not granted the destination's audience")
+	case outcomeTargetDisabled:
+		slog.Info(PluginName+": the destination's client is disabled", "host", pctx.Host, "audience", t.audience)
+		return p.deny(pctx, details, reasonTargetDisabled, http.StatusForbidden,
+			"policy.forbidden", "the destination's client is disabled")
 	default:
 		// Logged, not returned: the error can name other audiences the
 		// caller holds, and the response body goes back to the workload.

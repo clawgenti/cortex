@@ -36,6 +36,7 @@ no-token policies `allow`, `deny` and `client-credentials`, and both default to
 | In-cluster, audience granted to this workload | 200, token for that audience | `Authorization` replaced | `modify / token_exchanged` (or `cache_hit`) |
 | In-cluster, no Keycloak client by that name | 400 `invalid_client` "Audience not found" | forwarded unchanged; remembered for `unknown_audience_ttl` | `skip / audience_unknown` |
 | In-cluster, client exists but is **not granted** to this workload | 400 `invalid_request` "Requested audience not available" | **403** | `deny / audience_not_granted` |
+| In-cluster, the destination's client is **disabled** | 400 `invalid_client` "Client disabled" | **403** | `deny / target_disabled` |
 | Keycloak down, timeout, 5xx, bad credentials, any other error | — | **503** | `deny / exchange_failed` |
 | Credentials not yet loaded from `/shared/` | not asked | **503** | `deny / credentials_not_ready` |
 | Any host, bearer is a placeholder that can't be resolved (`resolve_placeholders: true`) | not asked | **401** | `deny / placeholder_unresolved` |

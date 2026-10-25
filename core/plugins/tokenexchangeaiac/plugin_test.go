@@ -286,14 +286,27 @@ func TestExistingButNotGrantedIsDenied(t *testing.T) {
 	}
 }
 
+func TestDisabledTargetIsForbidden(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	kc.override = func(w http.ResponseWriter, _ map[string]string) bool {
+		oauthError(w, 400, "invalid_client", "Client disabled")
+		return true
+	}
+	p := configured(t, srv, "")
+	pctx := outbound("github-tool", "Bearer user-token")
+	a := p.OnRequest(context.Background(), pctx)
+	if a.Type != pipeline.Reject || a.Violation.Status != http.StatusForbidden || a.Violation.Code != "policy.forbidden" {
+		t.Fatalf("action = %v %+v, want 403 policy.forbidden reject", a.Type, a.Violation)
+	}
+	if inv := lastInvocation(t, pctx); inv.Action != pipeline.ActionDeny || inv.Reason != reasonTargetDisabled {
+		t.Errorf("invocation = %s/%s", inv.Action, inv.Reason)
+	}
+}
+
 func TestIdPFailuresDenyNeverPassThrough(t *testing.T) {
 	cases := map[string]func(w http.ResponseWriter, form map[string]string) bool{
 		"server error": func(w http.ResponseWriter, _ map[string]string) bool {
 			oauthError(w, 500, "", "")
-			return true
-		},
-		"client disabled": func(w http.ResponseWriter, _ map[string]string) bool {
-			oauthError(w, 400, "invalid_client", "Client disabled")
 			return true
 		},
 		"non-JSON error": func(w http.ResponseWriter, _ map[string]string) bool {

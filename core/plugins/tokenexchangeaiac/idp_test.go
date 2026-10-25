@@ -13,12 +13,13 @@ func TestClassify(t *testing.T) {
 		err  error
 		want outcome
 	}{
-		// The two answers Keycloak 26.5 gave in the live probe.
+		// The three answers Keycloak 26.5 gave in the live probe.
 		{"no such client", &idpError{400, "invalid_client", "Audience not found"}, outcomeUnknownAudience},
 		{"not granted", &idpError{400, "invalid_request", "Requested audience not available: other-tool"}, outcomeNotGranted},
+		{"target disabled", &idpError{400, "invalid_client", "Client disabled"}, outcomeTargetDisabled},
 
 		// Same codes, other meanings: none may become a passthrough.
-		{"client disabled", &idpError{400, "invalid_client", "Client disabled"}, outcomeFailed},
+		{"disabled, wrong status", &idpError{500, "invalid_client", "Client disabled"}, outcomeFailed},
 		{"bad credentials", &idpError{401, "invalid_client", "Invalid client or Invalid client credentials"}, outcomeFailed},
 		{"subject not ours", &idpError{400, "invalid_request", "Client is not within the token audience"}, outcomeFailed},
 		{"right text, wrong status", &idpError{500, "invalid_client", "Audience not found"}, outcomeFailed},
