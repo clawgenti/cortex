@@ -53,16 +53,18 @@ func TestDoctorSaysWhenClaudeCodeIsNotRouted(t *testing.T) {
 }
 
 func TestDoctorVersionsMustAgree(t *testing.T) {
-	for _, c := range []struct{ name, cortex, reason string }{
-		{"another version", "#!/bin/sh\necho cortex v9.9.7\n", "agentop is v9.9.9, cortex is v9.9.7"},
-		{"no version", "#!/bin/sh\nexit 3\n", "cortex did not report its version"},
+	for _, c := range []struct{ name, cortex, reason, fix string }{
+		{"another version", "#!/bin/sh\necho cortex v9.9.7\n", "agentop is v9.9.9, cortex is v9.9.7", installerOneLiner},
+		{"no version", "#!/bin/sh\nexit 3\n", "cortex did not report its version", installerOneLiner},
+		// Following the plain one-liner would take a cpex install off cpex.
+		{"cpex build", "#!/bin/sh\necho cortex \\(cpex\\) v9.9.7\n", "agentop is v9.9.9, cortex is v9.9.7", installerOneLiner + " -s -- --cpex"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			sc := newDoctorScene(t)
 			sc.installed(t)
 			writeExe(t, filepath.Join(sc.home, ".local", "bin", "cortex"), c.cortex)
 			code, out := sc.doctor(t)
-			wantLines(t, code, 1, out, markLine("✗", "installed")+c.reason+"\n      fix: "+installerOneLiner+"\n")
+			wantLines(t, code, 1, out, markLine("✗", "installed")+c.reason+"\n      fix: "+c.fix+"\n")
 		})
 	}
 }

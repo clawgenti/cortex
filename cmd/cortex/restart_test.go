@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -72,9 +73,7 @@ func freeAddr(t *testing.T) string {
 }
 
 type proxyFixture struct {
-	home, config             string
-	forward, sessions, stats string
-	health, transparent      string
+	home, config string
 }
 
 // newProxyFixture writes a forward-only, loopback-only config. local puts it where a local
@@ -82,14 +81,7 @@ type proxyFixture struct {
 // on — and !local somewhere else, which is how a pod's config looks to this binary.
 func newProxyFixture(t *testing.T, local bool) proxyFixture {
 	t.Helper()
-	f := proxyFixture{
-		home:        t.TempDir(),
-		forward:     freeAddr(t),
-		sessions:    freeAddr(t),
-		stats:       freeAddr(t),
-		health:      freeAddr(t),
-		transparent: freeAddr(t),
-	}
+	f := proxyFixture{home: t.TempDir()}
 	dir := filepath.Join(f.home, cortexDirName)
 	if !local {
 		dir = filepath.Join(f.home, "elsewhere")
@@ -98,6 +90,20 @@ func newProxyFixture(t *testing.T, local bool) proxyFixture {
 		t.Fatal(err)
 	}
 	f.config = filepath.Join(dir, "config.yaml")
+	writeProxyConfig(t, f.config, anyPort)
+	return f
+}
+
+// anyPort has the kernel pick the port when the child binds. Picking one here and handing it
+// over raced: a port free when the test asked could be taken by the time the child bound
+// it, which failed the child with "already in use" (#1452). startProxy reads back where the
+// child landed.
+const anyPort = "127.0.0.1:0"
+
+// writeProxyConfig writes the fixture's config to path with the forward proxy on forward and
+// every other listener on anyPort.
+func writeProxyConfig(t *testing.T, path, forward string) {
+	t.Helper()
 	body := fmt.Sprintf(`mode: proxy-sidecar
 listener:
   roles: [forward]
@@ -111,11 +117,10 @@ stats:
 pipeline:
   inbound: {plugins: []}
   outbound: {plugins: []}
-`, f.forward, f.sessions, f.health, f.transparent, f.stats)
-	if err := os.WriteFile(f.config, []byte(body), 0o600); err != nil {
+`, forward, anyPort, anyPort, anyPort, anyPort)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return f
 }
 
 // childEnv is this environment with HOME moved and anything that would route the child's
@@ -162,15 +167,30 @@ func startChild(t *testing.T, home, run string, args ...string) *child {
 	return c
 }
 
-func startProxy(t *testing.T, f proxyFixture) *child {
+// proxy is a running child and the forward proxy address it bound.
+type proxy struct {
+	*child
+	forward string
+}
+
+// Where the child's servers landed, read off the lines each logs as it starts serving.
+var (
+	healthListening  = regexp.MustCompile(`msg="health server listening" [^\n]*\baddr=(\S+)`)
+	forwardListening = regexp.MustCompile(`msg="HTTP server listening" [^\n]*\bname=forward-proxy addr=(\S+)`)
+)
+
+func startProxy(t *testing.T, f proxyFixture) proxy {
 	t.Helper()
 	c := startChild(t, f.home, "main", "-config", f.config)
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if resp, err := http.Get("http://" + f.health + "/healthz"); err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return c
+		out := c.out.String()
+		if h, fw := healthListening.FindStringSubmatch(out), forwardListening.FindStringSubmatch(out); h != nil && fw != nil {
+			if resp, err := http.Get("http://" + h[1] + "/healthz"); err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return proxy{child: c, forward: fw[1]}
+				}
 			}
 		}
 		select {
@@ -181,7 +201,7 @@ func startProxy(t *testing.T, f proxyFixture) *child {
 		}
 	}
 	t.Fatal("proxy did not become healthy")
-	return nil
+	return proxy{}
 }
 
 // waitExit returns how long the child took to exit after since, failing at within.
@@ -240,7 +260,11 @@ func TestSecondInstanceExitsBeforeOpeningData(t *testing.T) {
 		t.Fatalf("fixture is not a local install: the first proxy did not open an archive")
 	}
 
-	second := startChild(t, f.home, "main", "-config", f.config)
+	// Its own config beside the first's, so it can name the port the first one bound: the
+	// forward proxy is the first socket it reserves.
+	over := filepath.Join(filepath.Dir(f.config), "over.yaml")
+	writeProxyConfig(t, over, first.forward)
+	second := startChild(t, f.home, "main", "-config", over)
 	second.waitExit(t, time.Now(), 15*time.Second)
 	out := second.out.String()
 	if second.cmd.ProcessState.Success() {
@@ -263,7 +287,7 @@ func TestSecondInstanceExitsBeforeOpeningData(t *testing.T) {
 func TestLocalInstallStopsWithoutDraining(t *testing.T) {
 	f := newProxyFixture(t, true)
 	p := startProxy(t, f)
-	hangThroughProxy(t, f.forward)
+	hangThroughProxy(t, p.forward)
 
 	sent := time.Now()
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -281,7 +305,7 @@ func TestLocalInstallStopsWithoutDraining(t *testing.T) {
 func TestPodStillDrains(t *testing.T) {
 	f := newProxyFixture(t, false)
 	p := startProxy(t, f)
-	hangThroughProxy(t, f.forward)
+	hangThroughProxy(t, p.forward)
 
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)

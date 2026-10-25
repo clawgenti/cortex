@@ -1,6 +1,6 @@
 module github.com/rossoctl/cortex/scripts/readme-demo
 
-go 1.26.5
+go 1.26.10
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10

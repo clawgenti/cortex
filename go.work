@@ -1,9 +1,8 @@
-go 1.26.5
+go 1.26.10
 
 use (
 	./core
 	./cmd/agentop
-	./cmd/cortex-cpex
 	./cmd/cortex-envoy
 	./cmd/cortex-praxis
 	./cmd/cortex

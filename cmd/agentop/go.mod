@@ -1,6 +1,6 @@
 module github.com/rossoctl/cortex/cmd/agentop
 
-go 1.26.5
+go 1.26.10
 
 // Workspace-only: this replace is satisfied by go.work during
 // local development. Standalone `go get` / `go install` outside the

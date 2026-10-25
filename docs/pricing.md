@@ -123,10 +123,10 @@ report as *priceable but unpriced* and take a `pricing:` entry of your own. Noth
 this is vendor-specific: it is written on the rate, so the first Anthropic model past the
 bound goes the same way.
 
-A further 77 first-party rows carry no per-token rate at all — the image, audio and
-realtime-transcription models, billed per image or per second — so there is nothing for
-this table to hold. They are not a gap this page can close, and a `pricing:` entry cannot
-express those units either.
+A further 77 first-party rows carry no positive per-token rate, so there is nothing for
+this table to hold. Most are image, video and audio models billed in other units, which a
+`pricing:` entry cannot express either; the other five are OpenAI's moderation models,
+which are free.
 
 ### Free models ship at zero
 

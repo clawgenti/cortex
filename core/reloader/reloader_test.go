@@ -3,6 +3,8 @@ package reloader
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -697,5 +699,50 @@ func TestValidateReloadable_RefusesASessionArchiveEdit(t *testing.T) {
 	next := &config.Config{Session: config.SessionConfig{Archive: &config.SessionArchiveConfig{Enabled: &off}}}
 	if err := validateReloadable(active, next); err == nil {
 		t.Fatal("a live edit of session.archive was accepted")
+	}
+}
+
+// A change in a WithExtraWatch folder reloads with the config file untouched, and an
+// event there that leaves the fingerprint unchanged does not.
+func TestReloader_ExtraWatchFolderReloads(t *testing.T) {
+	extra := filepath.Join(t.TempDir(), "plugins") // created by Start
+	var fp atomic.Value
+	fp.Store("one")
+	r, b, _, _, _ := setupWith(t, WithExtraWatch([]string{extra}, func() string { return fp.Load().(string) }))
+	if _, err := os.Stat(extra); err != nil {
+		t.Fatalf("Start did not create the watched folder: %v", err)
+	}
+	b.set(builderResult{inbound: emptyPipeline(t), outbound: emptyPipeline(t), cfg: &config.Config{Mode: "envoy-sidecar"}})
+
+	// An event with nothing changed: no reload.
+	if err := os.WriteFile(filepath.Join(extra, "scratch"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := r.Status().ReloadsOK; got != 0 {
+		t.Fatalf("an unchanged fingerprint reloaded %d times", got)
+	}
+
+	fp.Store("two")
+	if err := os.WriteFile(filepath.Join(extra, "mask.py"), []byte("x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return r.Status().ReloadsOK >= 1 }, "a folder change to reload")
+}
+
+// Without WithExtraWatch the hash is the config file's own sha256, which is what
+// /reload/status has always published as active_config_sha256.
+func TestReloader_HashIsTheConfigSHA256WithoutAFingerprint(t *testing.T) {
+	r, _, cfgPath, _, _ := setup(t)
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := r.Status().ActiveConfigSHA256, r.hash(data); got != want {
+		t.Fatalf("status hash %q, want %q", got, want)
+	}
+	sum := sha256.Sum256(data)
+	if got := r.hash(data); got != hex.EncodeToString(sum[:]) {
+		t.Errorf("hash = %q, not the config's sha256", got)
 	}
 }

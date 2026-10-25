@@ -159,6 +159,22 @@ func installBinary(env *setupEnv, src, dst string) (func() error, error) {
 // installedVersion is the last word of `path --version`'s first line, as
 // install.sh's installed_version reads it; "" when there is no such binary.
 func installedVersion(path string) string {
+	f := strings.Fields(versionLine(path))
+	if len(f) == 0 {
+		return ""
+	}
+	return f[len(f)-1]
+}
+
+// installedIsCpex reports whether the cortex at path is the cpex build, whose
+// `--version` reads "cortex (cpex) <version>" — the check install.sh makes.
+func installedIsCpex(path string) bool {
+	return strings.Contains(versionLine(path), " (cpex) ")
+}
+
+// versionLine is the first line of `path --version`; "" when there is no such
+// binary or it does not answer.
+func versionLine(path string) string {
 	if !isExecutable(path) {
 		return ""
 	}
@@ -166,11 +182,7 @@ func installedVersion(path string) string {
 	if err != nil {
 		return ""
 	}
-	f := strings.Fields(strings.SplitN(string(out), "\n", 2)[0])
-	if len(f) == 0 {
-		return ""
-	}
-	return f[len(f)-1]
+	return strings.SplitN(string(out), "\n", 2)[0]
 }
 
 func isExecutable(path string) bool {

@@ -71,7 +71,8 @@ func doctorRefine(env *setupEnv, s step, p stepPlan, prob *problem, fix string) 
 // checkBinaries asks agentop and cortex for their versions, which must agree, as
 // one install puts both there; and which agentop this shell runs.
 func checkBinaries(env *setupEnv) (bad, doubt *problem) {
-	a, c := env.installedVersion, installedVersion(filepath.Join(env.binDir, "cortex"))
+	cortex := filepath.Join(env.binDir, "cortex")
+	a, c := env.installedVersion, installedVersion(cortex)
 	switch {
 	case a == "":
 		bad = &problem{reason: "agentop did not report its version"}
@@ -81,7 +82,13 @@ func checkBinaries(env *setupEnv) (bad, doubt *problem) {
 		bad = &problem{reason: "agentop is " + a + ", cortex is " + c}
 	}
 	if bad != nil {
-		bad.fix = []string{installerOneLiner}
+		// The plain one-liner installs the default build, so it would take a
+		// cpex install off cpex.
+		fix := installerOneLiner
+		if installedIsCpex(cortex) {
+			fix += " -s -- --cpex"
+		}
+		bad.fix = []string{fix}
 		return bad, nil
 	}
 	// Found nowhere is the PATH step's to report.

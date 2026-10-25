@@ -1,8 +1,10 @@
 # cpex plugin
 
-> **`cortex-cpex` is a build variant** of the AuthBridge proxy-sidecar
-> (`cortex`), deployed *in place of* `cortex` when
-> CPEX policy enforcement is needed — not an additional sidecar.
+> **The `authbridge-cpex` image is a build variant** of the AuthBridge
+> proxy-sidecar — `cortex` built with cgo and `-tags cpex` — deployed *in
+> place of* the `authbridge` image when CPEX policy enforcement is needed, not
+> as an additional sidecar. On a laptop, `install.sh --cpex` installs the
+> released build of it (see [On a laptop](#on-a-laptop)).
 
 The `cpex` plugin embeds the [CPEX](https://github.com/contextforge-org/cpex)
 runtime inside AuthBridge so operators can drive policy with CPEX's
@@ -18,7 +20,7 @@ sub-plugins those hooks dispatch to.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
-│ cortex-cpex (binary built with -tags cpex, links libcpex_ffi)│
+│ cortex (built with -tags cpex, links libcpex_ffi)                │
 │                                                                  │
 │  pipeline:                                                       │
 │   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
@@ -69,15 +71,37 @@ It is **not** the right home for:
   body. cpex requires at least one of `mcp-parser` /
   `inference-parser` / `a2a-parser` upstream in the chain.
 
+## On a laptop
+
+Each release publishes `cortex-cpex_<version>_<os>_<arch>.tar.gz` for macOS arm64
+and Linux amd64/arm64 (static, so glibc and musl hosts alike). It holds `cortex`
+built with the `fullcpex` profile: the default plugin set plus `cpex`. Install it
+with the laptop installer's `--cpex` flag:
+
+```sh
+curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh -s -- --cpex
+```
+
+The binary is still `cortex`, run by the same service with the same
+`~/.cortex/config.yaml`; the plugin does nothing until that config names it.
+`cortex --version` prints `cortex (cpex) <version>`, and `/v1/plugins` on the
+session API lists `cpex`. The install binds to loopback, so Cortex has process
+attribution there and `session_source: resolved` keeps a child process in its
+parent's session. Re-running the installer without `--cpex` switches back.
+[The cpex build](laptop-service.md#the-cpex-build) covers verification and
+switching. To build it from a checkout instead, `make cortex-cpex` writes
+`bin/cortex-cpex/cortex`.
+
 ## Architecture
 
 ### Build constraint
 
-The cpex plugin links `libcpex_ffi.a` via cgo. The `cortex-cpex`
-binary (`cmd/cortex-cpex/`) is the only build target that compiles
-the plugin — built with `-tags cpex` and `CGO_ENABLED=1`. Other
-binaries (`cortex`, `cortex-envoy`, `authbridge-lite`)
-stay pure-Go and never import the plugin.
+The cpex plugin links `libcpex_ffi.a` via cgo. Only `cortex` built with
+`-tags cpex`, `CGO_ENABLED=1` and a profile that carries the plugin compiles
+it: `cpex` for the `authbridge-cpex` image, `fullcpex` for the `cortex-cpex`
+release tarballs and `make cortex-cpex`. Every other build (the `authbridge`,
+`authbridge-lite` and `authbridge-envoy` images, the default `cortex` tarballs)
+stays pure-Go and never imports the plugin.
 
 The plugin's chassis (config decode, dispatch, Invocation recording)
 is tag-free; only the cgo adapter that talks to `cpex.PolicyEngine`
@@ -157,9 +181,10 @@ plugins:
 | `fail_open` | bool | `false` | On a CPEX-internal error: reject (`false`) or log and continue (`true`). A policy deny is always honored. See [fail_open](#fail_open-when-to-use-it). |
 | `worker_threads` | int | `0` | Size of CPEX's tokio worker pool; `0` lets CPEX choose. |
 | `bypass_hosts` | `[]string` | Keycloak, SPIRE, observability | Host globs that skip CPEX, on outbound traffic only. Setting the list replaces the default rather than extending it. With `synthetic_egress` the default is dropped; an explicit list is kept. See [Bypass list curation](#bypass-list-curation). |
+| `strict_hosts` | `[]string` | empty | Tool servers that may read JSON more leniently than the parsers, such as a Python server, each listed as a host glob (`.`-delimited, as in `delegated_credential_hosts`, matched without the port), an IP address, or a CIDR (`10.96.0.0/12`, `fd00:10:96::/112`). A host that reads as an address — any IP literal spelling, IPv4-mapped IPv6, a zone, a trailing dot, or a numeric `inet_aton` form such as `0x0a.0x60.0.10` — is matched by its canonical address against the addresses and CIDRs only; a name only against the globs, so a DNS name resolving to a listed address is not caught. A host that is neither a name nor an address (`10.96.0.256`, misused brackets) is treated as strict. An outbound request to one of them whose body no parser claimed is refused as `cpex.unparseable_request` when it is a JSON object the parsers cannot read. It protects only the destinations it lists: a server reached by its cluster IP or pod IP is covered only when that address is listed. It is checked before `bypass_hosts` and `bypass_paths`, so a destination on both is still checked. Every entry must be a CIDR without host bits, a canonical IP, or a name glob with a label that is not a number or a wildcard; anything else (`10.1`, `10.96.0.1/12`, `10.96.*.*`, `*.*`), CIDRs covering every address (`0.0.0.0/0`, `::/0`), and entries with a port or a zone are refused. The tool server should also parse strictly, as the HR demo's `hr-mcp` does. Empty, the default, checks no host. |
 | `bypass_paths` | `[]string` | `/healthz`, `/readyz`, `/livez`, `/metrics`, `/.well-known/*` | URL path globs that skip CPEX in both directions, or inbound only with `synthetic_egress`. Setting the list replaces the default. |
 | `fallback_identification` | string | `global` | How a request naming no tool, prompt, resource or model (A2A, MCP `tools/list` and `initialize`, unparsed traffic) is identified: `global` sends CPEX's global entity (`http`/`*`), so `http:` routes and the global policy govern it; `none` sends no identification, which CPEX denies as `unidentified_request` when the config declares any policy. Inference requests are identified as `llm`/<model>. |
-| `session_source` | string | `header` | The session id CPEX keys session state (taint labels) on. `header` reads `X-Session-Id`, or the A2A context id. `resolved` uses the session the forward proxy resolved, but only when a dedicated agent session header (such as `X-Claude-Code-Session-Id`) or the process chain named it; a guessed session (most recent, User-Agent affinity, pending or default bucket) and the generic `X-Session-Id` and `Session-Id` headers give none, and the caller's `X-Session-Id` and A2A context id are ignored. When the process chain shows the sender was started by an agent that named a session, that session is used even if the sender named one of its own, so a child process cannot leave its parent's taint. That protection needs process attribution, which Cortex has only in the laptop `cortex` binary bound to loopback; the `cortex-cpex` sidecar has none, so there `resolved` trusts the dedicated session header, which the sender sets, and does not stop a process from leaving its session's taint. CPEX binds session state to the subject, so a request with no subject has none either way. |
+| `session_source` | string | `header` | The session id CPEX keys session state (taint labels) on. `header` reads `X-Session-Id`, or the A2A context id. `resolved` uses the session the forward proxy resolved, but only when a dedicated agent session header (such as `X-Claude-Code-Session-Id`) or the process chain named it; a guessed session (most recent, User-Agent affinity, pending or default bucket) and the generic `X-Session-Id` and `Session-Id` headers give none, and the caller's `X-Session-Id` and A2A context id are ignored. When the process chain shows the sender was started by an agent that named a session, that session is used even if the sender named one of its own, so a child process cannot leave its parent's taint. That protection needs process attribution, which Cortex has only when bound to loopback, as the laptop install is; the `authbridge-cpex` sidecar has none, so there `resolved` trusts the dedicated session header, which the sender sets, and does not stop a process from leaving its session's taint. CPEX binds session state to the subject, so a request with no subject has none either way. |
 | `private_destinations` | bool | `false` | Let CPEX builtins (JWKS fetches, token exchange, CIBA, Vault) reach loopback, private and link-local addresses, cloud metadata included. Turn on only for trusted policies on a trusted network, such as a local IdP in development. |
 | `synthetic_egress` | bool | `false` | Present every outbound request that names no tool, prompt, resource or model as a call to the tool `http_egress`, including bodies a parser claimed as an MCP protocol method (`tools/list`, `initialize`) or an A2A message, with arguments `method`, `host` (port stripped), `path` (no query), `body` (first 8 KiB), `truncated` and `content_encoding`. A `CONNECT` tunnel carries its method and host only. CEL reads them as `args.<name>` on a `tool: http_egress` route. The excerpt is never recorded; the invocation keeps only its size and the truncated flag. Because the outbound host and path are the caller's choice, `bypass_paths` then applies inbound only and the default `bypass_hosts` is dropped (an explicit list is kept). |
 | `principal.token_file` | string | empty | File holding a caller JWT Cortex asserts on outbound tool calls (MCP tools and `http_egress`) and inference requests: it is supplied to CPEX identity resolution and never forwarded to the destination. The file is read again when it changes. A missing file logs a warning at startup and denies those requests with `cpex.principal_unavailable`. |
@@ -167,9 +192,9 @@ plugins:
 | `workload.audience` | string | empty | Audience of the pod's JWT-SVID that Cortex asserts as the calling workload, on the same requests as the principal: it is fetched from the in-process SPIFFE provider (the runtime config's `spiffe:` block) and supplied to CPEX identity resolution, so an `identity/jwt` plugin with `role: caller_workload` resolves the agent. Never forwarded to the destination. Empty turns it off. |
 | `workload.header` | string | `x-workload-token` | Header the JWT-SVID is presented under. A caller's own copy never reaches identity resolution. Must not be `Authorization` or `principal.header`. |
 | `delegated_credentials` | bool | `false` | Forward the credentials `delegate(...)` steps mint: each is written to the request as its header, replacing the caller's value. Off, a request whose policy delegated is denied with `cpex.delegation_unavailable`. The value is never recorded or logged. Needs CPEX 0.3.1 or later; a 0.3.0 library fails it at startup. |
-| `delegated_credential_hosts` | `map[string][]string` | none | Required with `delegated_credentials`. Binds each delegation target (the `delegate(...)` step's `target:`, else its audience) to `.`-delimited host globs, matched against the request's host without its port. A credential whose target is not bound to the request's host denies it with `cpex.delegation_destination_mismatch` and nothing is written. Patterns with a port, or that match every host (`*`, `**`), are refused. |
+| `delegated_credential_hosts` | `map[string][]string` | none | Required with `delegated_credentials`. Binds each delegation target (the `delegate(...)` step's `target:`, else its audience) to `.`-delimited host globs, matched against the request's host without its port. A credential whose target is not bound to the request's host denies it with `cpex.delegation_destination_mismatch` and nothing is written. An entry may also be an IP address or CIDR, which matches only a request whose host is a canonical IP literal in it (any case, leading zeros, brackets, IPv4-mapped IPv6); a numeric spelling only the resolver reads as that address (`0x0a.0x60.0.10`, `174063626`, a trailing dot) or a host that is neither a name nor an address matches nothing, and a name glob never matches an address. Entries are classified as `strict_hosts` entries are, and refused on the same terms, along with patterns that match every host (`*`, `**`). |
 | `delegated_credential_headers` | `[]string` | `[Authorization]` | Headers a delegated credential may be written to. A credential for any other header denies the request with `cpex.delegation_unavailable`. Framing, `proxy-*`, `x-authbridge-*`, `principal.header` and `workload.header` are refused. |
-| `observe_codes` | `[]string` | empty | Policy violation codes recorded as `observe` instead of enforced; the request continues and the labels the denying step set stay. PPE 0.5.0 has no other conditional taint (a false CEL step always denies), so this lets an `llm:` route taint a session on content without blocking the request. Later steps of that route do not run, and a code shared with another step would silence that step's deny too, so Configure refuses a code that is not named by exactly one `deny('reason', 'code')` in the policy, sits outside a route's own `pre_invocation`/`post_invocation` list (in `global`, `global.defaults` or a group, the route's steps run after it), or is not the last entry of every list down to it (its step, its `on_deny`, its `when`/`do`). Codes the plugin emits itself (`principal_unavailable`, `delegation_unavailable`, `delegation_destination_mismatch`, `ambiguous_request`, `unnamed_entity`) are refused. |
+| `observe_codes` | `[]string` | empty | Policy violation codes recorded as `observe` instead of enforced; the request continues and the labels the denying step set stay. PPE 0.5.0 has no other conditional taint (a false CEL step always denies), so this lets an `llm:` route taint a session on content without blocking the request. Later steps of that route do not run, and a code shared with another step would silence that step's deny too, so Configure refuses a code that is not named by exactly one `deny('reason', 'code')` in the policy, sits outside a route's own `pre_invocation`/`post_invocation` list (in `global`, `global.defaults` or a group, the route's steps run after it), or is not the last entry of every list down to it (its step, its `on_deny`, its `when`/`do`). Codes the plugin emits itself (`principal_unavailable`, `delegation_unavailable`, `delegation_destination_mismatch`, `ambiguous_request`, `unnamed_entity`, `unparseable_request`) are refused. |
 
 A `cpex` entry with no hooks and no CPEX YAML is valid and inert, so the
 plugin can be installed before its policy ships.
@@ -345,9 +370,10 @@ plugins:
 | `cpex.delegation_destination_mismatch` | 403 | A `delegate(...)` step minted a credential whose target `delegated_credential_hosts` does not bind to the request's host. Nothing is written to the request. |
 | `cpex.delegation_unavailable` | 403 | A `delegate(...)` step granted a token the plugin cannot forward: `delegated_credentials` is off, or the credential names a header outside `delegated_credential_headers`, or came back without its value. Forwarding would send the caller's own bearer where the policy asked for the delegated one, so the request is denied. |
 | `cpex.unnamed_entity` | 403 | An MCP `tools/call` or `prompts/get` with no name, or a `resources/read` with no URI. |
+| `cpex.unparseable_request` | 403 | An outbound request to a `strict_hosts` destination whose body no parser claimed and that is a JSON object the parsers cannot read: one in UTF-16 or UTF-32 or after a byte order mark, or whose first value `encoding/json` cannot decode (`NaN`, `Infinity`, a number out of float64 range, a truncated object; invalid UTF-8 in a string is replaced with U+FFFD, not refused), whose keys collide, or whose top-level `method` key in any case is not a string. The body's own keys do not decide it, so dropping or renaming `jsonrpc` does not avoid it. Only the first value is read, so NDJSON and trailing data are not refused. A lenient server may still run such a body as the tool call no route judged. Requests to any other host are not checked. Not subject to `fail_open`. |
 | `cpex.ambiguous_request` | 403 | A parsed JSON body has a repeated key, or two keys equal under case folding in an object the parsers decode into a struct (the envelope, `params`, messages, content blocks, Responses `input[]` items, A2A message and parts, tool definitions) or a server commonly binds to one (MCP `params.arguments`, at any depth, map-valued arguments such as an `env` or `headers` map included), so policy and the server could read different requests. |
 
-The last five are decided by the plugin rather than by policy, and
+The last six are decided by the plugin rather than by policy, and
 `fail_open` does not apply to them.
 
 On a deny, the `Invocation.Reason` field and the response carry the
@@ -500,8 +526,8 @@ need to route background results separately from foreground logs.
 
 - [`core/plugins/cpex/README.md`](../core/plugins/cpex/README.md) — the
   plugin's own reference: CMF mapping, APL examples, building and testing.
-- [`cmd/README.md`](../cmd/README.md) — the `cortex-cpex` binary and the
-  `authbridge-cpex` image it ships in.
+- [`cmd/README.md`](../cmd/README.md) — the cpex builds of `cortex` and the
+  `authbridge-cpex` image.
 - `cmd/cortex-cpex/CPEX_FFI_VERSION` — the CPEX release tag the FFI is
   pinned to. `CPEX_FFI_ABI` beside it holds the FFI ABI integer, and
   `CPEX_FFI_SHA256` the digest of each target's tarball;

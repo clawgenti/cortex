@@ -21,10 +21,13 @@ const (
 	ProfileLite  ProfileName = "lite"
 	ProfileEnvoy ProfileName = "envoy"
 	ProfileCpex  ProfileName = "cpex"
+	// ProfileFullCpex is full plus the cpex plugin, for a cgo laptop build of
+	// cortex. Build with the `cpex` tag alongside these.
+	ProfileFullCpex ProfileName = "fullcpex"
 )
 
 var allProfiles = []ProfileName{
-	ProfileLocal, ProfileFull, ProfileLite, ProfileEnvoy, ProfileCpex,
+	ProfileLocal, ProfileFull, ProfileLite, ProfileEnvoy, ProfileCpex, ProfileFullCpex,
 }
 
 // membership is the single source of truth for plugin packaging: every plugin has
@@ -36,41 +39,47 @@ var allProfiles = []ProfileName{
 //
 // Artifact contents:
 //
-//	local  desktop cortex — the three parsers + tool-prune
-//	full   authbridge image, Kubernetes proxy-sidecar, release tarballs,
-//	       make dev-install — all fifteen
-//	lite   authbridge-lite image — sidecar minimum
-//	envoy  authbridge-envoy image
-//	cpex   authbridge-cpex image
+//	local     desktop cortex — the three parsers, tool-prune and script
+//	full      authbridge image, Kubernetes proxy-sidecar, release tarballs,
+//	          make dev-install — all sixteen
+//	lite      authbridge-lite image — sidecar minimum
+//	envoy     authbridge-envoy image
+//	cpex      authbridge-cpex image
+//	fullcpex  full plus cpex — make cortex-cpex, a cgo build of cortex
 var membership = map[PluginName][]ProfileName{
-	"a2aparser":       {ProfileLocal, ProfileFull, ProfileEnvoy, ProfileCpex},
-	"inferenceparser": {ProfileLocal, ProfileFull, ProfileEnvoy, ProfileCpex},
-	"mcpparser":       {ProfileLocal, ProfileFull, ProfileEnvoy, ProfileCpex},
-	"toolprune":       {ProfileLocal, ProfileFull, ProfileEnvoy},
+	"a2aparser":       {ProfileLocal, ProfileFull, ProfileFullCpex, ProfileEnvoy, ProfileCpex},
+	"inferenceparser": {ProfileLocal, ProfileFull, ProfileFullCpex, ProfileEnvoy, ProfileCpex},
+	"mcpparser":       {ProfileLocal, ProfileFull, ProfileFullCpex, ProfileEnvoy, ProfileCpex},
+	"toolprune":       {ProfileLocal, ProfileFull, ProfileFullCpex, ProfileEnvoy},
 
-	"ibac":        {ProfileFull, ProfileEnvoy, ProfileCpex},
-	"sparc":       {ProfileFull, ProfileEnvoy, ProfileCpex},
-	"tokenbroker": {ProfileFull, ProfileEnvoy, ProfileCpex},
-	"lineage":     {ProfileFull, ProfileEnvoy},
-	"opa":         {ProfileFull, ProfileEnvoy},
+	// Laptop only by behaviour, not by profile: it runs nothing unless cmd/cortex
+	// says the process is a local install. The full profiles carry it because the
+	// laptop's release tarballs are built from them; only cmd/cortex registers it.
+	"script": {ProfileLocal, ProfileFull, ProfileFullCpex},
 
-	// Full only. Its redirect needs the forward proxy, so cortex-envoy would refuse
+	"ibac":        {ProfileFull, ProfileFullCpex, ProfileEnvoy, ProfileCpex},
+	"sparc":       {ProfileFull, ProfileFullCpex, ProfileEnvoy, ProfileCpex},
+	"tokenbroker": {ProfileFull, ProfileFullCpex, ProfileEnvoy, ProfileCpex},
+	"lineage":     {ProfileFull, ProfileFullCpex, ProfileEnvoy},
+	"opa":         {ProfileFull, ProfileFullCpex, ProfileEnvoy},
+
+	// Full (and fullcpex) only. Its redirect needs the forward proxy, so cortex-envoy would refuse
 	// it at build time, and only cmd/cortex registers it. Full is what the release
 	// tarballs and make dev-install build, so it reaches laptops; it changes no
 	// traffic until an agent is routed.
-	"inferencerouter": {ProfileFull},
+	"inferencerouter": {ProfileFull, ProfileFullCpex},
 
 	// The credential and identity plugins lite exists for, plus budget tracking.
-	"jwtvalidation": {ProfileFull, ProfileLite, ProfileEnvoy, ProfileCpex},
-	"tokenexchange": {ProfileFull, ProfileLite, ProfileEnvoy, ProfileCpex},
+	"jwtvalidation": {ProfileFull, ProfileFullCpex, ProfileLite, ProfileEnvoy, ProfileCpex},
+	"tokenexchange": {ProfileFull, ProfileFullCpex, ProfileLite, ProfileEnvoy, ProfileCpex},
 	// The route-free alternative to tokenexchange, so it ships wherever that does.
 	// Linked is not active: it changes no traffic until a pipeline names it.
-	"discoveryexchange":   {ProfileFull, ProfileLite, ProfileEnvoy, ProfileCpex},
-	"litellm_budgettrack": {ProfileFull, ProfileLite},
-	"staticinject":        {ProfileFull, ProfileLite},
+	"discoveryexchange":   {ProfileFull, ProfileFullCpex, ProfileLite, ProfileEnvoy, ProfileCpex},
+	"litellm_budgettrack": {ProfileFull, ProfileFullCpex, ProfileLite},
+	"staticinject":        {ProfileFull, ProfileFullCpex, ProfileLite},
 
-	// Only cortex-cpex carries the cpex plugin; it is registered nowhere else.
-	"cpex": {ProfileCpex},
+	// Needs cgo and the `cpex` build tag, so only the cpex builds carry it.
+	"cpex": {ProfileCpex, ProfileFullCpex},
 
 	// No profile: both are heavy and linked only when a caller asks. context-guru
 	// pulls bifrost/core, tiktoken-go, tree-sitter grammars and starlark (~16 MiB);

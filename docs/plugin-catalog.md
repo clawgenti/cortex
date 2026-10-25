@@ -36,6 +36,7 @@ AuthBridge pipeline YAML, not whether it is compiled into the binary
 | [`opa`](#opa) | [OPA](https://www.openpolicyagent.org/docs) policy enforcement for inbound and outbound requests. | Alpha | Both | No |
 | [`sparc`](#sparc) | Pre-tool reflection: blocks ungrounded/hallucinated tool calls. | Alpha | Outbound | No |
 | [`static-inject`](#static-inject) | Swaps a placeholder credential for a real static credential on outbound requests. | Alpha | Outbound | No |
+| [`script`](#script) | Runs the scripts in `~/.cortex/plugins` as pipeline steps, so a small Python or shell script can read, change or block requests and responses. Laptop only. | Alpha | Outbound | No |
 | [`session-budget`](#session-budget) | Enforces per-session token, call, and duration budgets via Redis. | Alpha | Outbound | No |
 | [`token-broker`](#token-broker) | Exchanges incoming tokens against a configured IdP via a broker service. | Alpha | Outbound | No |
 | [`token-exchange`](#token-exchange) | RFC 8693 outbound token exchange per route. | Ready | Outbound | YES |
@@ -63,8 +64,9 @@ Full reference: [`context-guru-plugin.md`](context-guru-plugin.md).
 Bridges AuthBridge hooks to the [CPEX](https://github.com/contextforge-org/cpex)
 framework (a policy enforcement runtime for AI agents): an APL DSL plus named
 CPEX policy plugins (JWT identity, OAuth delegation, Cedar, CEL, OPA).
-Requires the separate `cortex-cpex` binary (`-tags cpex`, `CGO_ENABLED=1`,
-links `libcpex_ffi.a` from the pinned CPEX 0.3.1 release). The CPEX policy
+Requires a cpex build of `cortex` — the `authbridge-cpex` image or `make
+cortex-cpex` (`-tags cpex`, `CGO_ENABLED=1`, links `libcpex_ffi.a` from the
+pinned CPEX 0.3.1 release). The CPEX policy
 uses 0.3's schema; a 0.2.x policy fails at boot. Full details in [cpex-plugin.md](./cpex-plugin.md);
 see also the plugin's [README](../core/plugins/cpex/README.md).
 
@@ -214,6 +216,44 @@ interface each IdP implements, see
 [idp-plugin-contract.md](./idp-plugin-contract.md).
 
 Full reference: [`token-exchange-plugin.md`](token-exchange-plugin.md).
+
+## `script`
+
+Runs every executable file in `~/.cortex/plugins` as a pipeline step, in
+file-name order: each is a long-lived process that answers one JSON line per
+request. A script reads the request (method, host, path, headers without
+credentials, body, and the parsers' fields) and may change its headers or body,
+or deny it. A new script runs in **shadow mode**, recording what it would do,
+until its handshake says `enforce`. A script that crashes, times out or answers
+nonsense lets the request through, with the error on its timeline row, unless
+the slot sets `fail_closed: true`.
+
+On a local install the preset appends one `script` entry to the end of the
+outbound chain, so a file dropped into the folder runs with no YAML edit;
+adding, editing or removing a script reloads the pipelines. List `script`
+yourself, with `config.dir`, to place a second slot elsewhere — between two Go
+plugins, for example, as long as no body reader follows it: a slot is a request
+writer wherever scripts run, empty or not, so the chain is refused at build
+time rather than by the first script dropped into it. Anywhere but a local
+install a `script` entry loads nothing, so a config naming it cannot run
+commands in a sidecar.
+
+A script may also read each response, and, if its handshake declares
+`rewrite_response`, change or block it. Response readers run once a response
+is complete and keep streaming; a response rewriter holds every streamed
+response in its slot's pipeline back until it is complete.
+
+Declares what its loaded scripts need, on top of the request-writer floor:
+response streaming is unaffected unless a loaded script rewrites responses.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `dir` | (empty) | Folder inside `~/.cortex/plugins` this slot runs; empty is that folder itself |
+| `timeout` | `2s` | How long one script may take to answer one hook |
+| `fail_closed` | `false` | Deny a request when an enforcing script errors on it |
+
+Full guide, including the Python SDK and replaying a script over a recorded
+session: [`script-plugin.md`](script-plugin.md).
 
 ## `tool-prune`
 

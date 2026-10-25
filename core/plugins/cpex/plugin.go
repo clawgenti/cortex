@@ -23,10 +23,9 @@
 //
 // # Build tag
 //
-// The real CPEX backend uses cgo and links libcpex_ffi.a. The
-// cortex-cpex binary is the only build target that compiles
-// this package with -tags cpex; other binaries (cortex,
-// cortex-envoy, authbridge-lite) do not import this package.
+// The real CPEX backend uses cgo and links libcpex_ffi.a. Only cortex
+// built with -tags cpex (the authbridge-cpex image and `make
+// cortex-cpex`) links it; other builds do not import this package.
 //
 // The package itself compiles tag-free for unit tests: the Manager
 // interface (manager.go) is satisfied by FakeManager in tests, and
@@ -81,6 +80,11 @@ type CPEX struct {
 	// matcher because we only compare against a single host per
 	// request; the goroutine-safe scan happens via matchesAnyHost.
 	bypassHosts []string
+
+	// strictHosts is the compiled strict_hosts list: outbound
+	// destinations whose unclaimed bodies are checked by
+	// unparseableObject.
+	strictHosts hostPatterns
 
 	// observeCodes holds the namespaced deny codes recorded as observe
 	// rather than enforced (observe_codes).
@@ -199,6 +203,11 @@ func (p *CPEX) Configure(raw json.RawMessage) error {
 	}
 	p.bypassPaths = matcher
 	p.bypassHosts = c.BypassHosts
+	strictHosts, err := newHostPatterns("strict_hosts", c.StrictHosts)
+	if err != nil {
+		return fmt.Errorf("cpex config: %w", err)
+	}
+	p.strictHosts = strictHosts
 	p.observeCodes = nil
 	for _, code := range c.ObserveCodes {
 		if p.observeCodes == nil {
@@ -363,6 +372,18 @@ func (p *CPEX) runHooks(ctx context.Context, pctx *pipeline.Context, hooks []str
 		return pipeline.Action{Type: pipeline.Continue}
 	}
 
+	// strict_hosts wins over both bypass lists: a strict destination's
+	// unreadable body is refused even when its host or path is also
+	// bypassed, so a bypass entry cannot reopen what strict_hosts closes.
+	// Outbound only: inbound, the Host header is the caller's.
+	strict := pctx.Direction == pipeline.Outbound && p.strictHosts.match(pctx.Host)
+	if strict && pctx.CurrentPhase() != pipeline.InvocationPhaseResponse {
+		if code := unpresentableRequest(pctx, true); code == codeUnparseableRequest {
+			code = "cpex." + code
+			return denyWithStatus(pctx, http.StatusForbidden, code, code, deniedMessage, nil)
+		}
+	}
+
 	// Fast-skip bypass: traffic to infrastructure (Keycloak, SPIRE,
 	// liveness probes) shouldn't pay the FFI round-trip. Check paths
 	// first since most bypass traffic is health/discovery rather
@@ -385,7 +406,7 @@ func (p *CPEX) runHooks(ctx context.Context, pctx *pipeline.Context, hooks []str
 	}
 
 	if pctx.CurrentPhase() != pipeline.InvocationPhaseResponse {
-		if code := unpresentableRequest(pctx); code != "" {
+		if code := unpresentableRequest(pctx, strict); code != "" {
 			code = "cpex." + code
 			return denyWithStatus(pctx, http.StatusForbidden, code, code, deniedMessage, nil)
 		}

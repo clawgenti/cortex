@@ -178,6 +178,8 @@ Options:
                      is installed, and the background proxy from its pidfile. Does
                      not download, install, or start anything. Safe to re-run.
   --yes, -y          do not ask; apply the changes setup lists
+  --cpex             install cortex built with the cpex policy plugin (macOS
+                     arm64, Linux amd64/arm64). Re-run without it to switch back
   --ref=REF          install from a git ref instead of the newest stable release —
                      both this script and the binaries (e.g. --ref=main for
                      unreleased changes, --ref=v0.8.1 to pin). The only way to
@@ -210,9 +212,14 @@ NO_SERVICE=""
 # NO_MODIFY_PATH keeps setup out of every shell profile. This loop runs before the
 # bootstrap, so main's copy must accept the flag for a piped install to pass it on.
 NO_MODIFY_PATH=""
+# CPEX selects the cortex-cpex tarball: the same `cortex`, built with the cpex plugin.
+# Setup is not told: to it, this is one more cortex binary. Released copies of this
+# script from before the flag reject it as an unknown option.
+CPEX=""
 for arg in "$@"; do
 	case "$arg" in
 		--install-only) MODE=install-only ;;
+		--cpex) CPEX=1 ;;
 		--claude-code) WIRE_CLAUDE_CODE=1 ;;
 		--yes | -y) ASSUME_YES=1 ;;
 		--ref=*) WANT_REF="${arg#*=}" ;;
@@ -226,7 +233,7 @@ for arg in "$@"; do
 			usage
 			exit 0
 			;;
-		*) die "unknown option: $arg (try --claude-code, --install-only, --local, --no-modify-path, --no-service, --stop, --ref=REF, --yes, or no argument)" ;;
+		*) die "unknown option: $arg (try --claude-code, --cpex, --install-only, --local, --no-modify-path, --no-service, --stop, --ref=REF, --yes, or no argument)" ;;
 	esac
 done
 # Removed knobs die rather than being ignored. Left set in someone's shell,
@@ -381,6 +388,43 @@ ere_escape() {
 	printf '%s' "$1" | sed 's/[].[^$()*+?{}|\\]/\\&/g'
 }
 
+# detect_platform sets os and arch to the names the release archives use.
+detect_platform() {
+	os=$(uname -s)
+	case "$os" in
+		Darwin) os=darwin ;;
+		Linux) os=linux ;;
+		*) die "unsupported OS: $os (the installer supports macOS and Linux)" ;;
+	esac
+	arch=$(uname -m)
+	case "$arch" in
+		x86_64 | amd64) arch=amd64 ;;
+		arm64 | aarch64) arch=arm64 ;;
+		*) die "unsupported architecture: $arch (supported: amd64, arm64)" ;;
+	esac
+}
+
+# cpex_platform_check dies unless the release builds cortex-cpex for os/arch, which
+# it does only where CPEX publishes its FFI library for the platform.
+cpex_platform_check() {
+	case "${os}/${arch}" in
+		darwin/arm64 | linux/amd64 | linux/arm64) ;;
+		*) die "--cpex is not available for ${os}/${arch} (supported: darwin/arm64, linux/amd64, linux/arm64)" ;;
+	esac
+}
+
+# require_cpex_build dies unless release $1's checksums.txt lists the cortex-cpex
+# archive for os/arch, matched as verification matches it below. A release from
+# before --cpex has none, and its own install.sh rejects the flag as unknown, so this
+# runs before anything is staged and before the bootstrap hands off to that script.
+require_cpex_build() { # version
+	_rc_sums=$(curl -fsSL "https://github.com/${REPO}/releases/download/$1/checksums.txt" 2>/dev/null) \
+		|| die "could not fetch checksums.txt for $1"
+	_rc_re=$(ere_escape "cortex-cpex_$1_${os}_${arch}.tar.gz")
+	printf '%s\n' "${_rc_sums}" | grep -qE "^[0-9a-fA-F]+[[:space:]]+\*?(\./)?${_rc_re}\$" \
+		|| die "release $1 has no cpex build for ${os}/${arch}"
+}
+
 # --- run the released copy of this script, not the one from main ---
 #
 # The documented command fetches this file from main, which is whatever landed
@@ -444,6 +488,18 @@ if [ -n "${_reexec}" ]; then
 		SCRIPT_REF="main"
 		VERSION_REF="main"
 	else
+		# --cpex, checked here because a released script that predates it would only
+		# say "unknown option". Only a release tag names binaries; any other ref's
+		# script resolves its own.
+		if [ -n "${CPEX:-}" ]; then
+			case "${want_ref}" in
+				v*)
+					detect_platform
+					cpex_platform_check
+					require_cpex_build "${want_ref}"
+					;;
+			esac
+		fi
 		# Rebuild the argument list without --ref: it is meta, consumed here, and a
 		# released script from before --ref existed rejects it as an unknown option.
 		# Rotating the positional parameters keeps arguments with spaces intact,
@@ -1067,19 +1123,7 @@ hand_off() {
 }
 
 # --- detect platform ---
-os=$(uname -s)
-case "$os" in
-	Darwin) os=darwin ;;
-	Linux) os=linux ;;
-	*) die "unsupported OS: $os (the installer supports macOS and Linux)" ;;
-esac
-
-arch=$(uname -m)
-case "$arch" in
-	x86_64 | amd64) arch=amd64 ;;
-	arm64 | aarch64) arch=arm64 ;;
-	*) die "unsupported architecture: $arch (supported: amd64, arm64)" ;;
-esac
+detect_platform
 
 # --- stop and exit, if asked ---
 # Placed after the helpers and platform detection (so stop_cortex has what it needs)
@@ -1088,6 +1132,14 @@ esac
 if [ "${MODE}" = "stop" ]; then
 	stop_cortex
 	exit 0
+fi
+
+# --- --cpex: only where the cpex build is published ---
+# Before anything is resolved or staged.
+if [ -n "${CPEX}" ]; then
+	cpex_platform_check
+	[ "${AUTHBRIDGE_SKIP_DOWNLOAD:-}" != "1" ] \
+		|| die "--cpex selects what to download, and AUTHBRIDGE_SKIP_DOWNLOAD=1 downloads nothing"
 fi
 
 # --- repair, offline: AUTHBRIDGE_SKIP_DOWNLOAD=1 hands the installed agentop to setup ---
@@ -1106,6 +1158,8 @@ fi
 # binaries it installs are one tested set rather than two independently-moving things.
 version=$(resolve_version "${VERSION_REF}") \
 	|| die "could not resolve the newest release (pass --ref=vX.Y.Z to pin one)"
+# The release may predate --cpex: say so before staging anything.
+[ -z "${CPEX}" ] || require_cpex_build "${version}"
 
 # --- download + verify ---
 # An explicit template under TMPDIR, not a bare `mktemp -d`: macOS's mktemp puts that
@@ -1130,6 +1184,18 @@ trap 'exit 129' HUP
 base="https://github.com/${REPO}/releases/download/${version}"
 agentop_tgz="agentop_${version}_${os}_${arch}.tar.gz"
 proxy_tgz="cortex_${version}_${os}_${arch}.tar.gz"
+[ -z "${CPEX}" ] || proxy_tgz="cortex-cpex_${version}_${os}_${arch}.tar.gz"
+
+# Leaving the cpex build should be visible: re-running the plain one-liner over it
+# installs the default build. The installed binary says which one it is ("cortex
+# (cpex) <version>"), so no stamp file has to record the choice, and none can
+# disagree with what is actually installed.
+if [ -z "${CPEX}" ] && [ -x "${BIN_DIR}/cortex" ]; then
+	_iv=$("${BIN_DIR}/cortex" --version 2>/dev/null | head -n 1) || _iv=""
+	case " ${_iv} " in
+		*" (cpex) "*) info "Replacing the installed cpex build of cortex with the default one (pass --cpex to keep it)." ;;
+	esac
+fi
 
 # tmp is the stage: the download lands in it, the binaries are extracted beside it,
 # and setup gets it as --from. The clock starts here for --handoff-seconds.

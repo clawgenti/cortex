@@ -8,7 +8,7 @@ import (
 
 // TestTags_Local pins the desktop profile. The set mirrors the plugin list
 // cmd/cortex/local.go writes into ~/.cortex/config.yaml — the three
-// parsers plus tool-prune. If those diverge, a laptop either ships plugins its
+// parsers plus tool-prune — and script, which the preset appends there. If those diverge, a laptop either ships plugins its
 // config never names or names plugins the binary cannot load, and the latter is
 // a refuse-to-start (`unknown plugin ...`) rather than a degraded feature.
 func TestTags_Local(t *testing.T) {
@@ -17,7 +17,7 @@ func TestTags_Local(t *testing.T) {
 		t.Fatalf("Tags(local): %v", err)
 	}
 	want := "include_plugin_a2aparser,include_plugin_inferenceparser," +
-		"include_plugin_mcpparser,include_plugin_toolprune"
+		"include_plugin_mcpparser,include_plugin_script,include_plugin_toolprune"
 	if strings.Join(got, ",") != want {
 		t.Errorf("output changed\n got: %s\nwant: %s", strings.Join(got, ","), want)
 	}
@@ -35,7 +35,7 @@ func TestTags_ReproduceTodaysDefaults(t *testing.T) {
 	}{
 		{"full", []string{
 			"a2aparser", "discoveryexchange", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation", "lineage",
-			"litellm_budgettrack", "mcpparser", "opa", "sparc", "staticinject",
+			"litellm_budgettrack", "mcpparser", "opa", "script", "sparc", "staticinject",
 			"tokenbroker", "tokenexchange", "toolprune",
 		}},
 		{"envoy", []string{
@@ -45,6 +45,11 @@ func TestTags_ReproduceTodaysDefaults(t *testing.T) {
 		{"cpex", []string{
 			"a2aparser", "cpex", "discoveryexchange", "ibac", "inferenceparser", "jwtvalidation",
 			"mcpparser", "sparc", "tokenbroker", "tokenexchange",
+		}},
+		{"fullcpex", []string{
+			"a2aparser", "cpex", "discoveryexchange", "ibac", "inferenceparser", "inferencerouter", "jwtvalidation",
+			"lineage", "litellm_budgettrack", "mcpparser", "opa", "script", "sparc", "staticinject",
+			"tokenbroker", "tokenexchange", "toolprune",
 		}},
 		// lite reproduces the retired lite-tags generator's keep set exactly, so
 		// the published -lite artifact does not change in this refactor. It is a
@@ -68,6 +73,25 @@ func TestTags_ReproduceTodaysDefaults(t *testing.T) {
 					tc.profile, strings.Join(got, ","), strings.Join(wantTags, ","))
 			}
 		})
+	}
+}
+
+// TestTags_FullCpexIsFullPlusCpex keeps the cgo laptop build at parity with the
+// default one: a plugin added to full must reach fullcpex too.
+func TestTags_FullCpexIsFullPlusCpex(t *testing.T) {
+	full, err := Tags(ProfileFull)
+	if err != nil {
+		t.Fatalf("Tags(full): %v", err)
+	}
+	got, err := Tags(ProfileFullCpex)
+	if err != nil {
+		t.Fatalf("Tags(fullcpex): %v", err)
+	}
+	want := append(append([]string{}, full...), "include_plugin_cpex")
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("fullcpex is not full plus cpex\n got: %s\nwant: %s",
+			strings.Join(got, ","), strings.Join(want, ","))
 	}
 }
 
