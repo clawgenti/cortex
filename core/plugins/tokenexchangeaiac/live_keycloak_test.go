@@ -112,6 +112,10 @@ func TestLiveKeycloak(t *testing.T) {
 	}
 }
 
+// liveHTTP bounds every setup call, so a stalled Keycloak fails the test
+// instead of hanging it until go test's own timeout.
+var liveHTTP = &http.Client{Timeout: 30 * time.Second}
+
 func envOr(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -121,7 +125,7 @@ func envOr(k, def string) string {
 
 func passwordGrant(t *testing.T, tokenURL string) string {
 	t.Helper()
-	resp, err := http.PostForm(tokenURL, url.Values{
+	resp, err := liveHTTP.PostForm(tokenURL, url.Values{
 		"grant_type": {"password"}, "client_id": {"agent"}, "client_secret": {"s3cret"},
 		"username": {"alice"}, "password": {"alice"},
 	})
@@ -145,7 +149,7 @@ type liveAdmin struct {
 }
 
 func (a *liveAdmin) token() string {
-	resp, err := http.PostForm(a.base+"/realms/master/protocol/openid-connect/token", url.Values{
+	resp, err := liveHTTP.PostForm(a.base+"/realms/master/protocol/openid-connect/token", url.Values{
 		"grant_type": {"password"}, "client_id": {"admin-cli"}, "username": {a.user}, "password": {a.pass},
 	})
 	if err != nil {
@@ -174,7 +178,7 @@ func (a *liveAdmin) request(method, path string, payload any) *http.Response {
 	}
 	req.Header.Set("Authorization", "Bearer "+a.token())
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := liveHTTP.Do(req)
 	if err != nil {
 		a.t.Fatal(err)
 	}
