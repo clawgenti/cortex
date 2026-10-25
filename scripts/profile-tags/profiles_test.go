@@ -51,9 +51,10 @@ func TestTags_ReproduceTodaysDefaults(t *testing.T) {
 			"lineage", "litellm_budgettrack", "mcpparser", "opa", "script", "sparc", "staticinject",
 			"tokenbroker", "tokenexchange", "tokenexchangeaiac", "toolprune",
 		}},
-		// lite reproduces the retired lite-tags generator's keep set exactly, so
-		// the published -lite artifact does not change in this refactor. It is a
-		// sidecar minimum and shares no plugin with `local`.
+		// lite is the retired lite-tags generator's keep set plus
+		// tokenexchangeaiac, the route-free alternative to tokenexchange, which
+		// ships wherever that does. It is a sidecar minimum and shares no plugin
+		// with `local`.
 		{"lite", []string{
 			"jwtvalidation", "litellm_budgettrack", "staticinject", "tokenexchange", "tokenexchangeaiac",
 		}},

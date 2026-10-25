@@ -190,19 +190,11 @@ func (c *idpClient) post(ctx context.Context, creds credentials, form url.Values
 // whether to trust it. An opaque (non-JWT) token cannot be checked and is
 // refused.
 func audienceContains(token, audience string) error {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return errors.New("issued token is not a JWT, so its audience cannot be checked")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return fmt.Errorf("issued token payload is not base64url: %w", err)
-	}
 	var claims struct {
 		Aud json.RawMessage `json:"aud"`
 	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return fmt.Errorf("issued token payload is not JSON: %w", err)
+	if err := decodeClaims(token, &claims); err != nil {
+		return err
 	}
 	var auds []string
 	var one string
@@ -225,19 +217,11 @@ func audienceContains(token, audience string) error {
 // claim, unverified, for the same reason as audienceContains. A token it cannot
 // decode yields zero values: the claims only enrich policy input.
 func tokenSubjectAndScopes(token string) (string, []string) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", nil
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", nil
-	}
 	var claims struct {
 		Sub   string `json:"sub"`
 		Scope string `json:"scope"`
 	}
-	if json.Unmarshal(payload, &claims) != nil {
+	if decodeClaims(token, &claims) != nil {
 		return "", nil
 	}
 	scopes := strings.Fields(claims.Scope)
@@ -245,4 +229,21 @@ func tokenSubjectAndScopes(token string) (string, []string) {
 		scopes = nil
 	}
 	return claims.Sub, scopes
+}
+
+// decodeClaims unmarshals a JWT's payload into claims, without checking the
+// signature.
+func decodeClaims(token string, claims any) error {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return errors.New("issued token is not a JWT, so its claims cannot be read")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return fmt.Errorf("issued token payload is not base64url: %w", err)
+	}
+	if err := json.Unmarshal(payload, claims); err != nil {
+		return fmt.Errorf("issued token payload is not JSON: %w", err)
+	}
+	return nil
 }
