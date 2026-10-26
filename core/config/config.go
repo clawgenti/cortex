@@ -936,8 +936,8 @@ type ListenerConfig struct {
 	SkipHosts []string `yaml:"skip_hosts" json:"skip_hosts"`
 
 	// DeclineResponsesWebSockets: whether the forward proxy answers a WebSocket
-	// upgrade on an OpenAI Responses API path (one ending /responses) with 426
-	// itself, instead of forwarding the request with its Upgrade stripped. nil means
+	// upgrade on an OpenAI Responses API path (one ending /responses, on chatgpt.com
+	// or api.openai.com) with 426 itself, instead of forwarding the request with its Upgrade stripped. nil means
 	// unset, and the default is on; explicit false restores the forwarding. See
 	// DeclinesResponsesWebSockets for why on is the default.
 	//

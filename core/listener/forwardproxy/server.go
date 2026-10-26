@@ -1013,14 +1013,54 @@ const declinedUpgradeBody = `{"detail":"WebSocket transport is not available thr
 // wantsResponsesWebSocket reports whether r asks to open a WebSocket on an OpenAI
 // Responses API path — the one shape declineResponsesWebSocket answers.
 //
-// Scoped to the Responses suffix inference-parser reads (/v1/responses, and Codex's
-// /backend-api/codex/responses), because 426 is an answer only that endpoint's
-// clients are known to read as "use HTTPS": every other WebSocket keeps the strip
-// and whatever its origin makes of the bare GET.
+// Scoped twice: to OpenAI's own hosts (isOpenAIResponsesHost), and to the Responses
+// suffix inference-parser reads (/v1/responses, and Codex's
+// /backend-api/codex/responses). A 426 is an answer only Codex is known to read as
+// "use HTTPS", and only against OpenAI is that known: every other WebSocket keeps the
+// strip and whatever its origin makes of the bare GET.
 func wantsResponsesWebSocket(r *http.Request) bool {
 	return r.Method == http.MethodGet &&
-		strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") &&
+		upgradesToWebSocket(r.Header) &&
+		isOpenAIResponsesHost(r.URL.Host) &&
 		strings.HasSuffix(r.URL.Path, "/responses")
+}
+
+// isOpenAIResponsesHost reports whether authority is one of OpenAI's own Responses API
+// hosts: chatgpt.com, which serves Codex on a ChatGPT login, and api.openai.com, which
+// serves it on an API key and is the public /v1/responses.
+//
+// OpenAI's only, because what a 426 means to a client is only known for Codex — it is
+// read from Codex's own source. Another harness speaking the same API through another
+// host (a LiteLLM gateway, OpenCode Zen, a local server) may treat a 426 as a hard
+// failure where today it falls back, so those keep the strip and the origin's answer.
+// Exact names, compared case-insensitively without a port or a trailing dot: a
+// subdomain is not the same service.
+//
+// authority is r.URL.Host, the address the request is dialed to — on a bridged request
+// the tunnel's own, which tunnelAuthorityMatches has already held the Host header to,
+// and after a redirect the redirect's — so the judgement follows where the bytes go.
+func isOpenAIResponsesHost(authority string) bool {
+	switch strings.TrimSuffix(strings.ToLower(hostOnly(authority)), ".") {
+	case "chatgpt.com", "api.openai.com":
+		return true
+	}
+	return false
+}
+
+// upgradesToWebSocket reports whether h's Upgrade names websocket. RFC 9110 §7.8 makes
+// Upgrade a comma-separated list, matched case-insensitively and in any repeat of the
+// header, so "websocket, h2c" asks for a WebSocket as surely as "websocket" does. A
+// token may carry a version ("websocket/13"); only the name before it is compared.
+func upgradesToWebSocket(h http.Header) bool {
+	for _, line := range h.Values("Upgrade") {
+		for _, tok := range strings.Split(line, ",") {
+			name, _, _ := strings.Cut(strings.TrimSpace(tok), "/")
+			if strings.EqualFold(name, "websocket") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // declineResponsesWebSocket answers a WebSocket upgrade on a Responses API path with
@@ -1063,7 +1103,7 @@ func (s *Server) declineResponsesWebSocket(w http.ResponseWriter, r *http.Reques
 	}
 	s.recordOutboundRequestEvent(tl, pctx, sid)
 	s.recordOutboundResponseEvent(pctx, http.StatusUpgradeRequired, &pipeline.EventError{
-		Kind:    "upgrade_declined",
+		Kind:    pipeline.ErrorKindUpgradeDeclined,
 		Message: "WebSocket upgrade answered 426 by the proxy; the client falls back to HTTPS",
 	})
 }

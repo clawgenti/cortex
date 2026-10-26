@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -115,11 +116,17 @@ func TestForwardProxy_EndToEnd_RecordsAndStripsTheUpgrade(t *testing.T) {
 	store := session.New(5*time.Minute, 100, 0)
 	defer store.Close()
 
+	// Written by the origin's handler goroutine and read here after the response: a
+	// response arriving over a socket is not a happens-before edge Go's memory model
+	// recognises, so the three are read under the same lock they are written under.
+	var mu sync.Mutex
 	var reached bool
 	var sawUpgrade, sawConnection string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		reached = true
 		sawUpgrade, sawConnection = r.Header.Get("Upgrade"), r.Header.Get("Connection")
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer backend.Close()
@@ -154,14 +161,17 @@ func TestForwardProxy_EndToEnd_RecordsAndStripsTheUpgrade(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if !reached {
+	mu.Lock()
+	gotReached, gotUpgrade, gotConnection := reached, sawUpgrade, sawConnection
+	mu.Unlock()
+	if !gotReached {
 		t.Fatal("the origin was never reached, so the strip below is untested")
 	}
-	if sawUpgrade != "" {
-		t.Errorf("the origin received Upgrade: %q — it must be stripped", sawUpgrade)
+	if gotUpgrade != "" {
+		t.Errorf("the origin received Upgrade: %q — it must be stripped", gotUpgrade)
 	}
-	if sawConnection != "" {
-		t.Errorf("the origin received Connection: %q — it must be stripped", sawConnection)
+	if gotConnection != "" {
+		t.Errorf("the origin received Connection: %q — it must be stripped", gotConnection)
 	}
 
 	v := store.View(session.DefaultSessionID)

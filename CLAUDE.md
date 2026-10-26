@@ -591,16 +591,19 @@ Every event on `/v1/sessions/{id}` and `/v1/events` carries:
   what the client got, because every consumer keys on it. **A 499 with `error.kind:
   "client_canceled"` is the client hanging up first** — and since neither proxy times
   out a slow upstream, that is how a hung one usually ends. It counts as an error in
-  `/v1/usage` but stays out of the 5xx series, and logs no WARN. **A 426 with
-  `error.kind: "upgrade_declined"` is the forward proxy refusing a WebSocket on a
-  Responses API path** (a path ending `/responses`): the origin would only answer the
-  stripped GET with a 405, which Codex retries for ~6s, while a 426 sends it straight to
-  HTTPS. Nothing is forwarded, and the Finisher sees an allow with status 426. On by
-  default; `listener.decline_responses_websockets: false` forwards the upgrade instead. On all of these the
+  `/v1/usage` but stays out of the 5xx series, and logs no WARN. On all of these the
   Finisher sees `OutcomeError` with `Outcome.StatusCode` **0**, because that zero is
   what marks the request as an error rather than an allow — the event and the outcome
-  disagree about the status on purpose. **A request whose body could not be buffered
-  is the exception:** it never reached the pipeline, so its request row carries no
+  disagree about the status on purpose. **A 426 with `error.kind:
+  "upgrade_declined"` is not one of these:** it is the forward proxy refusing a
+  WebSocket on OpenAI's Responses API (a path ending `/responses` on `chatgpt.com` or
+  `api.openai.com`; other hosts keep the strip), because the origin
+  would only answer the stripped GET with a 405, which Codex retries for ~6s, while a
+  426 sends it straight to HTTPS. Nothing is forwarded, the Finisher sees an allow with
+  status 426, and `/v1/usage` does not count it as an error. On by default;
+  `listener.decline_responses_websockets: false` forwards the upgrade instead.
+  **A request whose body could not be buffered is the other exception:** it never
+  reached the pipeline, so its request row carries no
   parse and no Finisher runs. Over the forward proxy's `maxRequestBodySize` (32 MiB)
   it is a 413 `proxy_error` with an empty `error.code`; a client that hung up
   mid-upload gets a 499 `client_canceled`, which here does log a WARN (`request body

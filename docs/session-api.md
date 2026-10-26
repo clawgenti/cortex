@@ -181,8 +181,9 @@ Every event on `/v1/sessions/{id}` and `/v1/events` carries:
   is the client hanging up first — since neither proxy times out a slow
   upstream, that is how a hung one usually ends. A 426 with `error.kind:
   "upgrade_declined"` is the forward proxy's own answer to a WebSocket upgrade on
-  an OpenAI Responses API path: nothing is forwarded, and a client such as Codex
-  reads it as "use HTTPS" and retries at once over HTTPS.
+  OpenAI's Responses API (`chatgpt.com` or `api.openai.com`): nothing is forwarded,
+  and a client such as Codex reads it as "use HTTPS" and retries at once over
+  HTTPS. It is not counted as an error in `/v1/usage`.
 - `requestedHost` — present only when a plugin redirected the request: the
   host the client asked for. `host` is where the request actually went, and
   usage, the cost ledger and pricing all follow `host`.

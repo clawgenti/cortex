@@ -603,6 +603,13 @@ type EventError struct {
 	Message string `json:"message,omitempty"` // human-readable reason; safe to surface in logs/metrics
 }
 
+// ErrorKindUpgradeDeclined is the forward proxy answering a Responses API WebSocket
+// upgrade with 426 itself (listener.decline_responses_websockets). It rides on an
+// EventError because the status is a 4xx and the row should say whose answer it is,
+// but it is not a failure: the client is expected to switch to HTTPS, and does.
+// usage does not count it as an error, and the Finisher sees an allow.
+const ErrorKindUpgradeDeclined = "upgrade_declined"
+
 // SessionSource is how a listener resolved Context.Session.
 type SessionSource string
 

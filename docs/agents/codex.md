@@ -206,7 +206,10 @@ for this dialect.
 Cortex cannot carry one: `Upgrade` is a hop-by-hop header a proxy must not forward, and
 the parser reads HTTP requests, not frames. So the forward proxy answers that handshake
 itself with **426 Upgrade Required**, which Codex reads as "this endpoint wants HTTP" and
-switches to HTTPS straight away, for the rest of its session. The attempt shows on the
+switches to HTTPS straight away, for the rest of its session. That covers both of
+Codex's endpoints — `chatgpt.com` on a ChatGPT login and `api.openai.com` on an API key
+— and no other host, since what a 426 means is only known for Codex against OpenAI. It
+is not counted as an error in `/v1/usage`. The attempt shows on the
 timeline as a `GET` on the Responses path answered 426 with `error.kind:
 "upgrade_declined"`, and Codex prints one line for it:
 
