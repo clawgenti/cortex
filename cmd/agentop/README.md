@@ -579,6 +579,28 @@ applies the change. Everything else — undo by hand, CA trust, the record
 file, verified depth, known issues — is in
 [opencode.md](../../docs/agents/opencode.md).
 
+## Installing a bundled script plugin (`agentop script`)
+
+Cortex ships some [script plugins](../../docs/script-plugin.md#bundled-scripts)
+inside agentop. `agentop script` installs one in a single step:
+
+    agentop script list                  every bundled plugin and its state
+    agentop script install <name>        copy it and add its slot
+    agentop script remove <name>         take both back out
+
+- **`install`** copies the plugin's folder to `~/.cortex/plugins/<name>/` and
+  adds a `script` slot for it to `~/.cortex/config.yaml`. It then waits for
+  Cortex to load the slot and checks every script in it started. If one did not,
+  it takes back what it added and says why.
+- **Run again,** it updates a copy from an earlier release and leaves a current
+  one alone. A copy you edited is refused: `remove` it first.
+- **`remove`** refuses a folder holding a file `install` did not write.
+- **`list --json`** is for other programs, such as moca. Its fields are `name`,
+  `description`, `state`, `failClosed`, `scripts` and, with Cortex running,
+  `loaded` and `notStarted`.
+
+`--config PATH` names another Cortex config, as for `agentop server`.
+
 ## Choosing an inference server (`agentop server`)
 
 With several inference servers — LiteLLM gateways or local model servers — each
