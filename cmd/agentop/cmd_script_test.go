@@ -22,6 +22,10 @@ type fakeCortex struct {
 	loaded, notStarted atomic.Int32
 	refuse             atomic.Bool
 	polls              atomic.Int32
+	// reloadedAfter, when set, has /reload/status report its last success as
+	// later than any write, as a proxy that has picked a change up does. Unset,
+	// last_success is the time of the poll, which is also after any write.
+	reloadedAfter atomic.Bool
 }
 
 func newFakeCortex(t *testing.T) *fakeCortex {
@@ -35,6 +39,9 @@ func newFakeCortex(t *testing.T) *fakeCortex {
 			// serverTarget's probe and poll 2 the poll's baseline, so it rises at 3.
 			n := f.polls.Add(1)
 			st := map[string]any{"last_success": time.Now(), "reloads_ok": 1, "reloads_failed": 0}
+			if f.reloadedAfter.Load() {
+				st["last_success"] = time.Now().Add(time.Hour)
+			}
 			if f.refuse.Load() {
 				st["last_success"] = time.Now().Add(-time.Hour)
 				if n >= 3 {
@@ -301,5 +308,109 @@ func TestScript_UnknownNameListsTheCatalog(t *testing.T) {
 	code, _, errOut := runScriptCmd(t, "install", "nope", "--config", cfg)
 	if code != 2 || !strings.Contains(errOut, "moca-sandbox") {
 		t.Fatalf("exit %d: %s", code, errOut)
+	}
+}
+
+// A folder holding this release's files but no record — copied by hand as the
+// v0.9.2 guide said, or left by an install that stopped before the record — is
+// adopted: install writes the record, and remove can then take it out.
+func TestScript_InstallAdoptsAHandCopiedFolder(t *testing.T) {
+	cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
+	e, err := findCatalogEntry("moca-sandbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(plugins, "moca-sandbox")
+	os.MkdirAll(dir, 0o700)
+	for n, b := range e.Files {
+		os.WriteFile(filepath.Join(dir, n), b, 0o700)
+	}
+	if st := listJSON(t, cfg)["moca-sandbox"]; st.State != stateIncomplete {
+		t.Fatalf("hand-copied folder, no slot: state = %s, want incomplete", st.State)
+	}
+	if code, out, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 0 {
+		t.Fatalf("install: %d %s%s", code, out, e)
+	}
+	if st := listJSON(t, cfg)["moca-sandbox"]; st.State != stateInstalled {
+		t.Fatalf("after install: state = %s", st.State)
+	}
+	if code, _, e := runScriptCmd(t, "remove", "moca-sandbox", "--config", cfg); code != 0 {
+		t.Fatalf("remove: %s", e)
+	}
+}
+
+// An empty folder with no record — what Cortex's reloader creates for a slot it
+// watches — counts as no folder at all.
+func TestScript_AnEmptyFolderIsNoFolder(t *testing.T) {
+	cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
+	os.MkdirAll(filepath.Join(plugins, "moca-sandbox"), 0o700)
+	if st := listJSON(t, cfg)["moca-sandbox"]; st.State != stateNotInstalled {
+		t.Fatalf("empty folder: state = %s, want not installed", st.State)
+	}
+	if code, out, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 0 {
+		t.Fatalf("install over an empty folder: %d %s%s", code, out, e)
+	}
+}
+
+// An update removes the files the earlier release wrote that this one does not
+// ship, so the slot stops running them and remove can still take the folder out.
+func TestScript_UpdateRemovesFilesTheReleaseDropped(t *testing.T) {
+	cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
+	if code, _, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 0 {
+		t.Fatal(e)
+	}
+	dir := filepath.Join(plugins, "moca-sandbox")
+	dropped := []byte("#!/bin/sh\n# shipped by an earlier release only\n")
+	os.WriteFile(filepath.Join(dir, "10-old.sh"), dropped, 0o700)
+	rec, _ := readRecord(dir)
+	rec.Version = "v0.0.1"
+	rec.Files["10-old.sh"] = sum(dropped)
+	b, _ := json.Marshal(rec)
+	os.WriteFile(filepath.Join(dir, scriptRecord), b, 0o600)
+	if st := listJSON(t, cfg)["moca-sandbox"]; st.State != stateOutdated {
+		t.Fatalf("state = %s, want outdated", st.State)
+	}
+	if code, out, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 0 || !strings.Contains(out, "Updated") {
+		t.Fatalf("update: %d %s%s", code, out, e)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "10-old.sh")); !os.IsNotExist(err) {
+		t.Errorf("the dropped file is still there: %v", err)
+	}
+	if code, _, e := runScriptCmd(t, "remove", "moca-sandbox", "--config", cfg); code != 0 {
+		t.Fatalf("remove after update: %s", e)
+	}
+}
+
+// An update whose new scripts do not start puts the earlier files back, so a
+// fail_closed slot keeps running the scripts that worked. The check waits for
+// the reload the new files trigger rather than reading the old build's counts.
+func TestScript_AFailedUpdateRestoresTheEarlierFiles(t *testing.T) {
+	f := newFakeCortex(t)
+	f.present.Store(true)
+	f.loaded.Store(1)
+	cfg, plugins := scriptEnv(t, f.addr(), f.addr())
+	if code, _, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 0 {
+		t.Fatal(e)
+	}
+	dir := filepath.Join(plugins, "moca-sandbox")
+	old := []byte("#!/usr/bin/env python3\n# an earlier release\n")
+	script := filepath.Join(dir, "moca-sandbox.py")
+	os.WriteFile(script, old, 0o700)
+	b, _ := json.Marshal(installRecord{Version: "v0.0.1", Files: map[string]string{"moca-sandbox.py": sum(old)}})
+	os.WriteFile(filepath.Join(dir, scriptRecord), b, 0o600)
+
+	// The old build still reports 1/1 until the reload; after it, nothing starts.
+	f.reloadedAfter.Store(true)
+	f.loaded.Store(0)
+	f.notStarted.Store(1)
+	code, _, errOut := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg)
+	if code != 1 || !strings.Contains(errOut, "did not load") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if got, _ := os.ReadFile(script); !bytes.Equal(got, old) {
+		t.Errorf("the earlier script was not put back:\n%s", got)
+	}
+	if st := listJSON(t, cfg)["moca-sandbox"]; st.State != stateOutdated {
+		t.Errorf("state after a failed update = %s, want outdated", st.State)
 	}
 }

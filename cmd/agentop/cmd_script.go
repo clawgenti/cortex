@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -212,22 +213,48 @@ func readRecord(dir string) (installRecord, bool) {
 	return r, true
 }
 
+// folderRecord is what dir holds as far as install is concerned. A folder with a
+// record is what install wrote. One without a record that is empty, or holds
+// exactly this release's files, is treated as if install had written it: the
+// first is what Cortex's reloader creates for a slot it watches, the second what
+// copying the files by hand leaves. present is false for no folder, or an empty
+// one; ok is false for a folder install cannot account for.
+func folderRecord(dir string, e catalog.CatalogEntry) (rec installRecord, present, ok bool) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return installRecord{}, false, true
+	}
+	if r, ok := readRecord(dir); ok {
+		return r, true, true
+	}
+	if len(ents) == 0 {
+		return installRecord{}, false, true
+	}
+	rec = installRecord{Files: map[string]string{}}
+	for _, d := range ents {
+		b, err := os.ReadFile(filepath.Join(dir, d.Name()))
+		src, shipped := e.Files[d.Name()]
+		if err != nil || !shipped || !bytes.Equal(b, src) {
+			return installRecord{}, true, false
+		}
+		rec.Files[d.Name()] = sum(b)
+	}
+	return rec, true, true
+}
+
 // stateOf is e's state on this machine. The record says what install wrote: files
 // matching it but not this release are outdated, files differing from it modified.
 func stateOf(t scriptTarget, e catalog.CatalogEntry) scriptState {
 	dir := filepath.Join(t.root, e.Name)
-	_, statErr := os.Stat(dir)
-	folder := statErr == nil
+	rec, folder, ok := folderRecord(dir, e)
 	slot := hasSlot(t.cfg, e.Name)
 	switch {
 	case !folder && !slot:
 		return stateNotInstalled
+	case !ok:
+		return stateModified
 	case !folder || !slot:
 		return stateIncomplete
-	}
-	rec, ok := readRecord(dir)
-	if !ok {
-		return stateModified
 	}
 	current := len(rec.Files) == len(e.Files)
 	for name, want := range rec.Files {
@@ -341,11 +368,61 @@ func slotChanges(e catalog.CatalogEntry) []edit.ConfigChange {
 	return out
 }
 
+// priorFiles is what dir held before writeFiles changed it, so a failed update can
+// be put back: each file's bytes and mode, by name, and the record.
+type priorFiles struct {
+	files  map[string][]byte
+	modes  map[string]os.FileMode
+	record []byte
+}
+
+// snapshot reads what dir holds of the files old lists, and the record.
+func snapshot(dir string, old installRecord) priorFiles {
+	p := priorFiles{files: map[string][]byte{}, modes: map[string]os.FileMode{}}
+	for n := range old.Files {
+		if b, err := os.ReadFile(filepath.Join(dir, n)); err == nil {
+			p.files[n] = b
+			if info, err := os.Stat(filepath.Join(dir, n)); err == nil {
+				p.modes[n] = info.Mode().Perm()
+			}
+		}
+	}
+	p.record, _ = os.ReadFile(filepath.Join(dir, scriptRecord))
+	return p
+}
+
+// restore puts dir back as p found it: this release's files that p did not hold
+// are removed, and every file p held is written back.
+func (p priorFiles) restore(dir string, e catalog.CatalogEntry) {
+	for n := range e.Files {
+		if _, ok := p.files[n]; !ok {
+			_ = os.Remove(filepath.Join(dir, n))
+		}
+	}
+	for n, b := range p.files {
+		_ = writeAtomic(filepath.Join(dir, n), b, p.modes[n])
+	}
+	if p.record == nil {
+		_ = os.Remove(filepath.Join(dir, scriptRecord))
+	} else {
+		_ = writeAtomic(filepath.Join(dir, scriptRecord), p.record, 0o600)
+	}
+}
+
 // writeFiles puts e's files in dir, each through a temp file and a rename so the
-// reloader never sees half a script, then the record.
-func writeFiles(dir string, e catalog.CatalogEntry) error {
+// reloader never sees half a script, then the record. Files old lists that this
+// release does not ship are removed, so an update does not leave a script the
+// slot would go on running.
+func writeFiles(dir string, e catalog.CatalogEntry, old installRecord) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
+	}
+	for n := range old.Files {
+		if _, shipped := e.Files[n]; !shipped && filepath.Base(n) == n {
+			if err := os.Remove(filepath.Join(dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+		}
 	}
 	rec := installRecord{Version: version, Files: map[string]string{}}
 	names := make([]string, 0, len(e.Files))
@@ -384,6 +461,9 @@ func writeAtomic(path string, b []byte, mode os.FileMode) error {
 // removeFiles deletes what rec lists, the record, then dir when it is empty.
 func removeFiles(dir string, rec installRecord) error {
 	for n := range rec.Files {
+		if filepath.Base(n) != n {
+			continue // a record names files in its own folder, nothing else
+		}
 		if err := os.Remove(filepath.Join(dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
@@ -442,29 +522,36 @@ func scriptInstall(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s is already installed.\n", e.Name)
 		return 0
 	case stateModified:
+		if _, ok := readRecord(dir); !ok {
+			return fail("%s already exists and was not written by install (%s); move it out first",
+				homeTilde(dir), strings.Join(unrecorded(dir, installRecord{}), ", "))
+		}
 		return fail("%s holds files that were edited since it was installed; run `agentop script remove %s` first", homeTilde(dir), e.Name)
 	}
-	_, statErr := os.Stat(dir)
-	hadFolder := statErr == nil
-	if hadFolder {
-		if rec, ok := readRecord(dir); ok {
-			if extra := unrecorded(dir, rec); len(extra) > 0 {
-				return fail("%s holds files install did not write (%s); move them out first", homeTilde(dir), strings.Join(extra, ", "))
-			}
-		} else if extra := unrecorded(dir, installRecord{}); len(extra) > 0 {
-			return fail("%s already exists and was not written by install (%s); move it out first", homeTilde(dir), strings.Join(extra, ", "))
-		}
+	old, hadFolder, accounted := folderRecord(dir, e)
+	if !accounted {
+		return fail("%s already exists and was not written by install; move it out first", homeTilde(dir))
+	}
+	if extra := unrecorded(dir, old); len(extra) > 0 {
+		return fail("%s holds files install did not write (%s); move them out first", homeTilde(dir), strings.Join(extra, ", "))
 	}
 	hadSlot := hasSlot(t.cfg, e.Name)
 
-	if err := writeFiles(dir, e); err != nil {
+	prior := snapshot(dir, old)
+	wrote := time.Now()
+	if err := writeFiles(dir, e, old); err != nil {
+		prior.restore(dir, e)
 		return fail("writing %s: %v", homeTilde(dir), err)
 	}
+	// undoFiles puts the folder back as install found it: gone, when install
+	// created it, or holding the earlier release's files on an update.
 	undoFiles := func() {
 		if !hadFolder {
 			rec, _ := readRecord(dir)
 			_ = removeFiles(dir, rec)
+			return
 		}
+		prior.restore(dir, e)
 	}
 
 	addedSlot := false
@@ -486,6 +573,18 @@ func scriptInstall(args []string, stdout, stderr io.Writer) int {
 		if res.Outcome == edit.WriteNotRunning {
 			fmt.Fprintf(stdout, "Installed %s. Cortex is not running; the slot loads when it starts.\n", e.Name)
 			return 0
+		}
+	}
+
+	if hadSlot && t.statsURL != "" {
+		// No config write, so nothing has waited for the reload the new files
+		// trigger; until it lands, the counts below are the old build's.
+		pctx, cancel := context.WithTimeout(context.Background(), edit.LocalPollDeadline)
+		res := edit.PollUntilReloaded(pctx, t.statsURL, wrote, "")
+		cancel()
+		if res.Status != edit.PollSuccess {
+			undoFiles()
+			return fail("Cortex did not reload %s, so its earlier files were put back: %s", e.Name, res.LastError)
 		}
 	}
 
