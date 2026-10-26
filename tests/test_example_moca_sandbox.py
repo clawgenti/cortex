@@ -1,4 +1,4 @@
-"""Tests for examples/script-plugins/moca-sandbox.py."""
+"""Tests for the moca-sandbox catalog entry, core/plugins/script/catalog/entries/moca-sandbox/."""
 
 import importlib.util
 import json
@@ -14,7 +14,7 @@ import yaml
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SDK = REPO / "core" / "plugins" / "script" / "sdk" / "cortex.py"
-SCRIPT = REPO / "examples" / "script-plugins" / "moca-sandbox.py"
+SCRIPT = REPO / "core" / "plugins" / "script" / "catalog" / "entries" / "moca-sandbox" / "moca-sandbox.py"
 GUIDE = REPO / "docs" / "script-plugin.md"
 
 SANDBOX_TOOL = {"name": "mcp__sandbox__bash", "input_schema": {"type": "object"}}
