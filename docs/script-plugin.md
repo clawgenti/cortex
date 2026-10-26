@@ -151,7 +151,10 @@ Completions and OpenAI Responses bodies. Other formats are in `flow.json`.
   `timeout` (2s) is restarted, and the request goes through.
 - **A broken script does not break your agent.** An exception, a crash or a
   timeout is shown on the request's row and the request continues. To block
-  instead, see `fail_closed` below.
+  instead, see `fail_closed` below. Under `fail_closed`, a script that does not
+  start at all — a syntax error, a missing interpreter — blocks every request
+  through its slot. Cortex tries it again when you save a change to it, or when
+  Cortex restarts.
 - **What Cortex records is what the upstream exchanged.** Cortex's parsers read
   each request before any script runs, and each streamed response before a
   rewriting script does, so the session view and archive keep the original
@@ -168,8 +171,9 @@ not part of the name. Each sees the request as the one before it left it. A
 script in shadow mode changes nothing, so the next one sees what it saw.
 
 All of `~/.cortex/plugins/` is one slot, which Cortex appends to the end of the
-outbound pipeline. To put scripts somewhere else — between two Go plugins, for
-example — list the slot yourself and give it a folder of its own:
+outbound pipeline. A folder inside it is a slot of its own once the config names
+it. To put scripts somewhere else — between two Go plugins, for example — list
+the slot yourself and give it a folder of its own:
 
 ```yaml
 pipeline:
@@ -183,14 +187,104 @@ pipeline:
       - name: script            # ~/.cortex/plugins/ itself
 ```
 
-Once the config names `script` anywhere, Cortex appends nothing. A slot must
-come after the parsers: it rewrites requests, and readers go first.
+- **Naming a slot keeps the default one.** When every `script` entry names a
+  `dir`, Cortex adds the `~/.cortex/plugins/` slot just before the first of them
+  that is not `on_error: off`. It goes first because a script that reads
+  responses must come before one that rewrites them.
+- **To place the default slot yourself,** list `- name: script` with no `dir`.
+  Cortex then adds nothing. With `on_error: off` it is switched off.
+- **A slot must come after the parsers:** it rewrites requests, and readers go
+  first.
 
 | Field | Default | Meaning |
 |---|---|---|
 | `dir` | (empty) | Folder inside `~/.cortex/plugins` this slot runs |
 | `timeout` | `2s` | How long one script may take to answer one request |
-| `fail_closed` | `false` | Block a request when an enforcing script fails on it |
+| `fail_closed` | `false` | Block a request when an enforcing script fails on it, and every request while a script in the slot did not start |
+
+## Examples
+
+Scripts written for a particular setup live in
+[`examples/script-plugins/`](../examples/script-plugins/). Cortex does not install
+them; copy the ones you want.
+
+### moca-sandbox.py: keep Claude Code on moca's sandbox tools
+
+[moca](https://github.com/rossoctl/moca) runs an agent's tools in a remote
+sandbox. To keep Claude Code off its local tools, `mocactl sbx up` denies them in
+the repo's `.claude/settings.json`. That deny also stops Claude Code loading
+`CLAUDE.md` (rossoctl/moca#568).
+
+This script does the deny's job instead, in sessions that carry moca's
+`mcp__sandbox__` tools:
+
+- it removes the local tools from the list the model sees;
+- it renames a local tool call the model makes anyway, so Claude Code runs
+  nothing;
+- it replaces the result of a local call that already ran with an error.
+
+Other sessions are untouched.
+
+Install it in a slot of its own, failing closed:
+
+1. Copy the script, from a checkout of this repo:
+
+   ```sh
+   mkdir -p ~/.cortex/plugins/moca-sandbox
+   cp examples/script-plugins/moca-sandbox.py ~/.cortex/plugins/moca-sandbox/
+   chmod +x ~/.cortex/plugins/moca-sandbox/moca-sandbox.py
+   ```
+
+2. Add the slot as the last outbound entry of `~/.cortex/config.yaml`:
+
+   ```yaml
+         - name: script
+           config:
+             dir: moca-sandbox
+             fail_closed: true
+   ```
+
+   Cortex reloads it; no restart.
+
+3. In the repo, create the sandbox without the settings file, and register the
+   sandbox server for this repo only:
+
+   ```sh
+   mocactl sbx up --no-agent-config
+   claude mcp add -s local sandbox -- mocactl sbx mcp
+   ```
+
+Check that it loaded:
+
+```sh
+curl --noproxy '*' -s http://127.0.0.1:47601/v1/pipeline \
+  | jq '.outbound[] | select(.config.dir == "moca-sandbox") | .metrics[:2]'
+```
+
+It should show `scripts loaded` 1 and `scripts not started` 0. agentop's
+plugin pane cannot show it yet: it opens the first `script` slot whichever row
+you pick.
+
+What it costs, and what it does not cover:
+
+- **Streams are held back for every session.** The script rewrites responses, so
+  Cortex buffers each streamed response until it is complete, not only moca's.
+- **No Cortex, no protection.** Claude Code must reach the model through Cortex
+  (`HTTPS_PROXY`).
+- **A script that does not start blocks all traffic** through its slot, by
+  `fail_closed`, even when it was only slow to start. Cortex tries it again when
+  you save a change to it, or when Cortex restarts.
+- **It reads only Anthropic responses:** JSON, and event streams whose events
+  each carry one `data:` line ending in `\n`. A response in another format
+  passes unchanged, so a local tool call in it is not renamed, and Claude Code
+  runs it.
+- **Other MCP servers you configured are not blocked:** the script blocks only
+  the tools on moca's list.
+- **Claude Code's own tools stay visible:** `Skill`, `SendMessage`, the `Cron`
+  tools and others are not on moca's list.
+- **Approve each sandbox tool once,** or run in auto mode. "Don't ask again" in a
+  prompt writes `.claude/settings.local.json` in the repo. Headless runs need
+  `--allowedTools 'mcp__sandbox__*'`.
 
 ## Without the SDK
 
