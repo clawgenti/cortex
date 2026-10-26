@@ -51,6 +51,10 @@ type Timeline struct {
 	Tools     []Tool    `json:"tools"`
 	Returns   []Return  `json:"returns"`
 	Hosts     []Host    `json:"hosts"`
+
+	// scanned counts the message bytes searched for returns, so a test can pin that only
+	// messages new to an agent are read.
+	scanned int
 }
 
 // Agent is one row of the agent tree.
@@ -109,10 +113,13 @@ type Host struct {
 	Error  bool       `json:"error,omitempty"`
 	Lost   bool       `json:"lost,omitempty"`
 	Seq    uint64     `json:"seq"`
+
+	idx int // the request's index in the events Build read, while building
 }
 
 // Build computes the timeline of events, which must be one session's events in Seq order.
-func Build(id string, events []pipeline.SessionEvent) *Timeline {
+// now ages out requests that never got an answer; see hostLostAfter.
+func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 	t := &Timeline{ID: id, Agents: []Agent{}, Turns: []Turn{}, Tools: []Tool{}, Returns: []Return{}, Hosts: []Host{}}
 	if len(events) == 0 {
 		return t
@@ -127,7 +134,7 @@ func Build(id string, events []pipeline.SessionEvent) *Timeline {
 		}
 	}
 	buildAgents(t, events)
-	buildHosts(t, events)
+	buildHosts(t, events, now)
 	return t
 }
 

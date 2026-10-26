@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -25,10 +26,6 @@ var (
 	taskIDRe       = regexp.MustCompile(`<task-notification>\s*<task-id>([A-Za-z0-9_-]+)</task-id>`)
 	spawnedIDRe    = regexp.MustCompile(`agentId: ([A-Za-z0-9_-]+)`)
 )
-
-// scanned, when set, is told how many bytes of message text each scan reads. Tests use it to
-// pin that only new messages are read; nil in production.
-var scanned func(n int)
 
 // previewMax bounds a tool's preview: enough to tell two Bash calls apart in a one-line strip.
 const previewMax = 80
@@ -118,18 +115,19 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 		if c.agent == UnseparatedAgent {
 			k = len(msgs)
 		}
-		for _, m := range msgs[k:] {
+		for mi, m := range msgs[k:] {
 			if m.Role == "assistant" {
 				continue // an agent quoting the markers is not a delivery
 			}
-			if scanned != nil {
-				scanned(len(m.Content))
-			}
+			t.scanned += len(m.Content)
 			for _, re := range []*regexp.Regexp{agentMessageRe, taskIDRe} {
 				for _, idx := range re.FindAllStringSubmatchIndex(m.Content, -1) {
 					from := m.Content[idx[2]:idx[3]]
 					tail := m.Content[idx[0]:min(len(m.Content), idx[1]+200)]
-					key := from + "\x00" + tail
+					// Keyed by the message's position in the history as well as its text: a
+					// fork re-sends its parent's deliveries at the same positions, while a
+					// second, identically worded hand-back lands at a new one.
+					key := fmt.Sprintf("%s\x00%d\x00%s", from, k+mi, tail)
 					if seenReturn[key] {
 						continue // a fork inherits its parent's history, deliveries included
 					}
@@ -172,7 +170,8 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 	for i := len(t.Turns) - 1; i >= 0; i-- {
 		tu := &t.Turns[i]
 		if tu.End == nil && lastTurn[tu.Agent].After(tu.Start) {
-			tu.End, tu.Lost = &tu.Start, true
+			at := tu.Start // a copy: Clip moves spans, and &tu.Start would then point at a neighbour
+			tu.End, tu.Lost = &at, true
 		}
 		if lastTurn[tu.Agent].Before(tu.Start) {
 			lastTurn[tu.Agent] = tu.Start
@@ -193,7 +192,8 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 			tool.Error = ends[tool.Agent][tool.ID].IsError
 		} else if tool.Name == "SubagentHandback" || lastTurn[tool.Agent].After(tool.Start) {
 			// The agent moved on without the result, or the tool ends the run by design.
-			tool.End, tool.Lost = &tool.Start, true
+			at := tool.Start
+			tool.End, tool.Lost = &at, true
 		}
 		if tool.Name == "Agent" || tool.Name == "Task" {
 			sp := spawns[si]

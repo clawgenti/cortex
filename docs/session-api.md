@@ -90,9 +90,12 @@ answers 404 rather than a neighbour when neither holds that seq.
 
 ## `GET /v1/sessions/{id}/timeline` — agents, tools and hosts on one time axis
 
-The session's history as spans, for agentop's Timeline pane. Computed per request
-from the whole session: memory first, then the archive behind it (a 6,000-event
-session takes a few milliseconds). Reads at most 50,000 events, newest first;
+The session's history as spans, for agentop's Timeline pane. Computed from the
+whole session: memory first, then the archive behind it (a 6,000-event session
+takes a few milliseconds; reading one that is only on disk takes over a second).
+The result is cached per session until its newest event changes, or for a minute
+on an idle session, so a pane refreshing every second costs one compute per new
+event. Reads at most 50,000 events, newest first;
 `truncated: true` says older ones exist. 404 for an unknown session. `?from=` and
 `?to=` (RFC 3339) keep only the spans that overlap the range; `agents` is always
 the whole list.
@@ -129,14 +132,15 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
   `<agent-message from="…">` or `<task-notification>` in a message that agent
   had not sent before.
 
-**Hosts** are every outbound request paired with its response, and every opaque
-tunnel. `kind` is `llm`, `mcp`, `http` or `tunnel`; a bridged CONNECT's open is
-folded into the decrypted request it carried, and `h:443` shares `h`'s row.
+**Hosts** are every outbound request paired with its response, every opaque
+tunnel, and every denial. `kind` is `llm`, `mcp`, `http` or `tunnel`; a bridged
+CONNECT's open is folded into the decrypted request it carried, and `h:443`
+shares `h`'s row.
 
 **`end` absent means still in flight.** A span that never got an answer but
 provably stopped is `lost` and ends where it started: a turn or tool whose agent
 moved on, a `SubagentHandback` (it ends the run), or a request more than ten
-minutes behind the session's newest event.
+minutes old.
 
 ## `DELETE /v1/sessions`
 

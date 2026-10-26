@@ -60,6 +60,8 @@ type Server struct {
 	// archive serves history the store no longer holds. nil — every deployment but a laptop
 	// with the archive on — leaves every endpoint exactly as it was. See archive.go.
 	archive *archive.Archive
+	// timelines caches /v1/sessions/{id}/timeline per session; see timeline.go.
+	timelines timelineCache
 	// allowClear lets DELETE /v1/sessions clear; false refuses it. clearRefusals and
 	// lastRefusalLog rate-limit the log of refusals. See clear.go.
 	allowClear     bool

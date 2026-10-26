@@ -36,7 +36,7 @@ func loadFixture(t testing.TB) []pipeline.SessionEvent {
 }
 
 func TestRealSessionWithBackgroundAgents(t *testing.T) {
-	tl := Build("s", loadFixture(t))
+	tl := Build("s", loadFixture(t), time.Time{})
 
 	want := map[string]string{
 		"a1bf9707ee0e71012": "Survey cortex egress data + UIs",
@@ -111,7 +111,7 @@ func BenchmarkBuild(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Build("s", events)
+		Build("s", events, time.Time{})
 	}
 }
 
@@ -126,7 +126,7 @@ func TestBuildBudget(t *testing.T) {
 	best := time.Duration(1<<63 - 1)
 	for i := 0; i < 3; i++ {
 		start := time.Now()
-		Build("s", events)
+		Build("s", events, time.Time{})
 		best = min(best, time.Since(start))
 	}
 	if best > 50*time.Millisecond {

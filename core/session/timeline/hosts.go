@@ -8,25 +8,51 @@ import (
 
 // buildHosts pairs each outbound request with its response by RequestID. A request with no
 // response is left open, which is honest for one in flight and for one whose stream died.
-func buildHosts(t *Timeline, events []pipeline.SessionEvent) {
+func buildHosts(t *Timeline, events []pipeline.SessionEvent, now time.Time) {
 	open := map[string]int{}
+	// A tunnel open with no reason is either a bridged CONNECT, whose decrypted request is
+	// its own row, or an opaque tunnel the transparent listener records before it knows. Held
+	// until the next event says which: a decrypted request on the same host folds it away.
+	pendingOpen := -1
+	settle := func(next *pipeline.SessionEvent) {
+		if pendingOpen < 0 {
+			return
+		}
+		if next != nil && next.Phase == pipeline.SessionRequest && !next.Tunnel && HostKey(next.Host) == t.Hosts[pendingOpen].Host {
+			// Bridged: drop the open, and its close if one is recorded later.
+			delete(open, events[t.Hosts[pendingOpen].idx].RequestID)
+			t.Hosts[pendingOpen].Host = ""
+		}
+		pendingOpen = -1
+	}
 	for i := range events {
 		e := &events[i]
 		if e.Direction != pipeline.Outbound || e.Host == "" {
 			continue
 		}
+		settle(e)
 		switch e.Phase {
 		case pipeline.SessionRequest:
-			// A CONNECT the TLS bridge decrypted records an open with no reason, then the
-			// decrypted request as its own row. Drawing both doubles every bridged lane.
-			if e.Tunnel && e.TunnelReason == "" {
-				continue
+			if e.RequestID != "" {
+				if j, ok := open[e.RequestID]; ok {
+					loseHost(&t.Hosts[j]) // a reused id: the earlier request never got its answer
+				}
+				open[e.RequestID] = len(t.Hosts)
 			}
-			open[e.RequestID] = len(t.Hosts)
-			t.Hosts = append(t.Hosts, Host{Host: HostKey(e.Host), Kind: kindOf(e), Start: e.At, Seq: e.Seq})
+			if e.Tunnel && e.TunnelReason == "" {
+				pendingOpen = len(t.Hosts)
+			}
+			t.Hosts = append(t.Hosts, Host{Host: HostKey(e.Host), Kind: kindOf(e), Start: e.At, Seq: e.Seq, idx: i})
 		case pipeline.SessionResponse, pipeline.SessionDenied:
 			j, ok := open[e.RequestID]
-			if !ok {
+			if !ok || e.RequestID == "" {
+				// A request the pipeline refused before recording it, or a CONNECT refused
+				// at the door, records only the denial. Blocked egress is the host event
+				// that matters most, so it is a span of its own.
+				if e.Phase == pipeline.SessionDenied {
+					at := e.At
+					t.Hosts = append(t.Hosts, Host{Host: HostKey(e.Host), Kind: kindOf(e), Start: at, End: &at, Status: e.StatusCode, Error: true, Seq: e.Seq})
+				}
 				continue
 			}
 			delete(open, e.RequestID)
@@ -44,18 +70,41 @@ func buildHosts(t *Timeline, events []pipeline.SessionEvent) {
 			}
 		}
 	}
-	// A request with no response is in flight only while the session is still near it. Hosts
-	// have no agent to move on, so the session's own clock decides.
-	for _, j := range open {
-		if h := &t.Hosts[j]; t.End.Sub(h.Start) > hostLostAfter {
-			h.End, h.Lost = &h.Start, true
+	settle(nil)
+	// A request with no response is in flight only while it is recent. Measured against the
+	// later of the session's newest event and now, so a hung request that is itself the
+	// session's last event still ages out.
+	ref := t.End
+	if now.After(ref) {
+		ref = now
+	}
+	for i := range t.Hosts {
+		if h := &t.Hosts[i]; h.End == nil && h.Host != "" && ref.Sub(h.Start) > hostLostAfter {
+			loseHost(h)
 		}
 	}
+	kept := t.Hosts[:0]
+	for _, h := range t.Hosts {
+		if h.Host != "" {
+			kept = append(kept, h)
+		}
+	}
+	t.Hosts = kept
 }
 
-// hostLostAfter is how long an unanswered request may sit behind the session's newest event
-// before it is called lost. Ten minutes covers the longest real model calls (the slowest seen
-// was under 22 minutes, and those were the rare tail), while not drawing a dead stream as busy.
+// loseHost ends an unanswered request where it started. A copy, not &h.Start: Clip moves
+// spans, and a pointer into the slice would then read a neighbour's start.
+func loseHost(h *Host) {
+	if h.End != nil {
+		return
+	}
+	at := h.Start
+	h.End, h.Lost = &at, true
+}
+
+// hostLostAfter is how long an unanswered request may sit before it is called lost. Ten
+// minutes covers the longest real model calls (the slowest seen was under 22 minutes, and
+// those were the rare tail), while not drawing a dead stream as busy.
 const hostLostAfter = 10 * time.Minute
 
 func kindOf(e *pipeline.SessionEvent) Kind {

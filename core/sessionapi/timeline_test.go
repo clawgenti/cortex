@@ -3,6 +3,7 @@ package sessionapi
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -94,5 +95,45 @@ func TestTimelineReadsTheArchiveBehindMemory(t *testing.T) {
 	// A session only the archive holds is served, not 404'd.
 	if _, code := getTimeline(t, ts.URL, "old", ""); code != http.StatusOK {
 		t.Errorf("archived-only session: status %d, want 200", code)
+	}
+}
+
+// A cached timeline is served until the session gains an event, and a caller's clip does
+// not reach the cached copy.
+func TestTimelineCacheFollowsTheNewestEvent(t *testing.T) {
+	ts, store := newTestServer(t)
+	base := time.Now().Add(-time.Hour)
+	appendTurn(store, "s1", base, "r1", "t1")
+	appendTurn(store, "s1", base.Add(30*time.Minute), "r2", "t2")
+
+	from := url.QueryEscape(base.Add(20 * time.Minute).Format(time.RFC3339))
+	getTimeline(t, ts.URL, "s1", "") // fill the cache, so the clipped read below is a hit
+	if tl, _ := getTimeline(t, ts.URL, "s1", "?from="+from); len(tl.Turns) != 1 {
+		t.Fatalf("clipped turns = %d, want 1", len(tl.Turns))
+	}
+	if tl, _ := getTimeline(t, ts.URL, "s1", ""); len(tl.Turns) != 2 {
+		t.Errorf("after a clipped read, unclipped turns = %d, want 2: the clip reached the cache", len(tl.Turns))
+	}
+	appendTurn(store, "s1", base.Add(40*time.Minute), "r3", "t3")
+	if tl, _ := getTimeline(t, ts.URL, "s1", ""); len(tl.Turns) != 3 || tl.LastSeq != 6 {
+		t.Errorf("after a new event: turns = %d lastSeq = %d, want 3 and 6", len(tl.Turns), tl.LastSeq)
+	}
+}
+
+// A session past the read bound says so.
+func TestTimelineSaysWhenItIsTruncated(t *testing.T) {
+	store := session.New(0, 0, 0) // uncapped: newTestServer's store holds only 100 events
+	ts := httptest.NewServer(New(":0", store).server.Handler)
+	t.Cleanup(func() { ts.Close(); store.Close() })
+	at := time.Now()
+	for i := 0; i < timelineMaxEvents+5; i++ {
+		store.Append("big", pipeline.SessionEvent{At: at, Direction: pipeline.Outbound, Phase: pipeline.SessionRequest, Host: "h.example"})
+	}
+	store.Append("small", pipeline.SessionEvent{At: at, Direction: pipeline.Outbound, Phase: pipeline.SessionRequest, Host: "h.example"})
+	if tl, _ := getTimeline(t, ts.URL, "big", ""); !tl.Truncated || tl.LastSeq != timelineMaxEvents+5 {
+		t.Errorf("big: truncated = %v lastSeq = %d", tl.Truncated, tl.LastSeq)
+	}
+	if tl, _ := getTimeline(t, ts.URL, "small", ""); tl.Truncated {
+		t.Errorf("small session reported truncated")
 	}
 }
