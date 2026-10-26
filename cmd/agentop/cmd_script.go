@@ -441,6 +441,11 @@ func writeFiles(dir string, e catalog.CatalogEntry, old installRecord) error {
 		}
 		rec.Files[n] = sum(e.Files[n])
 	}
+	return writeRecord(dir, rec)
+}
+
+// writeRecord writes rec as dir's record.
+func writeRecord(dir string, rec installRecord) error {
 	b, _ := json.MarshalIndent(rec, "", "  ")
 	return writeAtomic(filepath.Join(dir, scriptRecord), append(b, '\n'), 0o600)
 }
@@ -519,6 +524,12 @@ func scriptInstall(args []string, stdout, stderr io.Writer) int {
 	state := stateOf(t, e)
 	switch state {
 	case stateInstalled:
+		if _, ok := readRecord(dir); !ok {
+			rec, _, _ := folderRecord(dir, e)
+			if err := writeRecord(dir, installRecord{Version: version, Files: rec.Files}); err != nil {
+				return fail("writing %s: %v", homeTilde(dir), err)
+			}
+		}
 		fmt.Fprintf(stdout, "%s is already installed.\n", e.Name)
 		return 0
 	case stateModified:
@@ -649,7 +660,7 @@ func scriptRemove(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s is not installed.\n", e.Name)
 		return 0
 	}
-	rec, _ := readRecord(dir)
+	rec, _, _ := folderRecord(dir, e)
 	if extra := unrecorded(dir, rec); len(extra) > 0 {
 		return fail("%s holds files install did not write (%s); move them out first", homeTilde(dir), strings.Join(extra, ", "))
 	}

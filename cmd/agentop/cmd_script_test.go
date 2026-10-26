@@ -339,6 +339,95 @@ func TestScript_InstallAdoptsAHandCopiedFolder(t *testing.T) {
 	}
 }
 
+// handCopy leaves what the v0.9.2 guide did: this release's files in the folder,
+// no record, and the slot when withSlot is set.
+func handCopy(t *testing.T, cfg, plugins string, withSlot bool) string {
+	t.Helper()
+	dir := filepath.Join(plugins, "moca-sandbox")
+	if withSlot {
+		if code, _, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 0 {
+			t.Fatal(e)
+		}
+		if err := os.Remove(filepath.Join(dir, scriptRecord)); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	e, err := findCatalogEntry("moca-sandbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(dir, 0o700)
+	for n, b := range e.Files {
+		os.WriteFile(filepath.Join(dir, n), b, 0o700)
+	}
+	return dir
+}
+
+// remove takes out a hand-copied folder as install would have written it, with
+// or without its slot, and still refuses one holding a file of the user's.
+func TestScript_RemoveTakesOutAHandCopiedFolder(t *testing.T) {
+	for _, withSlot := range []bool{true, false} {
+		t.Run(map[bool]string{true: "with its slot", false: "without its slot"}[withSlot], func(t *testing.T) {
+			cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
+			before := readConfig(t, cfg)
+			dir := handCopy(t, cfg, plugins, withSlot)
+			code, out, errOut := runScriptCmd(t, "remove", "moca-sandbox", "--config", cfg)
+			if code != 0 || !strings.Contains(out, "Removed moca-sandbox") {
+				t.Fatalf("exit %d: %s%s", code, out, errOut)
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Errorf("folder left: %v", err)
+			}
+			if got := readConfig(t, cfg); got != before {
+				t.Errorf("config after remove differs from before:\n%s", got)
+			}
+		})
+	}
+	t.Run("plus a file of the user's", func(t *testing.T) {
+		cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
+		dir := handCopy(t, cfg, plugins, true)
+		os.WriteFile(filepath.Join(dir, "20-mine.py"), []byte("#!/bin/sh\n"), 0o700)
+		if code, _, errOut := runScriptCmd(t, "remove", "moca-sandbox", "--config", cfg); code != 1 || !strings.Contains(errOut, "20-mine.py") {
+			t.Fatalf("exit %d: %s", code, errOut)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "moca-sandbox.py")); err != nil {
+			t.Errorf("a file was removed although remove refused: %v", err)
+		}
+	})
+}
+
+// install over a hand-copied folder that already has its slot records it, so a
+// later release that changes a script finds the folder outdated, which install
+// updates, rather than modified, which it refuses.
+func TestScript_InstallRecordsAHandCopiedFolderWithItsSlot(t *testing.T) {
+	cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
+	dir := handCopy(t, cfg, plugins, true)
+	code, out, errOut := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg)
+	if code != 0 || !strings.Contains(out, "already installed") {
+		t.Fatalf("exit %d: %s%s", code, out, errOut)
+	}
+	if _, ok := readRecord(dir); !ok {
+		t.Fatal("install left the folder without a record")
+	}
+	e, err := findCatalogEntry("moca-sandbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := e
+	later.Files = map[string][]byte{}
+	for n, b := range e.Files {
+		later.Files[n] = append(append([]byte{}, b...), "\n# a later release\n"...)
+	}
+	tgt, err := loadScriptTarget(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := stateOf(tgt, later); st != stateOutdated {
+		t.Fatalf("a later release sees the adopted folder as %s, want outdated", st)
+	}
+}
+
 // An empty folder with no record — what Cortex's reloader creates for a slot it
 // watches — counts as no folder at all.
 func TestScript_AnEmptyFolderIsNoFolder(t *testing.T) {
