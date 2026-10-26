@@ -256,6 +256,44 @@ func TestScript_StatesFromTheFiles(t *testing.T) {
 	}
 }
 
+// An edited copy is modified whether or not its slot is there, so install leaves
+// the edit alone. Files matching their record with the slot gone stay incomplete.
+func TestScript_AnEditWithoutItsSlotIsModified(t *testing.T) {
+	cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
+	if code, _, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 0 {
+		t.Fatal(e)
+	}
+	slotless := strings.Replace(readConfig(t, cfg), "      - name: script\n        config:\n          dir: moca-sandbox\n          fail_closed: true\n", "", 1)
+	os.WriteFile(cfg, []byte(slotless), 0o600)
+	dir := filepath.Join(plugins, "moca-sandbox")
+	script := filepath.Join(dir, "moca-sandbox.py")
+
+	// An earlier release's copy, unedited: incomplete.
+	old := []byte("#!/usr/bin/env python3\n# an earlier release\n")
+	os.WriteFile(script, old, 0o700)
+	b, _ := json.Marshal(installRecord{Version: "v0.0.1", Files: map[string]string{"moca-sandbox.py": sum(old)}})
+	os.WriteFile(filepath.Join(dir, scriptRecord), b, 0o600)
+	if st := listJSON(t, cfg)["moca-sandbox"]; st.State != stateIncomplete {
+		t.Fatalf("outdated copy without its slot: state = %s, want incomplete", st.State)
+	}
+
+	// The same copy edited: modified, and install refuses it.
+	edited := append(append([]byte{}, old...), "# my change\n"...)
+	os.WriteFile(script, edited, 0o700)
+	if st := listJSON(t, cfg)["moca-sandbox"]; st.State != stateModified {
+		t.Fatalf("edited copy without its slot: state = %s, want modified", st.State)
+	}
+	if code, _, e := runScriptCmd(t, "install", "moca-sandbox", "--config", cfg); code != 1 || !strings.Contains(e, "remove moca-sandbox") {
+		t.Fatalf("install over an edit: %d %s", code, e)
+	}
+	if got, _ := os.ReadFile(script); !bytes.Equal(got, edited) {
+		t.Errorf("install replaced the edit:\n%s", got)
+	}
+	if readConfig(t, cfg) != slotless {
+		t.Error("install added the slot although it refused")
+	}
+}
+
 func TestScript_RemoveTakesBackWhatInstallAdded(t *testing.T) {
 	cfg, plugins := scriptEnv(t, closedAddr(t), closedAddr(t))
 	before := readConfig(t, cfg)

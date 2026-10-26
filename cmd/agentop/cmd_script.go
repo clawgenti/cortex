@@ -253,8 +253,6 @@ func stateOf(t scriptTarget, e catalog.CatalogEntry) scriptState {
 		return stateNotInstalled
 	case !ok:
 		return stateModified
-	case !folder || !slot:
-		return stateIncomplete
 	}
 	current := len(rec.Files) == len(e.Files)
 	for name, want := range rec.Files {
@@ -265,6 +263,9 @@ func stateOf(t scriptTarget, e catalog.CatalogEntry) scriptState {
 		if src, ok := e.Files[name]; !ok || sum(src) != want {
 			current = false
 		}
+	}
+	if !folder || !slot {
+		return stateIncomplete
 	}
 	if current {
 		return stateInstalled
