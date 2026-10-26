@@ -120,7 +120,7 @@ Full reference: [`jwt-validation-plugin.md`](jwt-validation-plugin.md).
 Emits two facts-only OpenTelemetry spans per HTTP exchange — a request
 span on sight and a response span at stream end, paired by
 `lineage.exchange.id` — carrying direction, protocol, endpoints, outcome
-and, optionally, the parsed payload. Cross-pod parenting rides one
+and, optionally, the payload (parsed, or the raw body of a plain HTTP exchange). Cross-pod parenting rides one
 `tracestate` member, `lineage-parent`; a request that arrives with no
 valid `traceparent` is forwarded with one naming the request span, and a
 valid one is never modified. The wire format is
