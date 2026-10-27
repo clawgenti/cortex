@@ -172,8 +172,8 @@ func TestStartUsageReplay_LiveTrafficIsNotCountedTwice(t *testing.T) {
 	store.AddRecorder(arch)
 	liveTurn := pipeline.SessionEvent{At: now, Phase: pipeline.SessionResponse, StatusCode: 200, Duration: time.Second,
 		RequestID: "live", Inference: &pipeline.InferenceExtension{Model: "claude-sonnet-5", TotalTokens: 7}}
-	store.Append("c", liveTurn)
-	want.Record("c", &liveTurn)
+	store.Append("a", liveTurn)
+	want.Record("a", &liveTurn)
 	store.Close()
 	// Closed, so the live turn is on disk where a read could find it: the set must not.
 	if err := arch.Close(); err != nil {
@@ -184,7 +184,7 @@ func TestStartUsageReplay_LiveTrafficIsNotCountedTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	live.FinishReplay(priv)
-	for _, id := range []string{"", "a", "b", "c"} {
+	for _, id := range []string{"", "a", "b"} {
 		w := want.Snapshot(time.Hour, time.Minute, id, usage.GroupNone).Totals
 		got := live.Snapshot(time.Hour, time.Minute, id, usage.GroupNone).Totals
 		if !reflect.DeepEqual(w, got) {

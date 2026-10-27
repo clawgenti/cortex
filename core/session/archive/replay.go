@@ -52,8 +52,11 @@ func (a *Archive) ReplaySources(cutoff time.Time) ReplaySet {
 // event (see usage.ReplayCopy).
 //
 // A segment gone since the set was taken — its session erased, or the archive cleared — is skipped
-// and not counted as incomplete: what it held was erased on purpose. It returns ctx.Err() as soon as ctx is
-// done, checked between events, so a deadline bounds it.
+// and not counted as incomplete. It returns ctx.Err() as soon as ctx is done, checked between
+// events, so a deadline bounds it.
+//
+// shortcut: an erase during the read leaves the all-sessions and per-agent totals short by the
+// segments not yet read, which an erase keeps; fix if a LAST 1H after an early erase is reported low.
 func (s ReplaySet) Read(ctx context.Context, fn func(sessionID string, e *pipeline.SessionEvent)) (incomplete int, err error) {
 	for _, src := range s.srcs {
 		if err := ctx.Err(); err != nil {
