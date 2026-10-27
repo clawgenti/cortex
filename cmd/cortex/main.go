@@ -738,8 +738,8 @@ func main() {
 		sessArchive = openSessionArchive(cfg, *configPath, sessions)
 		if sessArchive != nil {
 			history.open(sessArchive)
-			// Before any listener starts: see replayUsage for why that is the whole design.
-			replayUsageAtStartup(sessArchive, usageAgg)
+			// Started before any listener, finished beside them: see replayUsage.
+			startUsageReplay(sessArchive, usageAgg)
 		}
 
 		// Through lim.LogAttrs, not a hand-rolled attribute list. #999 gave the session
