@@ -190,7 +190,7 @@ func (m *model) timelineKey(key string) (tea.Cmd, bool) {
 	t := &m.timeline
 	switch key {
 	case "w":
-		now := m.clock()
+		_, _, now, _ := m.timelineRange() // the now the pane draws with, so w offers its tabs
 		offered := offeredWindows(t.sessionSpan(now))
 		if t.tl == nil || len(offered) == 1 {
 			return nil, true // only "all": nothing to change, and a saved choice is kept

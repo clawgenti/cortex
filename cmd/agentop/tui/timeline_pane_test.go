@@ -854,6 +854,14 @@ func TestTimelineOpenSpans_EndAtTheLastEventOnceTheSessionStopped(t *testing.T) 
 		t.Errorf("\"all\" runs to %v, past the session's last event", lay.to)
 	}
 
+	// w measures the session as the pane draws it: the open Bash does not stretch it to the
+	// clock, so from 5m the next window is all, as the tab row offers.
+	m.timeline.windowIdx = 0
+	m.handleKey(keyRune('w'))
+	if got := timelineWindows[m.timeline.windowIdx].label; got != "all" {
+		t.Errorf("w on an ended session with an open call chose %q, want all", got)
+	}
+
 	live := tlAt(1215).Add(5 * time.Minute)
 	m.now = func() time.Time { return live }
 	m.timeline.layoutKey = tlLayoutKey{}
