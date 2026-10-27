@@ -105,6 +105,10 @@ func renderUnitFor(goos string, p servicePaths) string {
 		// therefore has to land first, and the proxy closes rather than drains so it
 		// is gone long before either. A supervisor that waited 20s made every restart
 		// with a request in flight crash-loop its replacement on the bind.
+		//
+		// No ProcessType: Background confines the job to the efficiency cores, and every
+		// request an agent sends waits on this process. Decoding one 16MB archive segment
+		// took 1.0s at normal priority and 3.9-4.1s under `taskpolicy -b`.
 		return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -125,7 +129,6 @@ func renderUnitFor(goos string, p servicePaths) string {
   <key>AgentopVersion</key><string>` + xmlStr(version) + `</string>
   <key>StandardOutPath</key><string>` + xmlStr(p.logFile) + `</string>
   <key>StandardErrorPath</key><string>` + xmlStr(p.logFile) + `</string>
-  <key>ProcessType</key><string>Background</string>
   <key>ExitTimeOut</key><integer>5</integer>
 </dict>
 </plist>

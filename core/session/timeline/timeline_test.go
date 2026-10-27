@@ -597,3 +597,65 @@ func TestRepeatedIdenticalHandBackIsTwoReturns(t *testing.T) {
 		t.Errorf("returns = %+v, want 2", got)
 	}
 }
+
+// A 200 that ends with no finish reason is a stream cut mid-reply, and a refusal is a call that
+// failed; neither reads as a clean reply.
+func TestReplyWithoutAFinishIsAnError(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "")
+	r.turn("", 2, 1, h, nil, "refusal")
+	r.turn("", 4, 1, h, nil, "end_turn")
+	tl := Build("s", r.events, time.Time{})
+	if !tl.Turns[0].Error || !tl.Turns[1].Error || tl.Turns[2].Error {
+		t.Errorf("errors = %v %v %v, want the cut stream and the refusal only", tl.Turns[0].Error, tl.Turns[1].Error, tl.Turns[2].Error)
+	}
+}
+
+// A call that sends its predecessor's conversation unchanged is a retry; one that adds a message
+// is not, nor is an agent's first call.
+func TestResentMarksARetry(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "")
+	r.turn("", 5, 1, h, nil, "tool_use")
+	h2 := append(slices.Clone(h), user("next"))
+	r.turn("", 9, 1, h2, nil, "end_turn")
+	// A compaction sends fewer messages than the call before, all of them a prefix of it.
+	r.turn("", 12, 1, h, nil, "end_turn")
+	tl := Build("s", r.events, time.Time{})
+	if tl.Turns[0].Resent || !tl.Turns[1].Resent || tl.Turns[2].Resent || tl.Turns[3].Resent {
+		t.Errorf("resent = %v %v %v %v, want the second only", tl.Turns[0].Resent, tl.Turns[1].Resent, tl.Turns[2].Resent, tl.Turns[3].Resent)
+	}
+}
+
+// A background shell job runs from the result acknowledging it to the notification naming it.
+func TestBackgroundJobRunsUntilItsNotification(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t1", Name: "Bash"})
+	r.turn("", 2, 1, h, []pipeline.InferenceToolResult{result("t1", "Command running in background with ID: bk42. Output is being written to: /tmp/x")}, "end_turn")
+	// The id quoted by the agent itself is not a delivery; the notification is.
+	h2 := append(h, pipeline.InferenceMessage{Role: "assistant", Content: "<task-notification><task-id>bk42</task-id>"})
+	r.turn("", 30, 1, h2, nil, "end_turn")
+	r.turn("", 60, 1, append(h2, pipeline.InferenceMessage{Role: "user", Content: "<task-notification>\n<task-id>bk42</task-id>\n<status>completed</status>"}), nil, "end_turn")
+	tl := Build("s", r.events, time.Time{})
+	if len(tl.Jobs) != 1 || tl.Jobs[0].ID != "bk42" || !tl.Jobs[0].Start.Equal(at(2)) || tl.Jobs[0].End == nil || !tl.Jobs[0].End.Equal(at(60)) {
+		t.Fatalf("jobs = %+v, want bk42 from 2s to 60s", tl.Jobs)
+	}
+}
+
+// Aging an unanswered request is the one clock-dependent step, so a cached timeline can run it
+// again later and get what a fresh Build would.
+func TestLoseUnansweredMatchesAFreshBuild(t *testing.T) {
+	var r rec
+	r.add(pipeline.SessionEvent{At: at(0), Phase: pipeline.SessionRequest, RequestID: "h", Host: "slow.example"})
+	cached := Build("s", r.events, at(30))
+	if cached.Hosts[0].Lost {
+		t.Fatal("lost after 30s; want in flight")
+	}
+	cached.LoseUnanswered(at(3600))
+	if fresh := Build("s", r.events, at(3600)); cached.Hosts[0].Lost != fresh.Hosts[0].Lost || !cached.Hosts[0].Lost {
+		t.Errorf("aged cached = %+v, fresh = %+v, want both lost", cached.Hosts[0], fresh.Hosts[0])
+	}
+}

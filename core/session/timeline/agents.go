@@ -25,6 +25,9 @@ var (
 	agentMessageRe = regexp.MustCompile(`<agent-message from="([A-Za-z0-9_-]+)"`)
 	taskIDRe       = regexp.MustCompile(`<task-notification>\s*<task-id>([A-Za-z0-9_-]+)</task-id>`)
 	spawnedIDRe    = regexp.MustCompile(`agentId: ([A-Za-z0-9_-]+)`)
+	// backgroundRe is Claude Code's result for a shell command it started in the background;
+	// the command's <task-notification> later names the same id.
+	backgroundRe = regexp.MustCompile(`Command running in background with ID: ([A-Za-z0-9_-]+)`)
 )
 
 // previewMax bounds a tool's preview: enough to tell two Bash calls apart in a one-line strip.
@@ -73,6 +76,7 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 		prev  []pipeline.InferenceMessage
 	}
 	agents := map[string]*agentState{}
+	jobs := map[string]int{} // background job id → index in t.Jobs
 	var order []string
 	ends := map[string]map[string]*pipeline.InferenceToolResult{} // agent → tool id → first result
 	endAt := map[string]map[string]time.Time{}
@@ -83,8 +87,8 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 
 	for _, c := range calls {
 		inf := c.req.Inference
-		st, ok := agents[c.agent]
-		if !ok {
+		st, known := agents[c.agent]
+		if !known {
 			st = &agentState{first: c.req.At}
 			agents[c.agent] = st
 			order = append(order, c.agent)
@@ -101,6 +105,12 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 				if agentTools[r.ToolUseID] {
 					results[r.ToolUseID] = r.Content
 				}
+				if m := backgroundRe.FindStringSubmatch(r.Content); m != nil {
+					if _, dup := jobs[m[1]]; !dup {
+						jobs[m[1]] = len(t.Jobs)
+						t.Jobs = append(t.Jobs, Job{Agent: c.agent, ID: m[1], Start: c.req.At, Seq: c.req.Seq})
+					}
+				}
 			}
 		}
 
@@ -112,6 +122,8 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 		// request's history differs from the last one's and every scan would be a full one.
 		msgs := inf.Messages
 		k := commonPrefix(st.prev, msgs)
+		// A call that sends its predecessor's conversation unchanged added nothing: a retry.
+		resent := known && len(msgs) > 0 && k == len(msgs) && k == len(st.prev) && c.agent != UnseparatedAgent
 		if c.agent == UnseparatedAgent {
 			k = len(msgs)
 		}
@@ -133,22 +145,30 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 					}
 					seenReturn[key] = true
 					t.Returns = append(t.Returns, Return{Agent: from, Into: c.agent, At: c.req.At, Seq: c.req.Seq})
+					// A background job ends at the first notification naming it.
+					if j, ok := jobs[from]; ok && t.Jobs[j].End == nil {
+						at := c.req.At
+						t.Jobs[j].End = &at
+					}
 				}
 			}
 		}
 		st.prev = msgs
 
-		turn := Turn{Agent: c.agent, Start: c.req.At, Seq: c.req.Seq}
+		turn := Turn{Agent: c.agent, Start: c.req.At, Resent: resent, Seq: c.req.Seq}
 		if c.resp == nil {
 			t.Turns = append(t.Turns, turn)
 			continue
 		}
 		end := responseEnd(c.req, c.resp)
 		turn.End = &end
-		turn.Error = c.resp.Phase == pipeline.SessionDenied || c.resp.Error != nil || c.resp.StatusCode >= 400
 		if c.resp.Inference != nil {
 			turn.Finish = c.resp.Inference.FinishReason
 		}
+		// No finish reason is a reply that never finished: the proxy records a stream cut
+		// mid-reply as the 200 it started as. A refusal is a call that failed too.
+		turn.Error = c.resp.Phase == pipeline.SessionDenied || c.resp.Error != nil || c.resp.StatusCode >= 400 ||
+			turn.Finish == "" || turn.Finish == "refusal"
 		t.Turns = append(t.Turns, turn)
 		if c.resp.Inference == nil {
 			continue
