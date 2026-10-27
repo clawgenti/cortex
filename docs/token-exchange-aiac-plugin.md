@@ -107,7 +107,8 @@ pipeline:
 | `client_id` / `client_id_file` | `/shared/client-id.txt` | This workload's client ID. The inline value wins. |
 | `client_secret` / `client_secret_file` | `/shared/client-secret.txt` | This workload's client secret. The inline value wins. |
 | `audience_template` | `{service}` | Audience requested for a destination. Placeholders: `{service}`, `{namespace}`. Must contain `{service}`. |
-| `namespace` | — | Namespace assumed for short names, for templates that use `{namespace}`. Usually `${POD_NAMESPACE}`. Without it, short names pass through with `skip / namespace_unknown`. |
+| `namespace` | — | Namespace assumed for short names, for templates that use `{namespace}`. Without it (or `namespace_file`), short names pass through with `skip / namespace_unknown`. |
+| `namespace_file` | — | Read once at start when `namespace` is empty. Meant for `/var/run/secrets/kubernetes.io/serviceaccount/namespace`, which the kubelet projects from the pod's own metadata, so it is right in every copy of a config shared across namespaces. An absent or blank file, or one that is not a DNS label, refuses at start. |
 | `cluster_domain` | `cluster.local` | Cluster DNS domain, for recognising FQDNs. |
 | `no_token_policy` | `deny` | The request carries no bearer token: `deny` answers 401, `allow` forwards it unchanged, `client-credentials` exchanges the workload's own token (see below). The same values and default as `token-exchange`. |
 | `unknown_audience_ttl` | `5m` | How long a destination Keycloak doesn't know is passed through without asking again. `0` asks on every request. |
@@ -132,7 +133,8 @@ target's own sidecar validates as `aud`.
   `github-tool`): use the default, `{service}`.
 - **Operator-registered workloads**, whose client ID is a SPIFFE ID:
   `spiffe://<trust-domain>/ns/{namespace}/sa/{service}`, with
-  `namespace: ${POD_NAMESPACE}` for short names.
+  `namespace_file: /var/run/secrets/kubernetes.io/serviceaccount/namespace`
+  for short names.
 
 The SPIFFE form only works where the **service account has the same name as the
 Service**. The Host header carries the Service name, never the service account.

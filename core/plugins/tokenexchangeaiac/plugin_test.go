@@ -690,6 +690,48 @@ func TestConfigure(t *testing.T) {
 	}
 }
 
+func TestNamespaceFile(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := dir + "/" + name
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	base := `"token_url":"http://kc","client_id":"a","client_secret":"b","audience_template":"spiffe://td/ns/{namespace}/sa/{service}"`
+
+	p := New()
+	cfg := fmt.Sprintf(`{%s,"namespace_file":%q}`, base, write("ns", "team2\n"))
+	if err := p.Configure(json.RawMessage(cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if got, why := p.targets.resolve("github-tool:9090"); why != "" || got.audience != "spiffe://td/ns/team2/sa/github-tool" {
+		t.Errorf("short name with namespace_file: %+v %q, want the team2 audience", got, why)
+	}
+
+	// An inline namespace wins, and the file is then not read at all.
+	p = New()
+	cfg = fmt.Sprintf(`{%s,"namespace":"team1","namespace_file":%q}`, base, dir+"/absent")
+	if err := p.Configure(json.RawMessage(cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if p.cfg.Namespace != "team1" {
+		t.Errorf("namespace = %q, want the inline team1", p.cfg.Namespace)
+	}
+
+	for name, path := range map[string]string{
+		"absent":    dir + "/absent",
+		"blank":     write("blank", "\n"),
+		"not label": write("bad", "Team_1"),
+	} {
+		cfg := fmt.Sprintf(`{%s,"namespace_file":%q}`, base, path)
+		if err := New().Configure(json.RawMessage(cfg)); err == nil {
+			t.Errorf("%s: Configure accepted namespace_file %s", name, path)
+		}
+	}
+}
+
 func TestUnconfiguredDenies(t *testing.T) {
 	a := New().OnRequest(context.Background(), outbound("github-tool", "Bearer x"))
 	if a.Type != pipeline.Reject {

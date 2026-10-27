@@ -66,7 +66,15 @@ type tokenExchangeAIACConfig struct {
 	// AudienceTemplate maps a destination to the audience requested for it.
 	AudienceTemplate string `json:"audience_template" description:"Audience requested for a destination. Placeholders: {service}, {namespace}." default:"{service}"`
 	ClusterDomain    string `json:"cluster_domain" description:"Cluster DNS domain; hosts ending in .svc.<cluster_domain> are in-cluster." default:"cluster.local"`
-	Namespace        string `json:"namespace" description:"Namespace assumed for short service names, for templates that use {namespace}. Typically ${POD_NAMESPACE}."`
+	Namespace        string `json:"namespace" description:"Namespace assumed for short service names, for templates that use {namespace}. Alternatively namespace_file."`
+	// NamespaceFile is read once, in Configure, when Namespace is empty. It is
+	// meant for /var/run/secrets/kubernetes.io/serviceaccount/namespace, which
+	// the kubelet projects from the pod's own metadata: the one source that is
+	// right in every copy of a config shared across namespaces (the platform
+	// renders one authbridge-runtime-config into each agent namespace), where
+	// an inline namespace is wrong in all but one. No default and no poller,
+	// as for lineage-telemetry's key of the same name.
+	NamespaceFile string `json:"namespace_file" description:"Read when namespace is empty, once at start (e.g. /var/run/secrets/kubernetes.io/serviceaccount/namespace); absent, blank or not a DNS label refuses at start."`
 
 	NoTokenPolicy      string `json:"no_token_policy" description:"Outbound request with no bearer: exchange the workload's own client-credentials token, allow it through unchanged, or deny." default:"deny" enum:"client-credentials,allow,deny"`
 	UnknownAudienceTTL string `json:"unknown_audience_ttl" description:"How long an audience the IdP does not know is passed through without asking again. 0 asks every time." default:"5m"`
@@ -179,6 +187,16 @@ func (p *TokenExchangeAIAC) Configure(raw json.RawMessage) error {
 	s, err := c.validate()
 	if err != nil {
 		return fmt.Errorf("%s config: %w", PluginName, err)
+	}
+	if c.Namespace == "" && c.NamespaceFile != "" {
+		ns, err := config.ReadCredentialFile(c.NamespaceFile)
+		if err != nil {
+			return fmt.Errorf("%s config: namespace_file %q: %w", PluginName, c.NamespaceFile, err)
+		}
+		if !validLabel(ns) {
+			return fmt.Errorf("%s config: namespace_file %q: %q is not a DNS label", PluginName, c.NamespaceFile, ns)
+		}
+		c.Namespace = ns
 	}
 	targets, err := newTargetResolver(c.AudienceTemplate, c.ClusterDomain, c.Namespace)
 	if err != nil {
