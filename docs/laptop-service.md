@@ -37,6 +37,49 @@ agents added mid-session — verified across `KeepAlive`, `StartInterval` and
 `RunAtLoad` — so the supervisor is what makes crash recovery work. On Linux there is
 one process; systemd handles it.
 
+## Linux: staying up after you log out
+
+On Linux, Cortex is a systemd **user** unit, which runs under your own systemd
+manager. That manager normally starts at login and stops when your last session ends,
+taking Cortex with it. **Lingering** keeps it running with nobody logged in, and
+starts it at boot. Setup turns it on for you, which on a headless or SSH-only box is
+what keeps Cortex up between logins.
+
+Turning lingering on for yourself needs **polkit**. logind asks polkit whether you
+may, and systemd's own policy says yes, with no password. But that policy is applied
+by `polkitd`, a separate package, and a minimal install can lack it — Debian with
+only the SSH server, for one. Without it logind has no one to ask and refuses, and
+setup says so:
+
+```text
+loaded, but lingering could not be turned on: Cortex will stop when you log out.
+  loginctl enable-linger: Could not enable linger: Access denied
+  polkit is not installed, and logind needs it to let a user turn lingering on.
+```
+
+Cortex is still installed and running; it just stops at your next logout. Either fix
+works, and neither needs Cortex reinstalled:
+
+```sh
+# Install polkit, then turn lingering on for yourself
+sudo apt install polkitd
+loginctl enable-linger
+
+# Or turn it on directly, as root
+sudo loginctl enable-linger "$USER"
+```
+
+Re-running `agentop setup` after installing polkit is not enough: setup finds Cortex
+installed and healthy, changes nothing, and does not retry lingering.
+
+When polkit *is* installed and still refuses, the system's policy has decided users may
+not keep services running, and setup says that instead; only the root fix applies.
+Check where you stand with `loginctl show-user "$USER" --property=Linger`.
+
+Setup records that it turned lingering on, and `agentop uninstall` turns it back off
+only then. Lingering you turned on yourself, by either fix above, is left on when you
+uninstall: turn it off with `loginctl disable-linger` if you no longer want it.
+
 ## Re-running the installer is safe
 
 The one-liner is how you upgrade, so it is meant to be run repeatedly. When nothing has

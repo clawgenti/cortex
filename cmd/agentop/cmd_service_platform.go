@@ -246,7 +246,7 @@ func loadService(goos string, p servicePaths, progress io.Writer) error {
 		return fmt.Errorf("systemctl --user restart %s: %v: %s", systemdUnit, err, strings.TrimSpace(string(out)))
 	}
 	// Without lingering, a user unit stops at logout — which defeats the point on a
-	// headless or SSH-only box. Best-effort: it needs polkit on some systems.
+	// headless or SSH-only box. Best-effort: an unprivileged user needs polkit for it.
 	//
 	// uid, not $USER: a supervisor environment may not set USER at all, and the uid is
 	// already what every other call here uses. loginctl accepts either.
@@ -257,21 +257,91 @@ func loadService(goos string, p servicePaths, progress io.Writer) error {
 	// Cortex.
 	uid := strconv.Itoa(os.Getuid())
 	if !lingerEnabled(uid) {
-		if err := exec.Command("loginctl", "enable-linger", uid).Run(); err != nil {
+		if out, err := exec.Command("loginctl", "enable-linger", uid).CombinedOutput(); err != nil {
 			// Not fatal — the unit is loaded and serving — but it does mean the service
-			// stops at logout, so it must not be reported as surviving one. polkit
-			// refuses this on some systems.
-			return errLingerUnavailable
+			// stops at logout, so it must not be reported as surviving one.
+			return lingerFailure(strings.TrimSpace(string(out)), polkitPresent())
 		}
 		_ = os.WriteFile(lingerMarker(p), []byte("enabled by agentop\n"), 0o600) //nolint:errcheck
 	}
 	return nil
 }
 
-// errLingerUnavailable means the unit loaded but will not outlive a logout.
+// errLingerUnavailable means the unit loaded but will not outlive a logout. It is
+// what every linger failure wraps, so callers test for it with errors.Is; the
+// wrapping message is what names the cause.
 var errLingerUnavailable = errors.New(
-	"loaded, but `loginctl enable-linger` failed: the service will stop when you log out. " +
-		"Ask an administrator to run: loginctl enable-linger $USER")
+	"loaded, but lingering could not be turned on: Cortex will stop when you log out")
+
+// lingerFailure explains why `loginctl enable-linger` failed and what fixes it.
+//
+// An unprivileged user cannot turn lingering on alone. logind asks polkit whether
+// org.freedesktop.login1.set-self-linger is allowed, and systemd's policy for it
+// allows anyone, without a password. That policy is read only by polkitd, though,
+// which ships in a package of its own that systemd merely suggests. Without it
+// there is no one to ask, and logind's fallback for this action is to deny, so
+// loginctl prints "Access denied". A minimal Debian install with only the SSH
+// server is that case, so the headless box lingering exists for is where it fails.
+//
+// The two causes need different fixes, so it matters which one this is. With
+// polkitd absent, installing it lets this user turn lingering on by themselves.
+// With it present, the refusal is a local policy decision, and only an
+// administrator can override it. Root never asks polkit, so `sudo loginctl
+// enable-linger` works in either case.
+//
+// The advice runs loginctl directly rather than re-running setup. Lingering is
+// only attempted while loading the unit, and a re-run that finds Cortex installed
+// and healthy loads nothing, so after the polkit install it would change nothing
+// and say all is well.
+//
+// detail is loginctl's own output; present is polkitPresent's answer, false when
+// that could not be determined, so the advice for that case also names the root
+// fix, which works either way.
+func lingerFailure(detail string, present bool) error {
+	if detail == "" {
+		detail = "no reason given"
+	}
+	user := os.Getenv("USER")
+	if user == "" {
+		user = strconv.Itoa(os.Getuid())
+	}
+	if present {
+		return fmt.Errorf("%w.\n"+
+			"  loginctl enable-linger: %s\n"+
+			"  polkit refused it, so this system's policy does not let users keep their own\n"+
+			"  services running. An administrator can turn it on for you:\n"+
+			"    sudo loginctl enable-linger %s",
+			errLingerUnavailable, detail, user)
+	}
+	return fmt.Errorf("%w.\n"+
+		"  loginctl enable-linger: %s\n"+
+		"  polkit is not installed, and logind needs it to let a user turn lingering on.\n"+
+		"  Install it, then turn lingering on (the package is polkitd on Debian and Ubuntu):\n"+
+		"    sudo apt install polkitd\n"+
+		"    loginctl enable-linger\n"+
+		"  or have an administrator turn it on for you:\n"+
+		"    sudo loginctl enable-linger %s",
+		errLingerUnavailable, detail, user)
+}
+
+// polkitPresent reports whether polkitd can answer logind on the system bus:
+// running, or installed so D-Bus starts it on first use. `busctl list` shows both
+// kinds of name, so one call covers them. busctl ships with systemd itself, so it
+// is there wherever loginctl is. An answer that cannot be read counts as present,
+// which leaves the advice pointing at an administrator rather than claiming
+// polkit is missing.
+func polkitPresent() bool {
+	out, err := exec.Command("busctl", "--system", "--no-legend", "--no-pager", "list").Output()
+	if err != nil {
+		return true
+	}
+	for _, l := range strings.Split(string(out), "\n") {
+		if f := strings.Fields(l); len(f) > 0 && f[0] == "org.freedesktop.PolicyKit1" {
+			return true
+		}
+	}
+	return false
+}
 
 // lingerMarker records that we enabled lingering, so uninstall undoes only that.
 func lingerMarker(p servicePaths) string {
