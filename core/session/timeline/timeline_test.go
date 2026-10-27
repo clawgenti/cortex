@@ -305,6 +305,54 @@ func TestHostsPairByRequestAndFoldBridgedOpens(t *testing.T) {
 	}
 }
 
+// The forward proxy records a bridged CONNECT's open together with the tunnel's first row,
+// whichever that is: a decrypted request, one a plugin redirected (Host is the target and
+// RequestedHost the CONNECT's host), or a denial. Each folds the open away. A row naming
+// another host does not.
+func TestBridgedOpenFoldsIntoTheRowRecordedWithIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		next   []pipeline.SessionEvent
+		hosts  int
+		tunnel bool
+	}{
+		{"decrypted request", []pipeline.SessionEvent{
+			{At: at(1), Phase: pipeline.SessionRequest, RequestID: "h", Host: "api.example.com"},
+			{At: at(2), Phase: pipeline.SessionResponse, RequestID: "h", Host: "api.example.com", StatusCode: 200},
+		}, 1, false},
+		{"redirected request", []pipeline.SessionEvent{
+			{At: at(1), Phase: pipeline.SessionRequest, RequestID: "h", Host: "gateway.example", RequestedHost: "api.example.com"},
+			{At: at(2), Phase: pipeline.SessionResponse, RequestID: "h", Host: "gateway.example", RequestedHost: "api.example.com", StatusCode: 200},
+		}, 1, false},
+		{"denial", []pipeline.SessionEvent{
+			{At: at(1), Phase: pipeline.SessionDenied, RequestID: "h", Host: "api.example.com", StatusCode: 403},
+		}, 1, false},
+		{"redirected denial", []pipeline.SessionEvent{
+			{At: at(1), Phase: pipeline.SessionDenied, RequestID: "h", Host: "gateway.example", RequestedHost: "api.example.com", StatusCode: 403},
+		}, 1, false},
+		{"request to another host", []pipeline.SessionEvent{
+			{At: at(1), Phase: pipeline.SessionRequest, RequestID: "h", Host: "other.example"},
+			{At: at(2), Phase: pipeline.SessionResponse, RequestID: "h", Host: "other.example", StatusCode: 200},
+		}, 2, true},
+		{"denial for another host", []pipeline.SessionEvent{
+			{At: at(1), Phase: pipeline.SessionDenied, RequestID: "h", Host: "other.example", StatusCode: 403},
+		}, 2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var r rec
+			r.add(pipeline.SessionEvent{At: at(0), Phase: pipeline.SessionRequest, RequestID: "c", Host: "api.example.com:443", Tunnel: true})
+			for _, e := range tc.next {
+				r.add(e)
+			}
+			hs := Build("s", r.events, time.Time{}).Hosts
+			tunnel := slices.ContainsFunc(hs, func(h Host) bool { return h.Kind == KindTunnel })
+			if len(hs) != tc.hosts || tunnel != tc.tunnel {
+				t.Errorf("hosts = %+v, want %d with tunnel %v", hs, tc.hosts, tc.tunnel)
+			}
+		})
+	}
+}
+
 func TestClipKeepsOverlappingSpansAndEveryAgent(t *testing.T) {
 	var r rec
 	h := []pipeline.InferenceMessage{user("go")}

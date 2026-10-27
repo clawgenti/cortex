@@ -12,13 +12,14 @@ func buildHosts(t *Timeline, events []pipeline.SessionEvent, now time.Time) {
 	open := map[string]int{}
 	// A tunnel open with no reason is either a bridged CONNECT, whose decrypted request is
 	// its own row, or an opaque tunnel the transparent listener records before it knows. Held
-	// until the next event says which: a decrypted request on the same host folds it away.
+	// until the next event says which.
 	pendingOpen := -1
 	settle := func(next *pipeline.SessionEvent) {
 		if pendingOpen < 0 {
 			return
 		}
-		if next != nil && next.Phase == pipeline.SessionRequest && !next.Tunnel && HostKey(next.Host) == t.Hosts[pendingOpen].Host {
+		if next != nil && (next.Phase == pipeline.SessionRequest || next.Phase == pipeline.SessionDenied) && !next.Tunnel &&
+			(HostKey(next.Host) == t.Hosts[pendingOpen].Host || HostKey(next.RequestedHost) == t.Hosts[pendingOpen].Host) {
 			// Bridged: drop the open, and its close if one is recorded later.
 			delete(open, events[t.Hosts[pendingOpen].idx].RequestID)
 			t.Hosts[pendingOpen].Host = ""

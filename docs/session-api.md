@@ -133,9 +133,8 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
   had not sent before.
 
 **Hosts** are every outbound request paired with its response, every opaque
-tunnel, and every denial. `kind` is `llm`, `mcp`, `http` or `tunnel`; a bridged
-CONNECT's open is folded into the decrypted request it carried, and `h:443`
-shares `h`'s row.
+tunnel, and every denial. `kind` is `llm`, `mcp`, `http` or `tunnel`, and
+`h:443` shares `h`'s row.
 
 **`end` absent means still in flight.** A span that never got an answer but
 provably stopped is `lost` and ends where it started: a turn or tool whose agent
