@@ -154,6 +154,8 @@ cortex/
 │   ├── pipeline/                     #   Plugin interface + lifecycle
 │   ├── plugins/                      #   Every plugin; each owns its own config
 │   │   ├── jwtvalidation/            #     JWKS-backed JWT verifier (validation/)
+│   │   ├── script/catalog/           #     Script plugins shipped in agentop;
+│   │   │                             #     `agentop script install <name>`
 │   │   └── tokenexchange/            #     RFC 8693 exchange client + token cache
 │   ├── listener/                     #   All listener implementations (extproc, proxies)
 │   ├── config/                       #   Mode presets, YAML config, validation
@@ -248,7 +250,6 @@ cortex/
 │   ├── session-budget/               #   Redis-backed budget tracking
 │   └── context-guru/                 #   Opt-in context-guru plugin
 │
-├── examples/script-plugins/          # Example script plugins; copied by hand, not installed
 ├── tests/                            # Python tests
 ├── go.work                           # Workspace linking 8 of the 11 Go modules
 ├── .github/

@@ -1,4 +1,4 @@
-"""Tests for examples/script-plugins/moca-sandbox.py."""
+"""Tests for the moca-sandbox catalog entry, core/plugins/script/catalog/entries/moca-sandbox/."""
 
 import importlib.util
 import json
@@ -14,7 +14,7 @@ import yaml
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SDK = REPO / "core" / "plugins" / "script" / "sdk" / "cortex.py"
-SCRIPT = REPO / "examples" / "script-plugins" / "moca-sandbox.py"
+SCRIPT = REPO / "core" / "plugins" / "script" / "catalog" / "entries" / "moca-sandbox" / "moca-sandbox.py"
 GUIDE = REPO / "docs" / "script-plugin.md"
 
 SANDBOX_TOOL = {"name": "mcp__sandbox__bash", "input_schema": {"type": "object"}}
@@ -219,15 +219,16 @@ def test_handshake_enforces_and_rewrites_responses():
     assert hs["hooks"] == ["request", "response"]
 
 
-# The install steps in the guide must match the script: the folder it is copied
-# to is the slot's dir, the slot fails closed, and the MCP server it registers is
-# the one the script keys on.
+# The guide's moca-sandbox section must match the entry: the slot it shows is
+# the one install writes, and the MCP server it registers is the one the script
+# keys on.
 def test_the_guides_install_steps_match_the_script():
-    section = GUIDE.read_text().split("### moca-sandbox.py", 1)[1].split("\n## ", 1)[0]
+    section = GUIDE.read_text().split("### moca-sandbox:", 1)[1].split("\n### ", 1)[0]
     blocks = re.findall(r"```(\w+)\n(.*?)```", section, re.S)
     sh = [textwrap.dedent(b) for lang, b in blocks if lang == "sh"]
     (slot,) = yaml.safe_load(textwrap.dedent(next(b for lang, b in blocks if lang == "yaml")))
-    assert slot == {"name": "script", "config": {"dir": "moca-sandbox", "fail_closed": True}}
-    assert "~/.cortex/plugins/moca-sandbox/" in sh[0] and SCRIPT.name in sh[0] and "chmod +x" in sh[0]
+    entry = yaml.safe_load((SCRIPT.parent / "entry.yaml").read_text())
+    assert slot == {"name": "script", "config": {"dir": SCRIPT.parent.name, "fail_closed": entry["fail_closed"]}}
+    assert sh[0].strip() == "agentop script install " + SCRIPT.parent.name
     server = re.search(r"claude mcp add -s local (\S+) --", sh[1]).group(1)
     assert "mcp__%s__" % server in SCRIPT.read_text()

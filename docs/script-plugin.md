@@ -202,13 +202,32 @@ pipeline:
 | `timeout` | `2s` | How long one script may take to answer one request |
 | `fail_closed` | `false` | Block a request when an enforcing script fails on it, and every request while a script in the slot did not start |
 
-## Examples
+## Bundled scripts
 
-Scripts written for a particular setup live in
-[`examples/script-plugins/`](../examples/script-plugins/). Cortex does not install
-them; copy the ones you want.
+Cortex ships some script plugins. agentop installs one in a single step:
 
-### moca-sandbox.py: keep Claude Code on moca's sandbox tools
+```sh
+agentop script list
+agentop script install moca-sandbox
+agentop script remove moca-sandbox
+```
+
+Each bundled script plugin is a folder with its own settings. Installing it:
+
+- copies the folder to `~/.cortex/plugins/<name>/`;
+- adds a `script` slot for it to `~/.cortex/config.yaml`, with the settings the
+  plugin needs;
+- waits for Cortex to load it, and checks every script in it started. If one did
+  not, it takes back what it added and says why.
+
+No restart is needed. Run `install` again after upgrading Cortex to update an
+outdated copy; one you edited is left alone until you `remove` it.
+
+`list` shows each one's state: `not installed`, `installed`, `outdated`,
+`modified` or `incomplete`, and, with Cortex running, how many of its scripts
+loaded. `list --json` gives the same for another program to read.
+
+### moca-sandbox: keep Claude Code on moca's sandbox tools
 
 [moca](https://github.com/rossoctl/moca) runs an agent's tools in a remote
 sandbox. To keep Claude Code off its local tools, `mocactl sbx up` denies them in
@@ -223,19 +242,15 @@ This script does the deny's job instead, in sessions that carry moca's
   nothing;
 - it replaces the result of a local call that already ran with an error.
 
-Other sessions are untouched.
+Other sessions are untouched. Its slot fails closed.
 
-Install it in a slot of its own, failing closed:
-
-1. Copy the script, from a checkout of this repo:
+1. Install it:
 
    ```sh
-   mkdir -p ~/.cortex/plugins/moca-sandbox
-   cp examples/script-plugins/moca-sandbox.py ~/.cortex/plugins/moca-sandbox/
-   chmod +x ~/.cortex/plugins/moca-sandbox/moca-sandbox.py
+   agentop script install moca-sandbox
    ```
 
-2. Add the slot as the last outbound entry of `~/.cortex/config.yaml`:
+   It adds this slot as the last outbound entry:
 
    ```yaml
          - name: script
@@ -244,26 +259,13 @@ Install it in a slot of its own, failing closed:
              fail_closed: true
    ```
 
-   Cortex reloads it; no restart.
-
-3. In the repo, create the sandbox without the settings file, and register the
+2. In the repo, create the sandbox without the settings file, and register the
    sandbox server for this repo only:
 
    ```sh
    mocactl sbx up --no-agent-config
    claude mcp add -s local sandbox -- mocactl sbx mcp
    ```
-
-Check that it loaded:
-
-```sh
-curl --noproxy '*' -s http://127.0.0.1:47601/v1/pipeline \
-  | jq '.outbound[] | select(.config.dir == "moca-sandbox") | .metrics[:2]'
-```
-
-It should show `scripts loaded` 1 and `scripts not started` 0. agentop's
-plugin pane cannot show it yet: it opens the first `script` slot whichever row
-you pick.
 
 What it costs, and what it does not cover:
 
@@ -285,6 +287,21 @@ What it costs, and what it does not cover:
 - **Approve each sandbox tool once,** or run in auto mode. "Don't ask again" in a
   prompt writes `.claude/settings.local.json` in the repo. Headless runs need
   `--allowedTools 'mcp__sandbox__*'`.
+
+
+### Adding a bundled script
+
+A bundled script plugin is a folder under `core/plugins/script/catalog/entries/`:
+the scripts, any `_`-prefixed helpers, and an `entry.yaml`:
+
+```yaml
+description: One line, shown by agentop script list
+fail_closed: false      # optional; the slot's setting
+timeout: 2s             # optional; the slot's setting
+```
+
+The folder's name is the slot's `dir`. A test in that package checks every
+entry, so adding one is adding the folder.
 
 ## Without the SDK
 
