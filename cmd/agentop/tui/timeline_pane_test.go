@@ -68,7 +68,7 @@ func sampleTimeline() *timeline.Timeline {
 func timelineModel(t *testing.T, w, h int) *model {
 	t.Helper()
 	m := fitModel(t, paneTimeline, w, h, nil)
-	end := tlAt(3600)
+	end := tlAt(7200) // an hour and a half after the last event: ended
 	m.now = func() time.Time { return end }
 	m.timeline = timelineState{session: "sess-1", tl: sampleTimeline(), cursor: -1, fetchedAt: end}
 	m.sessions = []session.SessionSummary{{ID: "sess-1"}}
@@ -511,7 +511,7 @@ func TestTimelineRefresh(t *testing.T) {
 	// Ended: no refetch without events.
 	m = timelineModel(t, 120, 40)
 	m.client = deadClient()
-	m.timeline.fetchedAt = tlAt(3600).Add(-time.Minute)
+	m.timeline.fetchedAt = tlAt(7200).Add(-time.Minute)
 	m.timeline.tickGen = 1
 	m.handleTimelineTick(timelineTickMsg{gen: 1})
 	if m.timeline.loading {
@@ -816,5 +816,35 @@ func TestTimelinePane_FitsShortTerminals(t *testing.T) {
 		m.timeline.windowIdx = 3
 		m.layout()
 		assertFits(t, m, "short timeline")
+	}
+}
+
+// A session that stopped mid-tool, with the tool's result never recorded, does not draw that
+// tool running on to now: once the session is no longer live its open spans end at its last
+// recorded event. While it is live, an open tool grows with the clock.
+func TestTimelineOpenSpans_EndAtTheLastEventOnceTheSessionStopped(t *testing.T) {
+	tl := sampleTimeline()
+	tl.Turns = tl.Turns[:4]                                                                                                    // main's last turn ends at 1200s with end_turn...
+	tl.Tools = append(tl.Tools, timeline.Tool{Agent: timeline.MainAgent, ID: "cut", Name: "Bash", Start: tlAt(1210), Seq: 50}) // ...then a Bash that never answered
+	tl.End = tlAt(1215)
+
+	m := timelineModel(t, 120, 40) // its clock is hours past 1215s
+	m.timeline.tl = tl
+	m.timeline.windowIdx = 3
+	lay, _ := m.timelineLayoutNow()
+	// The sample's own Bash is 90s; the cut-off one may add at most the 5s to the last event.
+	if got := lay.agents[0].toolTime; got > 95*time.Second {
+		t.Errorf("an ended session's cut-off tool brings tool time to %v, want at most 1m35s", got)
+	}
+	if lay.to.After(tlAt(1215).Add(time.Second)) {
+		t.Errorf("\"all\" runs to %v, past the session's last event", lay.to)
+	}
+
+	live := tlAt(1215).Add(5 * time.Minute)
+	m.now = func() time.Time { return live }
+	m.timeline.layoutKey = tlLayoutKey{}
+	lay, _ = m.timelineLayoutNow()
+	if got := lay.agents[0].toolTime; got < 90*time.Second+4*time.Minute {
+		t.Errorf("a live session's running tool brings tool time to %v, want it growing to now", got)
 	}
 }

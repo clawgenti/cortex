@@ -1258,9 +1258,11 @@ agentop is for, and the other four are surfaces you visit and leave.
 
   `w` cycles 5m / 1h / 24h / all, offering only the windows shorter than the
   session, so a short session shows "all" alone; the choice is saved, and a saved
-  window too long for a session shows "all" without being overwritten. A window
-  ends at now for a session still working and at its last activity for one that
-  has stopped. "all" squeezes each idle stretch over 30 minutes into a `┆`, and the
+  window too long for a session shows "all" without being overwritten. A session
+  is live while its last recorded event is under 30 minutes old: its windows
+  follow now, and a call still in flight grows. Once it is not, an open call ends
+  at the session's last event, the last moment anything was seen, and the window
+  ends at its last activity. "all" squeezes each idle stretch over 30 minutes into a `┆`, and the
   axis says how long it was. `←`/`→` pick a moment, skipping those stretches, and
   the line under the chart lists every tool that started then with its duration
   and its command, path or description; `↵` opens the Events pane on that event.

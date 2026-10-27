@@ -34,8 +34,12 @@ const timelineIdleRefresh = 10 * time.Second
 // timelineReadTimeout bounds one fetch.
 const timelineReadTimeout = 5 * time.Second
 
-// timelineIdleEnd is how long after its last activity a session's windows stop following now.
-const timelineIdleEnd = 2 * time.Minute
+// timelineLiveFor is how long after its last recorded event a session still counts as live:
+// its open spans run to now and its windows follow now. Past it, open spans end at the last
+// event, the last moment anything was seen, rather than running on to now. Thirty minutes is
+// past every quiet stretch a working session showed on real data, such as a foreground
+// `sleep 600` poll, which records nothing while it runs.
+const timelineLiveFor = 30 * time.Minute
 
 var errTimelineUnsupported = errors.New("timeline endpoint not available")
 
@@ -173,10 +177,12 @@ func (m *model) handleTimelineTick(msg timelineTickMsg) tea.Cmd {
 	return tea.Batch(fetch, timelineTick(msg.gen))
 }
 
-// timelineLive reports a session still working: its last activity is recent.
+// timelineLive reports a session still working: its last recorded event is recent. Not its
+// last activity, which counts an open span as running until now and so would call every
+// session with one open live for ever.
 func (m *model) timelineLive() bool {
 	t := &m.timeline
-	return t.tl != nil && m.clock().Sub(activityEnd(t.tl, t.fetchedAt)) <= timelineIdleEnd
+	return t.tl != nil && m.clock().Sub(t.tl.End) <= timelineLiveFor
 }
 
 // timelineKey handles the pane's own keys; false leaves the key to the global handlers.
@@ -251,16 +257,17 @@ func (m *model) timelineCells() int {
 	return max(m.width-timelineLabelWidth-timelineGutterWidth, 10)
 }
 
-// timelineRange is the window's [from, to] and the layout's now. A live session's window ends
-// at now; an ended one's at its last activity, so opening yesterday's session does not show an
-// empty five minutes. A zero from means "all".
+// timelineRange is the window's [from, to] and the layout's now. For a live session now is the
+// clock, so open spans grow and the window follows it. For one that is not, now is its last
+// recorded event: an open span ends there, and the window ends at the session's last activity,
+// so opening yesterday's session does not show an empty five minutes. A zero from means "all".
 func (m *model) timelineRange() (from, to, now time.Time, win int) {
 	t := &m.timeline
 	// Rounded to the refresh interval, so the window, and the cached layout built from it,
 	// move once a second rather than on every redraw.
 	now = m.clock().Truncate(timelineRefresh)
-	if !m.timelineLive() && !t.fetchedAt.IsZero() {
-		now = t.fetchedAt
+	if t.tl != nil && !m.timelineLive() {
+		now = t.tl.End
 	}
 	win = t.window(now)
 	w := timelineWindows[win]
@@ -268,8 +275,8 @@ func (m *model) timelineRange() (from, to, now time.Time, win int) {
 		return time.Time{}, time.Time{}, now, win
 	}
 	end := now
-	if last := activityEnd(t.tl, now); now.Sub(last) > timelineIdleEnd {
-		end = last
+	if !m.timelineLive() {
+		end = activityEnd(t.tl, now)
 	}
 	return end.Add(-w.span), end, now, win
 }
