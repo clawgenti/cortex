@@ -122,8 +122,9 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
   progress-label calls and tool-less side calls (titler, classifier) are left
   out. `error` marks a call that failed: an upstream error, a refusal, the
   client giving up, a finish of `content_filter`, `failed` or `cancelled`, or a
-  response that ended with no finish reason, which is a stream cut mid-reply. `resent` marks a call that sent its agent's previous
-  call's conversation again unchanged: a retry.
+  response that ended with no finish reason, which is a stream cut mid-reply.
+  `resent` marks a call that sent its agent's previous call's conversation again
+  unchanged: a retry.
 - A **tool** runs from the response that requested it to the agent's first
   request carrying its result (`inference.toolResults[].toolUseId`). A tool
   Claude Code started while the response was still streaming can have its

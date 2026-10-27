@@ -77,8 +77,8 @@ type Turn struct {
 	Start  time.Time  `json:"start"`
 	End    *time.Time `json:"end,omitempty"`
 	Finish string     `json:"finish,omitempty"`
-	// Error is a call that failed: an upstream error, a refusal, the client giving up, or a
-	// response that ended without a finish reason, which is a stream cut mid-reply.
+	// Error is a call that failed: an upstream error, the client giving up, or a finish in
+	// failedFinish.
 	Error bool `json:"error,omitempty"`
 	Lost  bool `json:"lost,omitempty"`
 	// Resent is a call that sent the agent's previous call's conversation again, unchanged: a

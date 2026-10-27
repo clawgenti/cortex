@@ -114,8 +114,8 @@ func TestTimelineLayout_MainRowSharesEachState(t *testing.T) {
 	}
 }
 
-// A failed call followed by a new message is the user's time, not a retry: a refusal the user
-// answered by rephrasing re-sends nothing.
+// A failed call followed by a new message is not a retry: a refusal the user answered by
+// rephrasing re-sends nothing.
 func TestTimelineLayout_FailedCallThenNewMessageIsNotRetry(t *testing.T) {
 	tl := sampleTimeline()
 	for i := range tl.Turns {
