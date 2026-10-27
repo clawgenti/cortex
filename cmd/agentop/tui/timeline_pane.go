@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rossoctl/cortex/cmd/agentop/apiclient"
 	"github.com/rossoctl/cortex/core/session/timeline"
@@ -131,7 +132,7 @@ func (m *model) fetchTimeline() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), timelineReadTimeout)
 		defer cancel()
-		tl, err := client.GetTimeline(ctx, id, time.Time{}, time.Time{})
+		tl, err := client.GetTimeline(ctx, id)
 		return timelineLoadedMsg{tl: tl, req: req, err: err}
 	}
 }
@@ -658,29 +659,14 @@ func (m *model) hostLine(r tlHostRow, lay tlLayout) string {
 
 func (m *model) cursorAt(c int, s string) string {
 	if c == m.timeline.cursor {
-		g := stripStyles(s)
+		// Unstyled, so the cell's own reset does not undo the cursor's reverse video.
+		g := ansi.Strip(s)
 		if g == " " {
 			g = "│"
 		}
 		return styleTLCursor.Render(g)
 	}
 	return s
-}
-
-// stripStyles drops escape sequences, so the cursor's reverse video is not undone by a cell's
-// own reset.
-func stripStyles(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] == 0x1b {
-			for i < len(s) && s[i] != 'm' {
-				i++
-			}
-			continue
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
 }
 
 // cursorStrip says what happened in the cell under the cursor: every tool that started there,

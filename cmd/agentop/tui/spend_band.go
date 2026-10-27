@@ -264,7 +264,7 @@ func (m *model) spendBandNeedsScopeMarker() bool {
 	case paneEvents, paneDetail:
 		return m.selectedSess != ""
 	case paneTimeline:
-		return m.timeline.session != "" || m.selectedSess != ""
+		return m.timeline.session != ""
 	}
 	return false
 }

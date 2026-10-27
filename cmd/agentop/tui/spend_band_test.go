@@ -1167,8 +1167,8 @@ func TestSpendBandNeedsScopeMarker_EveryPaneIsClassified(t *testing.T) {
 			continue
 		}
 		// A session is selected throughout: that is the state the marker exists for, and the
-		// state every pane is reachable in.
-		m := &model{pane: p, selectedSess: "s1"}
+		// state every pane is reachable in. The Timeline names its own, set when it opens.
+		m := &model{pane: p, selectedSess: "s1", timeline: timelineState{session: "s1"}}
 		if got := m.spendBandNeedsScopeMarker(); got != singleSession[p] {
 			t.Errorf("pane %v: spendBandNeedsScopeMarker() = %v, want %v", p, got, singleSession[p])
 		}

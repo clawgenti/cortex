@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/rossoctl/cortex/core/session/timeline"
@@ -503,12 +504,7 @@ func tlAgentRows(tl *timeline.Timeline, ax tlAxis, from, to, now time.Time) []tl
 
 // isLoopback reports a host on this machine: the proxy's own ports and local tools, not egress.
 func isLoopback(host string) bool {
-	for _, p := range []string{"127.", "localhost", "[::1]"} {
-		if len(host) >= len(p) && host[:len(p)] == p {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(host, "127.") || strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "[::1]")
 }
 
 // tlHostRows draws each host's requests in flight per cell, by one sweep over its request
