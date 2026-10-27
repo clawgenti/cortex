@@ -49,13 +49,16 @@ const (
 	// which lists Kubernetes workloads and whose own purpose line used to call them "agents"
 	// too — see paneKeys for how the two are told apart.
 	paneAgents
+	// paneTimeline draws one session's Claude Code agents, tool calls and hosts on a time
+	// axis; see timeline_pane.go.
+	paneTimeline
 )
 
 // lastPaneID is the highest valid paneID. Kept adjacent to the iota block so
 // adding a pane means updating one line here, and TestPaneKeysCoverAllPanes then
 // fails until that pane is documented in paneKeys — which is how paneUsage
 // shipped reachable by `u` but named in no footer and no help overlay.
-const lastPaneID = paneAgents
+const lastPaneID = paneTimeline
 
 // paneNone is the explicit "no previous pane recorded" sentinel for
 // model.previousPane. Using paneNamespaces (the zero value) as a
@@ -572,6 +575,9 @@ type model struct {
 	usage usageState
 	// usageDoc is the usage pane's drawn lines, searched — see usageBody.
 	usageDoc searchDoc
+	// timeline is the Timeline pane's state, and timelineDoc its drawn lines, searched.
+	timeline    timelineState
+	timelineDoc searchDoc
 
 	// spend backs the always-on spend strip. Separate from usage on purpose —
 	// see spendState, which records why sharing one poll chain would blank the
@@ -711,6 +717,11 @@ type model struct {
 	// selectedEventKey pins the events-pane cursor to an event across
 	// rebuilds (see eventKey). Zero value = unpinned.
 	selectedEventKey eventKey
+	// revealSeq is an event the Timeline's enter asked to land on, in session revealSess,
+	// waiting for the snapshot that holds it. Zero when none. Seqs are per session, so the
+	// session is part of the target.
+	revealSeq  uint64
+	revealSess string
 
 	// pipeline is the fetched plugin composition. nil until the initial
 	// GetPipeline response arrives; the pipeline pane shows "(loading…)"
@@ -935,6 +946,7 @@ func New(ctx context.Context, c *apiclient.Client, opts ...Option) tea.Model {
 		sortCol:      sortCol,
 		sortDesc:     sortDesc,
 		usage:        usageState{metric: usageMetric, windowIdx: usageWindowIdx, group: usageGroup},
+		timeline:     timelineState{windowIdx: Settings.timelineWindow(), cursor: -1},
 		sessionsData: sessionMeta,
 		sessionsTbl:  newSessionsTable(),
 		eventsTbl:    newEventsTable(),
@@ -1031,6 +1043,9 @@ func (m *model) backToPodsPane() {
 	// as if it described the new one.
 	m.usage.reqSeq++
 	m.usage.tickGen++
+	// And the timeline: a session id on the new pod is someone else's session.
+	m.timeline = timelineState{windowIdx: m.timeline.windowIdx, cursor: -1, reqSeq: m.timeline.reqSeq + 1, tickGen: m.timeline.tickGen + 1}
+	m.revealSeq, m.revealSess = 0, ""
 	// Same for the spend strip, and for the same reason. Not optional just because the
 	// strip is always on: a strip left showing the previous pod's dollars while the
 	// operator picks a new one is a figure attributed to the wrong workload, which is
@@ -1556,6 +1571,13 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.usage.lastFetch = time.Now()
 		return m, nil
 
+	case timelineLoadedMsg:
+		m.handleTimelineLoaded(msg)
+		return m, nil
+
+	case timelineTickMsg:
+		return m, m.handleTimelineTick(msg)
+
 	case usageTickMsg:
 		// Stop when the pane loses focus, and drop ticks from a previous visit:
 		// a quick exit and re-entry would otherwise leave two chains alive, each
@@ -1750,6 +1772,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.paging, msg.id)
 		if m.pane == paneEvents && m.selectedSess == msg.id {
 			m.rebuildEventsTable()
+			if m.revealSess == msg.id && !m.revealPendingSeq() {
+				// Older than the tail the snapshot holds: say so rather than leave the cursor
+				// somewhere the operator did not ask for.
+				m.revealSeq, m.revealSess = 0, ""
+				m.setFlash("that event is older than the loaded tail — [o] loads earlier pages")
+			}
 		}
 		// AND THE SESSIONS ROW, because the rebase above changed this session's CTX(1M)
 		// figure and the table holds BAKED cells — rebuildSessionsTable renders each gauge to a
@@ -1879,6 +1907,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// mark the connection as failed so the user sees why nothing is
 		// appearing.
 		if strings.HasPrefix(msg.where, "snapshot") || msg.where == "get pipeline" {
+			if m.revealSess == strings.TrimPrefix(msg.where, "snapshot ") {
+				m.revealSeq, m.revealSess = 0, ""
+			}
 			m.setFlash(msg.where + " failed: " + msg.err.Error())
 			// A failed tail snapshot has to re-arm [t] and leave the paged window
 			// described as it stands, rather than stranding the operator on a middle
@@ -2263,6 +2294,9 @@ func (m *model) handleStreamEvent(ev apiclient.StreamEvent) {
 	}
 stale:
 	m.sessionsStale = true
+	if m.pane == paneTimeline && m.timeline.session == e.SessionID {
+		m.timeline.stale = true // refetched on the pane's next tick, at most once a second
+	}
 	if m.pane == paneEvents && m.selectedSess == e.SessionID {
 		// TODO: coalesce these rebuilds. Every streamed event rebuilds the whole table
 		// for the session being watched: ~1.5ms flat plus ~0.23ms per 1000 events held
@@ -2499,6 +2533,9 @@ func (m *model) paneView() string {
 		default:
 			body = m.agentsTbl.View()
 		}
+	case paneTimeline:
+		title = m.sessionHeader(m.timeline.session, "timeline")
+		body = m.timelineBody()
 	case paneCatalog:
 		title = fmt.Sprintf("%s · %s · catalog", m.appName(), m.endpoint)
 		if m.catalog == nil {
