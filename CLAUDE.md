@@ -221,7 +221,8 @@ cortex/
 │   ├── dev/                          # Loose dev-only shell scripts
 │   │   ├── local-build-and-test.sh   #   Build every image and load it into Kind
 │   │   ├── verify-spire-keycloak.sh  #   Platform preflight for a local dev cluster
-│   │   └── verify-moved-ca-diagnostics.sh #   Repro for issue #1033's moved-CA diagnostics
+│   │   ├── verify-moved-ca-diagnostics.sh #   Repro for issue #1033's moved-CA diagnostics
+│   │   └── verify-reboot-lingering.sh #   Real-reboot check of systemd lingering (#964)
 │   ├── profile-tags/                 # Build-tag resolver: one profile per artifact
 │   ├── readme-demo/                  # Generates the README demo animation
 │   └── hooks/commit-msg              # Rewrites Co-Authored-By to Assisted-By

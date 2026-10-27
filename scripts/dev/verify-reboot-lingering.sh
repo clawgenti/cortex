@@ -18,36 +18,56 @@
 #      uninstalling Cortex correctly leave it on rather than reverting
 #      someone else's setting?
 #
-# How check 2 tells lingering apart from a login. Two things start a user's
-# systemd manager, and either one starts Cortex with it, because the unit is
-# WantedBy=default.target: lingering, at boot, and any login by that user,
-# through pam_systemd. Every SSH connection this script makes is such a login,
-# so "is Cortex running when we look" would pass with lingering broken.
-# Instead it compares two times the host records by itself, both on the
-# since-boot monotonic clock, neither changed by reading it afterwards:
+# How check 2 tells lingering apart from a login. This is the hard part, and
+# most of the script exists for it.
 #
-#   - when user@<uid>.service and cortex.service became active
-#     (systemd's ActiveEnterTimestampMonotonic), and
-#   - when this user's first login of the boot opened (logind's "New session"
-#     line in the journal — what the passwordless sudo journalctl is for).
+# Cortex runs under the user's own systemd manager (user@<uid>.service), and
+# its unit is WantedBy=default.target, so it starts whenever that manager
+# does. Two things start the manager:
 #
-# Both units must have come up at least MIN_MARGIN_S before that login, or a
-# login may have started them. Three things keep that comparison honest:
+#   - lingering, at boot, with nobody logged in: the property under test;
+#   - any login by that user, through pam_systemd.
+#
+# The script can only inspect the host by logging in to it over SSH, and that
+# login starts the manager, and Cortex with it, if lingering has not already.
+# So "is Cortex running when we look?" answers yes whether lingering works or
+# is broken. No check made at the time of looking can tell the two apart,
+# because the login doing the looking may be what started Cortex.
+#
+# The order of two events can. The script reads back what the host recorded
+# when each happened, both on the same since-boot clock:
+#
+#   - when user@<uid>.service and cortex.service became active. systemd keeps
+#     this per unit (ActiveEnterTimestampMonotonic), and reading it later does
+#     not change it.
+#   - when this user's first login of the boot opened. logind writes a "New
+#     session" line to the journal for every session it opens. The sessions
+#     themselves are gone by the time we look, since each SSH probe ends within
+#     a second, so the journal is the only record of them. That is what the
+#     passwordless sudo journalctl is for.
+#
+# If both units came up well before the boot's first login, no login can have
+# started them, so lingering did. If lingering is broken, nothing starts at
+# boot: the first login starts them, and they come up just after it.
+#
+# Three things keep that comparison honest:
 #
 #   - The quiet window. sshd comes up at about the moment lingering does, so a
 #     login the instant SSH answers leaves no gap to measure. Each cycle stays
 #     off the host for QUIET_SECONDS after it goes down, so the boot's first
 #     login lands long after lingering's work. Do not SSH to the host yourself
 #     during a run: your login would become that boot's first.
-#   - Manager sessions. From systemd 256 on, starting a user manager opens a
-#     session of class 'manager' for the manager itself. When lingering works,
-#     that is the user's first "New session" line of the boot, opened as
-#     lingering starts the manager, so counting it as a login would compare
-#     the manager against its own session and fail every good run. That class
-#     is skipped; any other is a real session that can start the manager.
+#   - Manager sessions are not logins. From systemd 256 on, starting a user
+#     manager also opens a logind session for the manager itself (class
+#     'manager'), logged with a "New session" line like any login. When
+#     lingering works, that line is the user's first of the boot, written as
+#     lingering starts the manager; counted as a login, it would fail every
+#     good run. So the first login is the first "New session" line that is not
+#     a manager session. How the two are told apart depends on the systemd
+#     version; collect_boot_evidence explains it.
 #   - The margin. The two times are written by different processes, and when a
-#     login does start the manager they land about 0.1s apart (systemd 261:
-#     the manager went active 0.08-0.11s after the login was logged). A margin
+#     login does start the manager they land about 0.1s apart (the manager
+#     went active 0.08s after the login on systemd 257, 0.11s on 261). A margin
 #     instead of bare ordering keeps the verdict off which write landed first.
 #
 # Usage: verify-reboot-lingering.sh <ssh-host> [reboot-count]
@@ -250,22 +270,42 @@ echo "SUBJECT_UID=${uid}"
 echo "BOOT_ID=$(cat /proc/sys/kernel/random/boot_id)"
 echo "LINGER=$(loginctl show-user "${name}" --property=Linger --value 2>/dev/null)"
 
-# The boot's first login by this user. logind sessions are transient, and the
-# wait_up probe that opened it closed it long ago, so only the journal still
-# has it. The username is quoted from systemd 255 on ("of user 'alan' with
-# class ...") and bare before it ("of user alan."): match both, as fixed
-# strings. Sessions of class 'manager' (and 'manager-early'), which systemd
-# 256 and later opens for the user manager itself, follow from the manager
-# starting rather than causing it; any other class is a real session that can
-# start the manager, so it counts.
+# The boot's first login by this user: the earliest "New session" line for
+# them that is not the user manager's own session. The header says why it
+# comes from the journal. The message changed format in systemd 258, so the
+# two are told apart in two ways:
+#
+#   - 258 and later: New session '2' of user 'alan' with class 'user' and ...
+#     The class is in the line, so manager sessions are dropped by its text.
+#   - 257 and earlier: New session 2 of user alan.
+#     No class. 256 and 257 already open manager sessions, so for each line
+#     left, ask logind for that session's class by its number (a logind
+#     session number, not a process ID). The manager's session stays open as
+#     long as the manager runs, which with lingering is the whole boot, so it
+#     answers 'manager' (or 'manager-early') and is skipped. A login counts
+#     either way: it answers 'user' while still open, and nothing once it has
+#     ended, because logind forgets ended sessions. Session numbers are not
+#     reused within a boot, so an ended login's number cannot answer for
+#     another session. Before 256 there are no manager sessions to skip.
+#
+# A manager that restarts mid-boot ends its boot-time session, which then
+# answers nothing and counts as a login. The check then fails rather than
+# passes. The username is matched both quoted and bare, as fixed strings.
 first_login_s=""
 if logind="$(sudo -n journalctl -b -u systemd-logind -o short-monotonic --no-pager 2>&1)"; then
 	first_login_s="$(printf '%s\n' "${logind}" |
 		grep -F 'New session' |
 		grep -F -e "of user '${name}'" -e "of user ${name}." |
 		grep -v -F "with class 'manager" |
-		sed -n 's/^\[[[:space:]]*\([0-9][0-9]*\.[0-9]*\)\].*/\1/p' |
-		head -n 1)"
+		while IFS= read -r line; do
+			sid="$(printf '%s\n' "${line}" | sed -n "s/.*New session '\{0,1\}\([^' ]*\)'\{0,1\} of user .*/\1/p")"
+			# </dev/null: loginctl must not read the lines this loop is reading.
+			case "$(loginctl show-session "${sid}" -p Class --value 2>/dev/null </dev/null)" in
+			(manager*) continue ;;
+			esac
+			printf '%s\n' "${line}" | sed -n 's/^\[[[:space:]]*\([0-9][0-9]*\.[0-9]*\)\].*/\1/p'
+			break
+		done)"
 	if [ -z "${first_login_s}" ]; then
 		printf '%s\n' "${logind}" | grep -F 'New session' | tail -n 5 | sed 's/^/DIAG: /'
 	fi
