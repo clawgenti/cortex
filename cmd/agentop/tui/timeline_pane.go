@@ -694,9 +694,10 @@ func (m *model) cursorStrip(lay tlLayout) string {
 		}
 		p := fmt.Sprintf("%s %s %s", m.shortAgent(x.Agent), x.Name, dur)
 		if x.Preview != "" {
-			p += " " + sanitizeLabel(x.Preview)
+			p += " " + x.Preview
 		}
-		parts = append(parts, p)
+		// The agent label, the tool name and the preview are all the model's text.
+		parts = append(parts, sanitizeLabel(p))
 	}
 	if len(parts) == 0 {
 		return styleMuted.Render(head + "no tool started in this cell")

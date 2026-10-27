@@ -410,6 +410,20 @@ func TestTimelineKeys_CursorSkipsGapsAndListsTools(t *testing.T) {
 	}
 }
 
+// The agent label is the model-written Agent description and the tool name is the model's too:
+// neither may carry a control sequence to the terminal.
+func TestTimelineCursorStrip_SanitizesModelText(t *testing.T) {
+	m := timelineModel(t, 140, 46)
+	m.timeline.windowIdx = 3
+	m.timeline.tl.Agents[1].Label = "Sur\x1b]52;c;aGk=\x07vey"
+	m.timeline.tl.Tools[2].Name = "Re\x1b[2Jad"
+	lay, _ := m.timelineLayoutNow()
+	m.timeline.cursor = cellOf(t, lay, 500)
+	if strip := m.cursorStrip(lay); strings.Contains(strip, "\x1b]") || strings.Contains(strip, "\x1b[2J") || strings.Contains(strip, "\x07") {
+		t.Errorf("strip = %q, carries a control sequence", strip)
+	}
+}
+
 func TestTimelineKeys_EscReturnsAndArrowsStay(t *testing.T) {
 	m := timelineModel(t, 120, 40)
 	m.timeline.returnPane = paneEvents
