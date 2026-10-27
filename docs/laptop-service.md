@@ -62,19 +62,21 @@ works, and neither needs Cortex reinstalled:
 
 ```sh
 # Install polkit, then turn lingering on for yourself
-sudo apt install polkitd
+sudo apt install polkitd      # Debian and Ubuntu; on Fedora, Arch and others the package is polkit
 loginctl enable-linger
 
 # Or turn it on directly, as root
-sudo loginctl enable-linger "$USER"
+sudo loginctl enable-linger "$(id -un)"
 ```
 
 Re-running `agentop setup` after installing polkit is not enough: setup finds Cortex
 installed and healthy, changes nothing, and does not retry lingering.
 
 When polkit *is* installed and still refuses, the system's policy has decided users may
-not keep services running, and setup says that instead; only the root fix applies.
-Check where you stand with `loginctl show-user "$USER" --property=Linger`.
+not keep services running, and setup says that instead; only the root fix applies. Any
+other failure, after polkit has said yes, is shown in loginctl's own words, again with
+only the root fix. Check where you stand with
+`loginctl show-user "$(id -un)" --property=Linger`.
 
 Setup records that it turned lingering on, and `agentop uninstall` turns it back off
 only then. Lingering you turned on yourself, by either fix above, is left on when you

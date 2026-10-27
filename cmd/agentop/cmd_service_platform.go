@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -294,34 +295,67 @@ var errLingerUnavailable = errors.New(
 // and healthy loads nothing, so after the polkit install it would change nothing
 // and say all is well.
 //
-// detail is loginctl's own output; present is polkitPresent's answer, false when
-// that could not be determined, so the advice for that case also names the root
-// fix, which works either way.
+// Polkit is blamed only when loginctl says authorization was refused. logind can
+// also fail after polkit has said yes, writing /var/lib/systemd/linger, and then
+// neither polkit fix would help. Any other failure gets loginctl's own words and
+// the root fix alone.
+//
+// detail is loginctl's own output; present is polkitPresent's answer.
 func lingerFailure(detail string, present bool) error {
 	if detail == "" {
 		detail = "no reason given"
 	}
-	user := os.Getenv("USER")
-	if user == "" {
-		user = strconv.Itoa(os.Getuid())
-	}
-	if present {
+	admin := "    sudo loginctl enable-linger " + lingerTarget()
+	switch {
+	case !authRefused(detail):
+		return fmt.Errorf("%w.\n"+
+			"  loginctl enable-linger: %s\n"+
+			"  An administrator can turn it on for you:\n"+
+			"%s",
+			errLingerUnavailable, detail, admin)
+	case present:
 		return fmt.Errorf("%w.\n"+
 			"  loginctl enable-linger: %s\n"+
 			"  polkit refused it, so this system's policy does not let users keep their own\n"+
 			"  services running. An administrator can turn it on for you:\n"+
-			"    sudo loginctl enable-linger %s",
-			errLingerUnavailable, detail, user)
+			"%s",
+			errLingerUnavailable, detail, admin)
 	}
 	return fmt.Errorf("%w.\n"+
 		"  loginctl enable-linger: %s\n"+
 		"  polkit is not installed, and logind needs it to let a user turn lingering on.\n"+
-		"  Install it, then turn lingering on (the package is polkitd on Debian and Ubuntu):\n"+
-		"    sudo apt install polkitd\n"+
+		"  Install it, then turn lingering on:\n"+
+		"    sudo apt install polkitd    # Debian and Ubuntu; elsewhere the package is polkit\n"+
 		"    loginctl enable-linger\n"+
 		"  or have an administrator turn it on for you:\n"+
-		"    sudo loginctl enable-linger %s",
-		errLingerUnavailable, detail, user)
+		"%s",
+		errLingerUnavailable, detail, admin)
+}
+
+// authRefused reports whether loginctl's error is logind refusing authorization,
+// rather than failing after it. These are systemd's own fixed strings:
+// bus_error_message prints "Access denied" for org.freedesktop.DBus.Error.AccessDenied,
+// and bus-polkit.c's "Interactive authentication required." is what a non-interactive
+// caller gets when polkit would have prompted. Ubuntu words the latter as "Access
+// denied as the requested operation requires interactive authentication", which the
+// first match covers. A rewording in some later systemd lands in the other branch,
+// whose root fix works whatever the cause.
+func authRefused(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "access denied") || strings.Contains(d, "interactive authentication required")
+}
+
+// lingerTarget names the account the administrator fix must enable: the one this
+// process runs as, which loadService passed to loginctl as a uid. A name reads
+// better than a uid to whoever runs the command, but it is looked up from the uid,
+// not taken from $USER, which can name someone else (su without -l keeps it). The
+// uid itself, which loginctl accepts too, when the lookup fails.
+func lingerTarget() string {
+	uid := strconv.Itoa(os.Getuid())
+	if u, err := user.LookupId(uid); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return uid
 }
 
 // polkitPresent reports whether polkitd can answer logind on the system bus:

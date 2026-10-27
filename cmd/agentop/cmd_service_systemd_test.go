@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -450,9 +451,9 @@ exit 1
 			"Cortex will stop when you log out",
 			"loginctl enable-linger: Could not enable linger: Access denied",
 			"polkit is not installed",
-			"\n    sudo apt install polkitd\n",
+			"\n    sudo apt install polkitd    # Debian and Ubuntu; elsewhere the package is polkit\n",
 			"\n    loginctl enable-linger\n",
-			"\n    sudo loginctl enable-linger ",
+			"\n    sudo loginctl enable-linger " + lingerTarget(),
 		} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("caveat lacks %q:\n%v", want, err)
@@ -479,6 +480,71 @@ exit 1
 			t.Errorf("caveat should blame the policy and not suggest installing polkit:\n%v", err)
 		}
 	})
+}
+
+// lingerFailure picks its advice from loginctl's error as well as from whether
+// polkit is there: polkit is blamed only for a refused authorization.
+func TestLingerFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, detail string
+		present      bool
+		want, reject []string
+	}{
+		{"denied, polkit absent", "Could not enable linger: Access denied", false,
+			[]string{"polkit is not installed", "sudo apt install polkitd"}, []string{"polkit refused it"}},
+		{"denied, polkit present", "Could not enable linger: Access denied", true,
+			[]string{"polkit refused it"}, []string{"polkit is not installed", "apt install"}},
+		// systemd's wording when polkit would have prompted; Ubuntu's is the
+		// "Access denied as the requested operation requires interactive
+		// authentication" form, which the denied case already covers.
+		{"interactive auth required, polkit present", "Could not enable linger: Interactive authentication required.", true,
+			[]string{"polkit refused it"}, []string{"apt install"}},
+		// Authorized, then logind could not write /var/lib/systemd/linger: neither
+		// polkit fix applies, so neither is offered.
+		{"failed after authorization, polkit absent", "Could not enable linger: Read-only file system", false,
+			[]string{"Read-only file system", "An administrator can turn it on for you"},
+			[]string{"polkit is not installed", "polkit refused it", "apt install"}},
+		{"failed after authorization, polkit present", "Could not enable linger: Read-only file system", true,
+			[]string{"Read-only file system"}, []string{"polkit"}},
+		{"no output at all", "", false,
+			[]string{"no reason given"}, []string{"polkit"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := lingerFailure(tc.detail, tc.present)
+			if !errors.Is(err, errLingerUnavailable) {
+				t.Fatalf("err = %v, want errLingerUnavailable", err)
+			}
+			msg := err.Error()
+			// Every branch ends with the root fix, aimed at this account.
+			for _, w := range append(tc.want, "\n    sudo loginctl enable-linger "+lingerTarget()) {
+				if !strings.Contains(msg, w) {
+					t.Errorf("message lacks %q:\n%s", w, msg)
+				}
+			}
+			for _, r := range tc.reject {
+				if strings.Contains(msg, r) {
+					t.Errorf("message should not contain %q:\n%s", r, msg)
+				}
+			}
+		})
+	}
+}
+
+// The administrator fix must name the account loadService enabled — the uid
+// this process runs as — whatever $USER says.
+func TestLingerTargetIgnoresUSER(t *testing.T) {
+	t.Setenv("USER", "someone-else")
+	got := lingerTarget()
+	if got == "someone-else" {
+		t.Fatalf("lingerTarget() = %q: took $USER, not the uid's account", got)
+	}
+	want := strconv.Itoa(os.Getuid())
+	if u, err := user.LookupId(want); err == nil {
+		want = u.Username
+	}
+	if got != want {
+		t.Errorf("lingerTarget() = %q, want %q", got, want)
+	}
 }
 
 func TestPolkitPresent(t *testing.T) {
