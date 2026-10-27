@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -127,14 +128,15 @@ func (c *timelineCache) put(id string, e timelineEntry) {
 }
 
 // clone copies the span slices Clip rewrites. The spans' time pointers are shared, which
-// is safe: Clip never writes through them.
+// is safe: Clip never writes through them. slices.Clone keeps an empty list empty rather
+// than nil, so it still encodes as [] and not null.
 func clone(tl *timeline.Timeline) *timeline.Timeline {
 	cp := *tl
-	cp.Agents = append([]timeline.Agent(nil), tl.Agents...)
-	cp.Turns = append([]timeline.Turn(nil), tl.Turns...)
-	cp.Tools = append([]timeline.Tool(nil), tl.Tools...)
-	cp.Returns = append([]timeline.Return(nil), tl.Returns...)
-	cp.Hosts = append([]timeline.Host(nil), tl.Hosts...)
+	cp.Agents = slices.Clone(tl.Agents)
+	cp.Turns = slices.Clone(tl.Turns)
+	cp.Tools = slices.Clone(tl.Tools)
+	cp.Returns = slices.Clone(tl.Returns)
+	cp.Hosts = slices.Clone(tl.Hosts)
 	return &cp
 }
 

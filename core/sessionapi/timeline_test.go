@@ -2,9 +2,11 @@ package sessionapi
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +137,23 @@ func TestTimelineSaysWhenItIsTruncated(t *testing.T) {
 	}
 	if tl, _ := getTimeline(t, ts.URL, "small", ""); tl.Truncated {
 		t.Errorf("small session reported truncated")
+	}
+}
+
+// A session with nothing to return encodes its empty lists as [], served fresh and from the
+// cache alike. Found on a real session: the cache's copy turned an empty list into null.
+func TestTimelineListsAreNeverNull(t *testing.T) {
+	ts, store := newTestServer(t)
+	appendTurn(store, "s1", time.Now(), "r1", "t1")
+	for _, pass := range []string{"fresh", "cached"} {
+		resp, err := http.Get(ts.URL + "/v1/sessions/s1/timeline")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if strings.Contains(string(b), "null") {
+			t.Errorf("%s: %s", pass, b)
+		}
 	}
 }
