@@ -17,8 +17,11 @@ One binary on macOS or Linux. No Kubernetes, no account.
 
 ```sh
 curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh
+```
 
-# then, in a new terminal:
+Then, in a new terminal:
+
+```sh
 agentop configure claude-code enable    # once — or opencode, codex, bob
 claude                                  # start (or restart) your agent as you always do
 agentop observe                         # in another terminal: watch it live
@@ -38,15 +41,16 @@ agentop observe
 agentop cost --window month --by agent
 ```
 
-**Cut 4–20% off every Claude Code prompt.** Cortex strips the tool
-definitions you never call.
+**Trim 4–20% off Claude Code's prompts** (median 6% in our measurement). Cortex
+strips the tool definitions you never call.
 
 ```sh
 agentop tools scan --write ~/.cortex/config.yaml
 ```
 
 **Switch model servers without touching your agent.** Provider down, or want the
-traffic to stay local? Send new sessions to a LiteLLM gateway or Ollama.
+traffic to stay local? Send new sessions to a LiteLLM gateway or Ollama. For Ollama,
+pull the model and [raise its context length](./docs/laptop-local-model.md#context-length) first.
 
 ```sh
 echo ollama | agentop server add ollama http://localhost:11434 \
@@ -85,14 +89,16 @@ on your machine, runs it through a pipeline of plugins, and sends it on re-encry
 
 ## Your data stays on your machine
 
-- **Loopback only.** Cortex contacts the servers your agent asks for. Its only call of
-  its own downloads LiteLLM's public [price list](./docs/pricing.md), hourly.
+- **Loopback only.** Cortex contacts the servers your agent asks for, or the one you
+  route it to. Its own calls: LiteLLM's public [price list](./docs/pricing.md), hourly
+  (`pricing.bundled: false` turns it off), and the model list of any server you add.
 - **Your own CA,** created locally in `~/.cortex/ca`. Never added to a keychain by Cortex.
-- **Bad certificates stay encrypted.** When a server's certificate fails, Cortex leaves
-  that connection end to end.
+- **Bad certificates aren't intercepted.** When a server's certificate fails, Cortex
+  leaves that connection encrypted end to end.
 - **Read-only** until you turn on pruning, server routing or an enforcing script.
 - **History on disk** in [`~/.cortex/sessions`](./docs/laptop-service.md#session-history-is-kept-in-cortexsessions)
-  and `~/.cortex/cost`. `agentop uninstall --purge` removes Cortex and all of it.
+  and `~/.cortex/cost`. `agentop uninstall` removes Cortex;
+  `--purge` also deletes `~/.cortex`.
 
 ## Beyond the laptop
 
