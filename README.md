@@ -1,21 +1,70 @@
 # Cortex
 
-**See what your coding agent actually sends — and pay less for it.**
+**`top` for your coding agent.** Watch every model call, tool call and dollar your
+agent spends, live — then cut the waste.
 
-Works with **Claude Code**, **OpenCode**, **Codex** and **IBM Bob**, and with any agent
-that can use an HTTPS proxy.
+Claude Code · OpenCode · Codex · IBM Bob · any agent that can use an HTTPS proxy.
+One binary on macOS or Linux. No Kubernetes, no account.
 
 <img src="./docs/assets/cortex-demo.svg" width="100%"
      alt="A terminal installs Cortex with one command, and a second command points Claude Code at it. Three Claude Code sessions run in separate directories, and agentop then lists all three with their token counts, cost and remaining context. Pressing $ breaks the spend down by tier, where cache reads dominate. Drilling into the busiest session shows the whole conversation and the fifteen-tool manifest it re-sends on every turn.">
 
-Cortex sits in your agent's request path on your own machine, decrypts the traffic,
-and shows you every model call, tool call and agent-to-agent message as it happens.
-**Think `top`, for your coding agent:** `agentop observe` shows which sessions are
-eating your tokens, your context window and your money, live. Cortex can also strip
-the tool definitions your agent never calls, 4–20% of the prompt on every turn,
-switch your agent to another model server, and run your own scripts on its traffic.
+## Try it
 
-One binary, no Kubernetes. macOS or Linux, amd64 or arm64.
+<!-- This install command is duplicated in the website's laptop quickstart:
+     rossoctl/rossoctl → docs/get-started/laptop.md ("Step 1: install the program").
+     Change both, or they drift — the --ref wording already did once. -->
+
+```sh
+curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh
+
+# then, in a new terminal:
+agentop configure claude-code enable    # once — or opencode, codex, bob
+claude                                  # start your agent as you always do
+agentop observe                         # in another terminal: watch it live
+```
+
+Setup asks once before changing anything. If something looks wrong, `agentop doctor`
+names the fix. Can't reach rossoctl.dev? The same script is
+[in this repo](https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh).
+
+## What you can do with it
+
+**See where your tokens go.** Every session's tokens, cost and context fill, live.
+Open one to read the whole conversation, and the tool list it re-sends every turn.
+
+```sh
+agentop observe
+agentop cost --window month --by agent
+```
+
+**Cut 4–20% off every prompt.** Cortex strips the tool definitions you never call.
+
+```sh
+agentop tools scan --write ~/.cortex/config.yaml
+```
+
+**Switch model servers without touching your agent.** Provider down, or want the
+traffic to stay local? Send new sessions to a LiteLLM gateway or Ollama.
+
+```sh
+agentop server add ollama http://localhost:11434 --main granite4.2:8b --helper granite4.2:8b
+agentop server use ollama --agent claude-code
+```
+
+**Add your own rules in a few lines of Python.** Drop a script in `~/.cortex/plugins/`.
+It can rewrite or block any request, with no config edit and no restart.
+
+```python
+@on.request
+def no_force_push(flow):
+    if "git push --force" in flow.latest_text:
+        flow.deny("force-push needs a human")
+```
+
+Guides: [token savings](./docs/laptop-token-savings.md) ·
+[local models](./docs/laptop-local-model.md) ·
+[script plugins](./docs/script-plugin.md) · [pricing](./docs/pricing.md)
 
 ## How it works
 
@@ -27,103 +76,9 @@ One binary, no Kubernetes. macOS or Linux, amd64 or arm64.
        alt="Your coding agent sends its traffic through Cortex, a local process. Cortex's TLS bridge decrypts it with your own CA, the plugin pipeline parses the model, tool and agent calls, and the request goes on, re-encrypted, to the model or tool server it was meant for. The session store records each session, its tokens and its cost to ~/.cortex, and agentop observe reads it over the session API.">
 </picture>
 
-Your agent uses Cortex as its HTTPS proxy. Cortex decrypts the traffic with a CA
-made on your machine, runs it through a pipeline of plugins that parse the model, tool
-and agent calls, and sends it on, re-encrypted, to the server it was meant for. Every
-request and reply is recorded in its session, with its tokens and cost, and `agentop`
-reads them live from the session API. [Running Cortex](./docs/laptop-service.md) covers
-each piece; the [plugin catalog](./docs/plugin-catalog.md) lists what else the pipeline
-can run.
-
-## Quick start
-
-<!-- This install command is duplicated in the website's laptop quickstart:
-     rossoctl/rossoctl → docs/get-started/laptop.md ("Step 1: install the program").
-     Change both, or they drift — the --ref wording already did once. -->
-
-```sh
-curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh
-```
-
-Setup lists every change it will make, and asks once. If rossoctl.dev is unreachable
-from where you are, the same script is served straight from this repository, at
-`https://raw.githubusercontent.com/rossoctl/cortex/main/scripts/install.sh`.
-
-To install `cortex` built with the [cpex policy plugin](docs/cpex-plugin.md) instead
-(macOS arm64, Linux amd64/arm64), add `| sh -s -- --cpex`. Re-running without the flag
-switches back; see [the cpex build](docs/laptop-service.md#the-cpex-build).
-
-Then connect your agent — once, in a new terminal. The table below has each command.
-
-```sh
-agentop configure claude-code enable    # or opencode, bob
-```
-
-Run your agent the way you always do. No flags, no environment variables.
-
-```sh
-claude                                  # or opencode, bob
-```
-
-In another terminal, watch its traffic live.
-
-```sh
-agentop observe
-```
-
-That's all. From now on every session of that agent goes through Cortex, and nothing
-changes about how you start it. An agent that was already running picks up the change
-when it restarts. If anything looks wrong, `agentop doctor` checks the install and
-names the command that fixes it.
-
-## What else you can do
-
-**Switch to another model server.** When your provider is down, or you want the
-traffic to stay on your machine, send an agent's new sessions to a LiteLLM gateway or a
-local Ollama. Running sessions stay where they started. `S` in `agentop observe` does
-the same thing.
-
-```sh
-echo ollama | agentop server add ollama http://localhost:11434 \
-  --main granite4.2:8b --helper granite4.2:8b --key-stdin
-agentop server use ollama --agent claude-code
-```
-
-[Run an agent on a local model](./docs/laptop-local-model.md) walks the whole setup.
-
-**Change or block requests with a script.** Drop an executable file in
-`~/.cortex/plugins/` and it runs on every request. You don't edit any config or
-restart anything.
-
-```python
-#!/usr/bin/env python3
-from cortex import on, run
-
-@on.request
-def no_force_push(flow):
-    if "git push --force" in flow.latest_text:
-        flow.deny("force-push needs a human")
-
-run()        # shadow mode: records what it would do, changes nothing
-```
-
-To test a script before it changes anything, replay a session you already ran through
-it with `--replay <session-id>`. [Script plugins](./docs/script-plugin.md) has the rest.
-
-**Stop paying for tools you never call.** One command lists the tools you have not
-called in 30 days and prunes them from every prompt.
-
-```sh
-agentop tools scan --write ~/.cortex/config.yaml
-```
-
-[Cut token cost](./docs/laptop-token-savings.md) shows what to expect.
-
-**See what you spent.** For example, this month's spend per agent:
-
-```sh
-agentop cost --window month --by agent
-```
+Your agent uses Cortex as its HTTPS proxy. Cortex decrypts the traffic with a CA made
+on your machine, runs it through a pipeline of plugins, and sends it on re-encrypted.
+[Running Cortex](./docs/laptop-service.md) covers each piece.
 
 ## Supported agents
 
@@ -135,73 +90,36 @@ agentop cost --window month --by agent
 | **IBM Bob** | `agentop configure bob enable` — the editor and the `bob` shell command both | [Guide](./docs/agents/bob.md) |
 | **Any other agent** | `agentop exec -- <command>` | [Guide](./docs/agents/any-agent.md) |
 
-Each `configure` command is a one-time setup: it asks before it writes, and afterwards
-you start the agent exactly as before. `status` and `disable` check and undo it. An
-agent without a `configure` command runs under `agentop exec`, or can be pointed at
-the proxy on `localhost:47600` with `~/.cortex/ca/ca.crt` trusted. Traffic in the Anthropic Messages or OpenAI Chat
-Completions format is parsed into model calls and tokens whichever agent sends it, and
-priced wherever Cortex [has a rate](./docs/pricing.md).
+`status` and `disable` check and undo each one.
 
-## What Cortex sees and keeps
+## Your data stays on your machine
 
-- **Local only.** The proxy listens on loopback, and it only contacts the servers that
-  the programs using it ask for.
-- **Your own CA.** Created on your machine, with its key in `~/.cortex/ca`, readable
-  only by you. Cortex never adds it to a keychain itself.
-- **Real certificates are still checked.** When a server's certificate fails, Cortex
-  leaves that connection encrypted end to end.
-- **Read-only**, unless you turn on [tool pruning](./docs/laptop-token-savings.md),
-  route an agent to [another server](./docs/laptop-local-model.md), or set a
-  [script](./docs/script-plugin.md) to `enforce`.
-- **History on disk.** Sessions, prompts and replies included, are kept in
-  [`~/.cortex/sessions`](./docs/laptop-service.md#session-history-is-kept-in-cortexsessions),
-  and cost totals in `~/.cortex/cost`.
-
-## Uninstall
-
-```sh
-agentop uninstall           # --purge also deletes ~/.cortex
-```
-
-It asks once, takes Cortex out of every agent it routed, and removes the service and
-binaries. [Remove it](./docs/laptop-service.md#remove-it) has the details.
-
-## Learn more
-
-- [All documentation](./docs/README.md) — the docs index, grouped by what you
-  are trying to do
-- [Running Cortex](./docs/laptop-service.md) — the service, how sessions are grouped,
-  troubleshooting
-- [agentop](./cmd/agentop/README.md) — every pane, key and command
-- [Run an agent on a local model](./docs/laptop-local-model.md) — Ollama on
-  your laptop, for when a provider is out or you want the traffic local
-- [Pricing](./docs/pricing.md) — rates, gateway discounts, unpriced traffic
-- [Full install guide](https://www.rossoctl.dev/docs/dev/get-started/laptop) —
-  prerequisites and a walkthrough. Ending the install command in `sh -s -- --help`
-  lists the installer's options.
-- [Install stats](https://rossoctl.github.io/cortex/install-stats/) — how many
-  people install Cortex, estimated from release downloads with CI subtracted. No
-  telemetry: the figures come from GitHub's own download counts, never from your
-  machine.
+- **Loopback only.** Cortex contacts the servers your agent asks for. Its only call of
+  its own downloads LiteLLM's public [price list](./docs/pricing.md), hourly.
+- **Your own CA,** created locally in `~/.cortex/ca`. Never added to a keychain by Cortex.
+- **Bad certificates stay encrypted.** When a server's certificate fails, Cortex leaves
+  that connection end to end.
+- **Read-only** until you turn on pruning, server routing or an enforcing script.
+- **History on disk** in [`~/.cortex/sessions`](./docs/laptop-service.md#session-history-is-kept-in-cortexsessions)
+  and `~/.cortex/cost`. `agentop uninstall --purge` removes Cortex and all of it.
 
 ## Beyond the laptop
 
-The same binary runs as a Kubernetes sidecar, with what agentic workloads need in
-production: a verifiable identity per workload and the right credentials for each
-downstream call (**AuthBridge**), guardrails that block actions straying from the
-user's intent, egress control, and spend caps. Start with
-[Running Cortex in Kubernetes](./docs/kubernetes.md); the
-[plugin catalog](./docs/plugin-catalog.md) and
-[architecture reference](./docs/architecture.md) cover the rest.
+The same binary runs as a Kubernetes sidecar: a verifiable identity per workload, the
+right credentials for each downstream call (**AuthBridge**), guardrails, egress control
+and spend caps. Start with [Running Cortex in Kubernetes](./docs/kubernetes.md).
 
-## Community
+## Learn more
 
-Cortex on a laptop is new, so tell us when it breaks: use the **Laptop feedback** form
-under [new issue](https://github.com/rossoctl/cortex/issues/new/choose), or
+[All docs](./docs/README.md) · [agentop reference](./cmd/agentop/README.md) ·
+[plugin catalog](./docs/plugin-catalog.md) · [cpex policy build](./docs/laptop-service.md#the-cpex-build) ·
+[full install guide](https://www.rossoctl.dev/docs/dev/get-started/laptop) ·
+[install stats](https://rossoctl.github.io/cortex/install-stats/) (from GitHub's download counts, no telemetry)
+
+Something broke? Tell us with the **Laptop feedback** form under
+[new issue](https://github.com/rossoctl/cortex/issues/new/choose), or on
 [Slack](https://ibm.biz/rossoctl-slack). A half-finished install with the error pasted
-in is more useful than a polished bug report you never sent. To work on Cortex, see
+in helps more than a polished report never sent. To contribute, see
 [CONTRIBUTING.md](./CONTRIBUTING.md); to report a vulnerability, [SECURITY.md](./SECURITY.md).
 
-## License
-
-[Apache 2.0](./LICENSE)
+Licensed under [Apache 2.0](./LICENSE).
