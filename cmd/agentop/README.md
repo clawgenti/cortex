@@ -1264,11 +1264,15 @@ agentop is for, and the other four are surfaces you visit and leave.
 
   An agent cell is a bar of how that cell's time divided, stacked from the
   bottom: amber the agent's tools running, purple its model generating, red
-  retrying after a failed model call, teal waiting on its subagents, grey waiting
-  on you. Blank is idle. Waiting is read from the gaps between an agent's model
-  calls: after a failed call it is retrying; a gap that one of its subagents was
-  running in, or that a subagent's result ended, is waiting on subagents; a gap
-  after a finished reply otherwise is waiting on you, for the main agent only. A
+  retrying after a failed model call, teal waiting on its subagents or its
+  background shell jobs, grey waiting on you. Waiting is read from the gaps
+  between an agent's model calls: a gap that one of its subagents or background
+  jobs was running in, or that a subagent's result ended, is waiting on
+  subagents; a gap before a call that re-sent the same conversation is retrying;
+  after a failed call it is retrying until the last failed request to the model
+  host, then waiting on you, since Claude Code shows the error and stops. On the
+  main agent, any other time is waiting on you, except after a tool that lost its
+  result, which is left blank. A subagent's gaps are otherwise blank. A
   subagent's cells are measured against the part of the cell it was alive for, so
   its row is one run from spawn to hand-back. A terminal cell holds two colours,
   so a cell that mixed three states (8% of cells at "all" in real sessions, none
@@ -1284,13 +1288,20 @@ agentop is for, and the other four are surfaces you visit and leave.
   is live while its last recorded event is under 30 minutes old: its windows
   follow now, and a call still in flight grows. Once it is not, an open call ends
   at the session's last event, the last moment anything was seen, and the window
-  ends at its last activity. "all" squeezes each idle stretch over 30 minutes into a `┆`, and the
-  axis says how long it was. `←`/`→` pick a moment, skipping those stretches, and
-  the line under the chart lists every tool that started then with its duration
-  and its command, path or description; `↵` opens the Events pane on that event.
-  `↑`/`↓` scroll the agent rows when they do not all fit. The pane refreshes at
-  most once a second while the stream delivers that session's events, and every
-  ten seconds while a call is in flight with nothing new recorded.
+  ends at its last activity. "all" squeezes each stretch over 30 minutes with
+  no model call or tool into a `┆`, coloured by the state that held most of it,
+  and the axis says how long it was; a host's `┆` is red when a request failed in
+  it. `←`/`→` pick a moment, skipping those stretches, and the line under the
+  chart lists the visible rows' tools that started then, and after them those
+  still running from earlier ("since 12:41:04"), each with its duration and its
+  command, path or description; a cell with no tool names the request `↵` would
+  open. `↵` opens the Events pane on the first event listed. `↑`/`↓` scroll the
+  agent rows, then the host rows, when they do not all fit; the footer offers
+  them only then. The pane refreshes at most once a second while the stream
+  delivers that session's events, and every ten seconds while a call is in
+  flight with nothing new recorded. A failed fetch is retried after 1s, then
+  2s, 4s … up to 30s, and the first fetch of a visit waits up to 30s, since a
+  session only on disk is read from its archive.
 
   **Claude Code only.** Agents come from the requests the proxy attributed to a
   Claude Code agent, and a tool's end from the first request carrying its
@@ -1427,8 +1438,8 @@ Layered on top of all of them:
 | `u` | sessions, events, detail | open the usage charts (sessions: all sessions; events/detail: the selected session) |
 | `T` | sessions, events, detail | open the timeline (sessions: the highlighted row; events/detail: the selected session) |
 | `w` | timeline | cycle window: 5m / 1h / 24h / all, only the windows shorter than the session |
-| `←` `→` / `h` `l` | timeline | pick a moment, skipping collapsed idle stretches; the line below lists the tools that started then |
-| `↑` `↓` / `k` `j` | timeline | scroll the agent rows |
+| `←` `→` / `h` `l` | timeline | pick a moment, skipping collapsed stretches; the line below lists the tools running then |
+| `↑` `↓` / `k` `j` | timeline | scroll the agent rows, then the host rows, when they do not all fit |
 | `Enter` | timeline | open the events pane at the cursor's first tool |
 | `Esc` | timeline | back to the pane it was opened from |
 | `$` | every pane except the two pickers, usage and timeline | expand the band into a breakdown — where the money went by rate tier, and who spent it by model, endpoint or agent — in place, so the table stays on screen. `$` again closes it; `Esc` does not, so it always backs out of the pane in one press. Needs 27 rows; refuses on the two pickers (nothing is connected yet), on the usage pane, which is already a breakdown with its own cycles, and on the timeline, whose `w` is its window. On the agents pane the breakdown — and the band above it, and the title — is scoped to the highlighted row, the same agent `↵` would scope to, read but never committed, and follows the cursor; leaving the pane returns both to the committed scope |

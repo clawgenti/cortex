@@ -181,6 +181,16 @@ func (a tlAxis) cellAt(t time.Time) (int, bool) {
 	return i, true
 }
 
+// gapMarkerAt is the marker cell of the collapsed gap holding t, and false for an instant in no
+// gap. A gap's cells share one from and to, so the search lands on its first.
+func (a tlAxis) gapMarkerAt(t time.Time) (int, bool) {
+	i := sort.Search(len(a.cells), func(i int) bool { return a.cells[i].to.After(t) })
+	if i == len(a.cells) || !a.cells[i].gap || t.Before(a.cells[i].from) {
+		return 0, false
+	}
+	return i + timelineGapCells/2, true
+}
+
 // share is how much of one cell's time went to each state.
 type share struct {
 	tool, model, retry, subs, user float64
@@ -206,8 +216,8 @@ func (s share) of(st tlState) float64 {
 
 // top2 is the cell's two largest states in stacking order, with their heights. A terminal cell
 // holds two colours, so a cell that mixed three states shows its two largest, scaled up to the
-// cell's whole filled share so dropping the third does not make the cell look idler; the cursor
-// line carries the full split. On real sessions that is 8% of cells at "all", none at 1h or 5m.
+// cell's whole filled share so dropping the third does not make the cell look idler. On real
+// sessions that is 8% of cells at "all", none at 1h or 5m.
 func (s share) top2() (lo tlState, loF float64, hi tlState, hiF float64) {
 	a, b := stNone, stNone
 	for st := stTool; st < stNone; st++ {
@@ -359,15 +369,28 @@ func (v ivs) cover(lo, hi time.Time) time.Duration {
 	return d
 }
 
-// waits classifies the gaps between an agent's consecutive turns. After a failed call it was
-// retrying. When the next turn was woken by a subagent's result, or one of its subagents was
-// running, it was waiting on its subagents. After a finished reply otherwise, it was waiting
-// on the user; only the main agent has one.
+// waits classifies the gaps between an agent's consecutive turns, and the one after its last.
+//
+//   - Woken by a subagent's result: waiting on its subagents, as is any time one of them or one
+//     of its background jobs was running.
+//   - The next call re-sent the conversation unchanged: retrying, the whole gap.
+//   - After a failed call otherwise: retrying until the last failed request to a model host in
+//     the gap, then waiting on the user, who had to act. Claude Code retries a cut stream for a
+//     few minutes and then shows the error and stops.
+//   - Anything else on the main agent is waiting on the user. A cell takes every other state
+//     first, so this is only the time nothing else explains. A gap that opens on a tool lost
+//     without its result is the exception: the tool may have run on (old proxies lost results
+//     they had), so it is left unclaimed rather than called the user's.
 func waits(tl *timeline.Timeline, agent string, children []string, life map[string][2]time.Time, now time.Time) (retry, subs, user ivs) {
 	var kids [][2]time.Time
 	for _, k := range children {
 		if l, ok := life[k]; ok {
 			kids = append(kids, l)
+		}
+	}
+	for _, j := range tl.Jobs {
+		if j.Agent == agent {
+			kids = append(kids, [2]time.Time{j.Start, tlEndOr(j.End, now)})
 		}
 	}
 	woke := map[int64]bool{}
@@ -376,34 +399,77 @@ func waits(tl *timeline.Timeline, agent string, children []string, life map[stri
 			woke[r.At.UnixNano()] = true
 		}
 	}
+	lostAt := map[int64]bool{}
+	for _, x := range tl.Tools {
+		if x.Agent == agent && x.Lost {
+			lostAt[x.Start.UnixNano()] = true
+		}
+	}
 	var turns []timeline.Turn
 	for _, t := range tl.Turns {
 		if t.Agent == agent {
 			turns = append(turns, t)
 		}
 	}
+	failed := modelHostFailures(tl, now)
+	main := agent == timeline.MainAgent
 	var r, s, u [][2]time.Time
-	for i := 0; i+1 < len(turns); i++ {
-		g0, g1 := tlEndOr(turns[i].End, now), turns[i+1].Start
+	for i := range turns {
+		if turns[i].End == nil {
+			continue // in flight: the model's share covers it
+		}
+		g0, g1, resent := *turns[i].End, now, false
+		if i+1 < len(turns) {
+			g1, resent = turns[i+1].Start, turns[i+1].Resent
+		}
 		if !g1.After(g0) {
 			continue
 		}
 		switch {
-		case turns[i].Error:
-			r = append(r, [2]time.Time{g0, g1})
 		case woke[g1.UnixNano()]:
 			s = append(s, [2]time.Time{g0, g1})
-		case turns[i].Finish == "end_turn" && agent == timeline.MainAgent:
-			// The whole gap: where a subagent ran during it, that part is drawn as waiting on
-			// subagents, which a cell takes before the user's share.
+		case resent:
+			r = append(r, [2]time.Time{g0, g1})
+		case turns[i].Error || turns[i].Lost:
+			end := g0
+			for _, f := range failed {
+				if !f[0].Before(g0) && f[0].Before(g1) {
+					end = tlMaxTime(end, tlMinTime(f[1], g1))
+				}
+			}
+			r = append(r, [2]time.Time{g0, end})
+			if main {
+				u = append(u, [2]time.Time{end, g1})
+			}
+		case lostAt[g0.UnixNano()]:
+		case main:
 			u = append(u, [2]time.Time{g0, g1})
 		}
 	}
-	// 5: a main agent whose last call finished its reply is waiting on the user now.
-	if n := len(turns); n > 0 && agent == timeline.MainAgent && turns[n-1].Finish == "end_turn" && turns[n-1].End != nil && now.After(*turns[n-1].End) {
-		u = append(u, [2]time.Time{*turns[n-1].End, now})
-	}
 	return newIvs(r), newIvs(append(s, kids...)), newIvs(u)
+}
+
+// modelHostFailures are the failed requests to any host a turn was sent to, which is where a
+// client's retries of a failed call go. A gateway's failed CONNECTs record no model call, so the
+// host is matched rather than the kind.
+func modelHostFailures(tl *timeline.Timeline, now time.Time) [][2]time.Time {
+	turnSeq := map[uint64]bool{}
+	for _, t := range tl.Turns {
+		turnSeq[t.Seq] = true
+	}
+	hosts := map[string]bool{}
+	for _, h := range tl.Hosts {
+		if turnSeq[h.Seq] {
+			hosts[h.Host] = true
+		}
+	}
+	var out [][2]time.Time
+	for _, h := range tl.Hosts {
+		if h.Error && hosts[h.Host] {
+			out = append(out, [2]time.Time{h.Start, tlEndOr(h.End, now)})
+		}
+	}
+	return out
 }
 
 // tlAgentRows orders agents as a tree, main first and each child under its parent, and fills
@@ -460,10 +526,9 @@ func tlAgentRows(tl *timeline.Timeline, ax tlAxis, from, to, now time.Time) []tl
 		row := tlAgentRow{agent: a, depth: depth, cells: make([]share, ax.width()), alive: make([]bool, ax.width()),
 			modelTime: m.cover(from, to), toolTime: t.cover(from, to), calls: calls[a.ID]}
 		l, known := life[a.ID]
+		// Gap cells are filled too, each with the whole stretch it stands for, so the marker can
+		// say what that stretch was.
 		for c, cell := range ax.cells {
-			if cell.gap {
-				continue
-			}
 			lo, hi := cell.from, cell.to
 			// A subagent is measured against the part of the cell it was alive for; the main
 			// agent against the whole cell, since it is alive for the whole session.
@@ -546,6 +611,8 @@ func tlHostRows(tl *timeline.Timeline, ax tlAxis, from, to, now time.Time) []tlH
 			if c, ok := ax.cellAt(at); ok {
 				a.row.err[c] = true
 				a.row.peak[c] = max(a.row.peak[c], 1)
+			} else if c, ok := ax.gapMarkerAt(at); ok {
+				a.row.err[c] = true // a failure inside a collapsed gap still shows, on its marker
 			}
 		}
 		out = append(out, *a.row)
