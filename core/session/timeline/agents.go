@@ -27,7 +27,7 @@ var (
 	spawnedIDRe    = regexp.MustCompile(`agentId: ([A-Za-z0-9_-]+)`)
 	// backgroundRe is Claude Code's result for a shell command it started in the background;
 	// the command's <task-notification> later names the same id.
-	backgroundRe = regexp.MustCompile(`Command running in background with ID: ([A-Za-z0-9_-]+)`)
+	backgroundRe = regexp.MustCompile(`^Command running in background with ID: ([A-Za-z0-9_-]+)`)
 )
 
 // previewMax bounds a tool's preview: enough to tell two Bash calls apart in a one-line strip.

@@ -645,6 +645,17 @@ func TestBackgroundJobRunsUntilItsNotification(t *testing.T) {
 	}
 }
 
+// A result that only quotes the acknowledgement, a file or diff read back, starts no job.
+func TestQuotedBackgroundMarkerStartsNoJob(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t1", Name: "Read"})
+	r.turn("", 2, 1, h, []pipeline.InferenceToolResult{result("t1", `+	r.turn("", 2, 1, h, result("t1", "Command running in background with ID: bk42."))`)}, "end_turn")
+	if tl := Build("s", r.events, time.Time{}); len(tl.Jobs) != 0 {
+		t.Errorf("jobs = %+v, want none", tl.Jobs)
+	}
+}
+
 // Aging an unanswered request is the one clock-dependent step, so a cached timeline can run it
 // again later and get what a fresh Build would.
 func TestLoseUnansweredMatchesAFreshBuild(t *testing.T) {
