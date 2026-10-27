@@ -353,6 +353,27 @@ func TestBridgedOpenFoldsIntoTheRowRecordedWithIt(t *testing.T) {
 	}
 }
 
+// A tunnel with a recorded close stayed opaque: the proxy records no close for a bridged one.
+// Whatever row follows its open, the tunnel keeps its span.
+func TestClosedTunnelIsNeverFolded(t *testing.T) {
+	for name, next := range map[string]pipeline.SessionEvent{
+		"request":    {At: at(1), Phase: pipeline.SessionRequest, RequestID: "h", Host: "api.example.com"},
+		"redirected": {At: at(1), Phase: pipeline.SessionRequest, RequestID: "h", Host: "gw.example", RequestedHost: "api.example.com"},
+		"denial":     {At: at(1), Phase: pipeline.SessionDenied, RequestID: "d", Host: "api.example.com", StatusCode: 403},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var r rec
+			r.add(pipeline.SessionEvent{At: at(0), Phase: pipeline.SessionRequest, RequestID: "c", Host: "api.example.com:443", Tunnel: true})
+			r.add(next)
+			r.add(pipeline.SessionEvent{At: at(5), Phase: pipeline.SessionResponse, RequestID: "c", Host: "api.example.com:443", Tunnel: true, StatusCode: 200})
+			hs := Build("s", r.events, time.Time{}).Hosts
+			if !slices.ContainsFunc(hs, func(h Host) bool { return h.Kind == KindTunnel && h.End != nil && h.End.Equal(at(5)) }) {
+				t.Errorf("hosts = %+v, want the tunnel kept and closed", hs)
+			}
+		})
+	}
+}
+
 func TestClipKeepsOverlappingSpansAndEveryAgent(t *testing.T) {
 	var r rec
 	h := []pipeline.InferenceMessage{user("go")}

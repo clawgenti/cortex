@@ -10,6 +10,13 @@ import (
 // response is left open, which is honest for one in flight and for one whose stream died.
 func buildHosts(t *Timeline, events []pipeline.SessionEvent, now time.Time) {
 	open := map[string]int{}
+	// A tunnel the proxy recorded a close for stayed opaque; a bridged one records none.
+	closed := map[string]bool{}
+	for i := range events {
+		if e := &events[i]; e.Tunnel && e.Phase == pipeline.SessionResponse && e.RequestID != "" {
+			closed[e.RequestID] = true
+		}
+	}
 	// A tunnel open with no reason is either a bridged CONNECT, whose decrypted request is
 	// its own row, or an opaque tunnel the transparent listener records before it knows. Held
 	// until the next event says which.
@@ -18,9 +25,9 @@ func buildHosts(t *Timeline, events []pipeline.SessionEvent, now time.Time) {
 		if pendingOpen < 0 {
 			return
 		}
-		if next != nil && (next.Phase == pipeline.SessionRequest || next.Phase == pipeline.SessionDenied) && !next.Tunnel &&
+		if next != nil && !closed[events[t.Hosts[pendingOpen].idx].RequestID] && (next.Phase == pipeline.SessionRequest || next.Phase == pipeline.SessionDenied) && !next.Tunnel &&
 			(HostKey(next.Host) == t.Hosts[pendingOpen].Host || HostKey(next.RequestedHost) == t.Hosts[pendingOpen].Host) {
-			// Bridged: drop the open, and its close if one is recorded later.
+			// Bridged: drop the open.
 			delete(open, events[t.Hosts[pendingOpen].idx].RequestID)
 			t.Hosts[pendingOpen].Host = ""
 		}

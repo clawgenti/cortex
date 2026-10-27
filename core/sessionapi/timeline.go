@@ -219,14 +219,11 @@ func (c *timelineCache) putPrefix(id string, epoch uint64, p *timelinePrefix) {
 	c.uses++
 	p.used = c.uses
 	c.prefixes[id] = p
-	// Held for timelineStale, then read again: a session nobody is watching keeps no history here.
-	time.AfterFunc(timelineStale, func() {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.prefixes[id] == p {
-			delete(c.prefixes, id)
+	for k, v := range c.prefixes {
+		if p.readAt.Sub(v.readAt) >= timelineStale {
+			delete(c.prefixes, k)
 		}
-	})
+	}
 	for {
 		total, oldest := 0, ""
 		for k, v := range c.prefixes {

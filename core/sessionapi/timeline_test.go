@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -342,8 +343,7 @@ func TestTimelineFollowsRetentionPruningAResumedSession(t *testing.T) {
 	}
 }
 
-// A resumed session's history is held only while someone keeps reading it, and only up to
-// timelinePrefixEvents across sessions.
+// A resumed session's history is held up to timelinePrefixEvents across sessions.
 func TestTimelineHeldHistoryIsBounded(t *testing.T) {
 	var c timelineCache
 	held := func() int {
@@ -367,5 +367,38 @@ func TestTimelineHeldHistoryIsBounded(t *testing.T) {
 	c.putPrefix("a", 1, &timelinePrefix{events: make([]pipeline.SessionEvent, 5)})
 	if held() != 20 {
 		t.Errorf("a history read before an erase was kept")
+	}
+}
+
+// A history replaced or dropped from the cache is not kept alive by it.
+func TestTimelineDroppedHistoryIsCollectable(t *testing.T) {
+	var c timelineCache
+	collected := make(chan struct{})
+	p := &timelinePrefix{events: make([]pipeline.SessionEvent, 1), readAt: time.Now()}
+	runtime.AddCleanup(p, func(ch chan struct{}) { close(ch) }, collected)
+	c.putPrefix("a", 0, p)
+	c.putPrefix("a", 0, &timelinePrefix{events: make([]pipeline.SessionEvent, 1), readAt: time.Now()})
+	p = nil
+	for range 20 {
+		runtime.GC()
+		select {
+		case <-collected:
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Error("a replaced history is still reachable")
+}
+
+// A history older than timelineStale goes when another is stored.
+func TestTimelineStaleHistoryIsSwept(t *testing.T) {
+	var c timelineCache
+	c.putPrefix("old", 0, &timelinePrefix{events: make([]pipeline.SessionEvent, 1), readAt: time.Now().Add(-2 * timelineStale)})
+	c.putPrefix("new", 0, &timelinePrefix{events: make([]pipeline.SessionEvent, 1), readAt: time.Now()})
+	c.mu.Lock()
+	_, old := c.prefixes["old"]
+	c.mu.Unlock()
+	if old {
+		t.Error("a stale history was kept")
 	}
 }
