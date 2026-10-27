@@ -12,7 +12,8 @@ Cortex sits in your agent's request path on your own machine, decrypts the traff
 and shows you every model call, tool call and agent-to-agent message as it happens.
 **Think `top`, for your coding agent:** `agentop observe` shows which sessions are
 eating your tokens, your context window and your money, live. Cortex can also strip
-the tool definitions your agent never calls, 4–20% of the prompt on every turn.
+the tool definitions your agent never calls, 4–20% of the prompt on every turn,
+switch your agent to another model server, and run your own scripts on its traffic.
 
 One binary, no Kubernetes. macOS or Linux, amd64 or arm64.
 
@@ -75,6 +76,55 @@ changes about how you start it. An agent that was already running picks up the c
 when it restarts. If anything looks wrong, `agentop doctor` checks the install and
 names the command that fixes it.
 
+## What else you can do
+
+**Switch to another model server.** When your provider is down, or you want the
+traffic to stay on your machine, send an agent's new sessions to a LiteLLM gateway or a
+local Ollama. Running sessions stay where they started. `S` in `agentop observe` does
+the same thing.
+
+```sh
+echo ollama | agentop server add ollama http://localhost:11434 \
+  --main granite4.2:8b --helper granite4.2:8b --key-stdin
+agentop server use ollama --agent claude-code
+```
+
+[Run an agent on a local model](./docs/laptop-local-model.md) walks the whole setup.
+
+**Change or block requests with a script.** Drop an executable file in
+`~/.cortex/plugins/` and it runs on every request. You don't edit any config or
+restart anything.
+
+```python
+#!/usr/bin/env python3
+from cortex import on, run
+
+@on.request
+def no_force_push(flow):
+    if "git push --force" in flow.latest_text:
+        flow.deny("force-push needs a human")
+
+run()        # shadow mode: records what it would do, changes nothing
+```
+
+To test a script before it changes anything, replay a session you already ran through
+it with `--replay <session-id>`. [Script plugins](./docs/script-plugin.md) has the rest.
+
+**Stop paying for tools you never call.** One command lists the tools you have not
+called in 30 days and prunes them from every prompt.
+
+```sh
+agentop tools scan --write ~/.cortex/config.yaml
+```
+
+[Cut token cost](./docs/laptop-token-savings.md) shows what to expect.
+
+**See what you spent.** For example, this month's spend per agent:
+
+```sh
+agentop cost --window month --by agent
+```
+
 ## Supported agents
 
 | Agent | Connect it | |
@@ -100,7 +150,9 @@ priced wherever Cortex [has a rate](./docs/pricing.md).
   only by you. Cortex never adds it to a keychain itself.
 - **Real certificates are still checked.** When a server's certificate fails, Cortex
   leaves that connection encrypted end to end.
-- **Read-only**, unless you turn on [tool pruning](./docs/laptop-token-savings.md).
+- **Read-only**, unless you turn on [tool pruning](./docs/laptop-token-savings.md),
+  route an agent to [another server](./docs/laptop-local-model.md), or set a
+  [script](./docs/script-plugin.md) to `enforce`.
 - **History on disk.** Sessions, prompts and replies included, are kept in
   [`~/.cortex/sessions`](./docs/laptop-service.md#session-history-is-kept-in-cortexsessions),
   and cost totals in `~/.cortex/cost`.
