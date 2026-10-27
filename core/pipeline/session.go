@@ -248,7 +248,9 @@ type SessionEvent struct {
 	// On the REQUEST row; pair it with the response row's StatusCode by RequestID.
 	// A 405 next to this is the origin rejecting the un-upgraded request, which is
 	// the sequence worth being able to read off the timeline rather than out of an
-	// agent's stderr.
+	// agent's stderr. A 426 with error.kind "upgrade_declined" is the proxy answering
+	// a Responses API WebSocket itself, before any origin is contacted
+	// (listener.decline_responses_websockets).
 	UpgradeStripped string
 
 	// HTTPMethod and HTTPPath are the request's HTTP verb and its
@@ -635,6 +637,13 @@ type EventError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"` // human-readable reason; safe to surface in logs/metrics
 }
+
+// ErrorKindUpgradeDeclined is the forward proxy answering a Responses API WebSocket
+// upgrade with 426 itself (listener.decline_responses_websockets). It rides on an
+// EventError because the status is a 4xx and the row should say whose answer it is,
+// but it is not a failure: the client is expected to switch to HTTPS, and does.
+// usage does not count it as an error, and the Finisher sees an allow.
+const ErrorKindUpgradeDeclined = "upgrade_declined"
 
 // SessionSource is how a listener resolved Context.Session.
 type SessionSource string

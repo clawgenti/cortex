@@ -523,6 +523,32 @@ func TestRecord_ErrorsAndDenials(t *testing.T) {
 	}
 }
 
+// The proxy's own 426 for a Responses API WebSocket is a request, and shows under its
+// status, but it is not an error: Codex is being told to use HTTPS, and does, once per
+// session. Any other 426 is still an error — the exemption is the kind, not the status.
+func TestRecord_DeclinedUpgradeIsNotAnError(t *testing.T) {
+	now := time.Date(2026, 9, 4, 23, 30, 30, 0, time.UTC)
+	a := New(WithClock(fixedClock(now)))
+
+	declined := respEvent(now, 426, 0, "", 0)
+	declined.Error = &pipeline.EventError{Kind: pipeline.ErrorKindUpgradeDeclined}
+	a.Record("s1", declined)
+	origin426 := respEvent(now, 426, 0, "", 0)
+	origin426.Error = &pipeline.EventError{Kind: "backend_error", Code: "426"}
+	a.Record("s1", origin426)
+
+	b := a.Snapshot(time.Minute, BucketWidth, "", GroupStatus).Buckets[0]
+	if b.Requests != 2 {
+		t.Errorf("requests = %d, want 2", b.Requests)
+	}
+	if b.Errors != 1 {
+		t.Errorf("errors = %d, want 1 — the origin's 426 only, not the proxy's declined upgrade", b.Errors)
+	}
+	if _, ok := b.Series["426"]; !ok {
+		t.Errorf("both 426s still belong under their status; got keys %v", keys(b.Series))
+	}
+}
+
 // Request events carry no status, duration or usage. Counting them would double
 // every request.
 func TestRecord_IgnoresRequestPhase(t *testing.T) {

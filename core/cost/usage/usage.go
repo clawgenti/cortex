@@ -1258,6 +1258,20 @@ func (a *Aggregator) evictColdestLocked() {
 	}
 }
 
+// countsAsError reports whether e is a failed exchange for Counts.Errors: a status of
+// 400 or more, or a denial.
+//
+// Except a proxy-declined WebSocket upgrade (pipeline.ErrorKindUpgradeDeclined). Its
+// 426 is Cortex telling Codex to use HTTPS, which it then does, once per session: by
+// design and on the default path, so counting it would give every healthy Codex
+// fleet a nonzero error rate. The Finisher sees it as an allow for the same reason.
+func countsAsError(e *pipeline.SessionEvent) bool {
+	if e.Error != nil && e.Error.Kind == pipeline.ErrorKindUpgradeDeclined {
+		return false
+	}
+	return e.StatusCode >= 400 || e.Phase == pipeline.SessionDenied
+}
+
 // foldInto accumulates one event into one ring.
 //
 // sessionID is passed rather than derived because the ring itself does not know
@@ -1338,7 +1352,7 @@ func (a *Aggregator) foldInto(ring []bucket, t time.Time, sessionID string, e *p
 	if ec.incompleteReason != "" {
 		addLabel(&b.byIncomplete, ringLabel(ec.incompleteReason), Counts{Requests: 1})
 	}
-	if e.StatusCode >= 400 || e.Phase == pipeline.SessionDenied {
+	if countsAsError(e) {
 		one.Errors = 1
 	}
 	b.Counts.Add(one)
