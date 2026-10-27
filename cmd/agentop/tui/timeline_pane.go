@@ -295,7 +295,8 @@ func (m *model) timelineCells() int {
 // timelineRange is the window's [from, to] and the layout's now. For a live session now is the
 // clock, so open spans grow and the window follows it. For one that is not, now is its last
 // recorded event: an open span ends there, and the window ends at the session's last activity,
-// so opening yesterday's session does not show an empty five minutes. A zero from means "all".
+// so opening yesterday's session does not show an empty five minutes. A zero from means "all",
+// whose to is now for a live session and zero, its last activity, for one that is not.
 func (m *model) timelineRange() (from, to, now time.Time, win int) {
 	t := &m.timeline
 	// Rounded to the refresh interval, so the window, and the cached layout built from it,
@@ -306,8 +307,11 @@ func (m *model) timelineRange() (from, to, now time.Time, win int) {
 	}
 	win = t.window(now)
 	w := timelineWindows[win]
-	if w.span == 0 || t.tl == nil {
+	if t.tl == nil || (w.span == 0 && !m.timelineLive()) {
 		return time.Time{}, time.Time{}, now, win
+	}
+	if w.span == 0 {
+		return time.Time{}, now, now, win
 	}
 	end := now
 	if !m.timelineLive() {
@@ -711,6 +715,12 @@ func axisLabels(lay tlLayout) string {
 			label := tlDuration(cell.to.Sub(cell.from))
 			claim(c-len(label)/2, label)
 		}
+	}
+	// A squeezed live wait is labelled with its length, like a gap, since its cells are not to
+	// scale with the rest.
+	if n := lay.axis.tail; n > 0 {
+		label := "+" + tlDuration(lay.axis.cells[w-1].to.Sub(lay.axis.cells[w-n].from))
+		claim(w-n, label)
 	}
 	format := "15:04"
 	if span := lay.to.Sub(lay.from); span <= 10*time.Minute {

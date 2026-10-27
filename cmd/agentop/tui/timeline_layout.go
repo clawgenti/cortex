@@ -47,10 +47,28 @@ const timelineGapCollapse = 30 * time.Minute
 // timelineGapCells is how wide a collapsed gap is drawn: the marker and a cell either side.
 const timelineGapCells = 3
 
+// timelineTailCells is the most cells a live session's "all" gives the wait since its last
+// activity. Past it the wait is squeezed into these cells and its length labelled.
+const timelineTailCells = 6
+
 // tlAxis maps cells to time. Each non-gap cell covers [from, to); a gap cell stands for a
 // collapsed idle stretch.
 type tlAxis struct {
 	cells []tlAxisCell
+	// tail is how many cells at the end are a live wait squeezed to timelineTailCells, 0 when
+	// none is.
+	tail int
+}
+
+// cellsFrom is how many cells begin at or after t.
+func (a tlAxis) cellsFrom(t time.Time) int {
+	n := 0
+	for _, c := range a.cells {
+		if !c.from.Before(t) {
+			n++
+		}
+	}
+	return n
 }
 
 type tlAxisCell struct {
@@ -275,14 +293,29 @@ type tlLayout struct {
 func buildTimelineLayout(tl *timeline.Timeline, from, to time.Time, cells int, now time.Time) tlLayout {
 	all := from.IsZero()
 	if all {
-		from, to = tl.Start, tlMaxTime(activityEnd(tl, now), tl.Start.Add(time.Second))
+		// A live session's "all" runs to now, as its windows do: the wait after its last reply is
+		// still going. to is set only then; an ended session stops at its last activity.
+		last := activityEnd(tl, now)
+		from, to = tl.Start, tlMaxTime(tlMaxTime(last, to), tl.Start.Add(time.Second))
 	}
 	if !to.After(from) {
 		to = from.Add(time.Second)
 	}
 	var ax tlAxis
 	if all {
-		ax = tlCollapsedAxis(from, to, tlBusyPeriods(tl, now), cells)
+		busy := tlBusyPeriods(tl, now)
+		ax = tlCollapsedAxis(from, to, busy, cells)
+		// The stretch from the last activity to now is drawn, not collapsed into a gap: it is the
+		// wait the pane is open to show. Drawn to scale while short, and in at most
+		// timelineTailCells once longer, so a long wait does not squeeze the work.
+		if last := activityEnd(tl, now); to.After(last) {
+			ax = tlCollapsedAxis(from, to, append(busy, [2]time.Time{last, to}), cells)
+			if n := ax.cellsFrom(last); n > timelineTailCells {
+				ax = tlCollapsedAxis(from, last, busy, cells-timelineTailCells)
+				tail := tlLinearAxis(last, to, timelineTailCells)
+				ax.cells, ax.tail = append(ax.cells, tail.cells...), timelineTailCells
+			}
+		}
 	} else {
 		ax = tlLinearAxis(from, to, cells)
 	}

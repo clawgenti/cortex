@@ -1191,3 +1191,49 @@ func TestTimelineStrip_NamesTheRequestWhenNoToolRan(t *testing.T) {
 		t.Errorf("↵ = %d %v, want llm.example's request (seq 1)", seq, ok)
 	}
 }
+
+// A live session's "all" runs to now, as its other windows do: the wait after its last reply is
+// drawn as waiting on the user, not cut off at the reply.
+func TestTimelineAll_LiveSessionRunsToNow(t *testing.T) {
+	m := timelineModel(t, 140, 46)
+	live := tlAt(1800).Add(10 * time.Minute) // the last reply ended at 1800s; live for 30 minutes
+	m.now = func() time.Time { return live }
+	m.timeline.fetchedAt, m.timeline.windowIdx = live, 3
+	lay, _ := m.timelineLayoutNow()
+	if !lay.to.Equal(live) {
+		t.Fatalf("all ends at %v, want now %v", lay.to.Sub(tlBase), live.Sub(tlBase))
+	}
+	last := lay.agents[0].cells[lay.axis.width()-1]
+	if lay.axis.cells[lay.axis.width()-1].gap || !near(last.user, 1) {
+		t.Errorf("the newest cell = %+v, want waiting on the user", last)
+	}
+}
+
+// A live wait is drawn to scale while short; once it would take more than timelineTailCells, it
+// is squeezed into them and labelled with its length, so the work keeps the width.
+func TestTimelineAll_LongLiveWaitIsCapped(t *testing.T) {
+	for _, tc := range []struct {
+		after  time.Duration
+		capped bool
+	}{{20 * time.Second, false}, {25 * time.Minute, true}} {
+		m := timelineModel(t, 140, 46)
+		live := tlAt(1800).Add(tc.after)
+		m.now = func() time.Time { return live }
+		m.timeline.fetchedAt, m.timeline.windowIdx = live, 3
+		lay, _ := m.timelineLayoutNow()
+		w := lay.axis.width()
+		if !lay.axis.cells[w-1].to.Equal(live) || !near(lay.agents[0].cells[w-1].user, 1) {
+			t.Errorf("%v on: the newest cell does not end at now waiting on the user", tc.after)
+		}
+		tailCells := lay.axis.cellsFrom(tlAt(1800))
+		if tc.capped && (tailCells != timelineTailCells || lay.axis.tail != timelineTailCells) {
+			t.Errorf("%v on: the wait takes %d cells (tail %d), want %d", tc.after, tailCells, lay.axis.tail, timelineTailCells)
+		}
+		if !tc.capped && (tailCells > timelineTailCells || lay.axis.tail != 0) {
+			t.Errorf("%v on: a short wait took %d cells (tail %d), want it drawn to scale", tc.after, tailCells, lay.axis.tail)
+		}
+		if label := axisLabels(lay); tc.capped != strings.Contains(label, "+"+tlDuration(tc.after)) {
+			t.Errorf("%v on: axis %q, want the squeezed wait labelled only when squeezed", tc.after, label)
+		}
+	}
+}

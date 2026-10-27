@@ -1285,10 +1285,12 @@ agentop is for, and the other four are surfaces you visit and leave.
   `w` cycles 5m / 1h / 24h / all, offering only the windows shorter than the
   session, so a short session shows "all" alone; the choice is saved, and a saved
   window too long for a session shows "all" without being overwritten. A session
-  is live while its last recorded event is under 30 minutes old: its windows
-  follow now, and a call still in flight grows. Once it is not, an open call ends
-  at the session's last event, the last moment anything was seen, and the window
-  ends at its last activity. "all" squeezes each stretch over 30 minutes with
+  is live while its last recorded event is under 30 minutes old: its windows,
+  "all" included, follow now, and a call still in flight grows. At "all" the
+  wait since its last activity takes at most 6 cells, labelled with its length
+  (`+24m`) once squeezed, so the work keeps the width. Once it is not, an open
+  call ends at the session's last event, the last moment anything was seen, and
+  the window ends at its last activity. "all" squeezes each stretch over 30 minutes with
   no model call or tool into a `┆`, coloured by the state that held most of it,
   and the axis says how long it was; a host's `┆` is red when a request failed in
   it. `←`/`→` pick a moment, skipping those stretches, and the line under the
