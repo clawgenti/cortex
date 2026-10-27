@@ -9,7 +9,7 @@ One binary on macOS or Linux. No Kubernetes, no account.
 <img src="./docs/assets/cortex-demo.svg" width="100%"
      alt="A terminal installs Cortex with one command, and a second command points Claude Code at it. Three Claude Code sessions run in separate directories, and agentop then lists all three with their token counts, cost and remaining context. Pressing $ breaks the spend down by tier, where cache reads dominate. Drilling into the busiest session shows the whole conversation and the fifteen-tool manifest it re-sends on every turn.">
 
-## Try it
+## Quick start
 
 <!-- This install command is duplicated in the website's laptop quickstart:
      rossoctl/rossoctl → docs/get-started/laptop.md ("Step 1: install the program").
@@ -38,7 +38,8 @@ agentop observe
 agentop cost --window month --by agent
 ```
 
-**Cut 4–20% off every prompt.** Cortex strips the tool definitions you never call.
+**Cut 4–20% off every Claude Code prompt.** Cortex strips the tool
+definitions you never call.
 
 ```sh
 agentop tools scan --write ~/.cortex/config.yaml
@@ -48,23 +49,13 @@ agentop tools scan --write ~/.cortex/config.yaml
 traffic to stay local? Send new sessions to a LiteLLM gateway or Ollama.
 
 ```sh
-agentop server add ollama http://localhost:11434 --main granite4.2:8b --helper granite4.2:8b
+echo ollama | agentop server add ollama http://localhost:11434 \
+  --main granite4.2:8b --helper granite4.2:8b --key-stdin   # Ollama takes any key
 agentop server use ollama --agent claude-code
 ```
 
-**Add your own rules in a few lines of Python.** Drop a script in `~/.cortex/plugins/`.
-It can rewrite or block any request, with no config edit and no restart.
-
-```python
-@on.request
-def no_force_push(flow):
-    if "git push --force" in flow.latest_text:
-        flow.deny("force-push needs a human")
-```
-
 Guides: [token savings](./docs/laptop-token-savings.md) ·
-[local models](./docs/laptop-local-model.md) ·
-[script plugins](./docs/script-plugin.md) · [pricing](./docs/pricing.md)
+[local models](./docs/laptop-local-model.md) · [pricing](./docs/pricing.md)
 
 ## How it works
 
@@ -112,7 +103,8 @@ and spend caps. Start with [Running Cortex in Kubernetes](./docs/kubernetes.md).
 ## Learn more
 
 [All docs](./docs/README.md) · [agentop reference](./cmd/agentop/README.md) ·
-[plugin catalog](./docs/plugin-catalog.md) · [cpex policy build](./docs/laptop-service.md#the-cpex-build) ·
+[plugin catalog](./docs/plugin-catalog.md) · [script plugins](./docs/script-plugin.md) ·
+[cpex policy build](./docs/laptop-service.md#the-cpex-build) ·
 [full install guide](https://www.rossoctl.dev/docs/dev/get-started/laptop) ·
 [install stats](https://rossoctl.github.io/cortex/install-stats/) (from GitHub's download counts, no telemetry)
 
