@@ -121,8 +121,8 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
 - A **turn** is one model call, request to end of response. Claude Code's
   progress-label calls and tool-less side calls (titler, classifier) are left
   out. `error` marks a call that failed: an upstream error, a refusal, the
-  client giving up, or a response that ended with no finish reason, which is
-  a stream cut mid-reply. `resent` marks a call that sent its agent's previous
+  client giving up, a finish of `content_filter`, `failed` or `cancelled`, or a
+  response that ended with no finish reason, which is a stream cut mid-reply. `resent` marks a call that sent its agent's previous
   call's conversation again unchanged: a retry.
 - A **tool** runs from the response that requested it to the agent's first
   request carrying its result (`inference.toolResults[].toolUseId`). A tool
@@ -139,8 +139,10 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
 - A **job** is a background shell command, from the tool result that
   acknowledged it (`Command running in background with ID: …`) to the first
   `<task-notification>` naming that id. Its tool call ends at the
-  acknowledgement, so the job is what shows it still running. Absent when the
-  session started none.
+  acknowledgement, so the job is what shows it still running. A job with no
+  `end` is one no notification named: still running, or never reported, as a
+  server left running when its agent exited is. Absent when the session
+  started none.
 
 **Hosts** are every outbound request paired with its response, every opaque
 tunnel, and every denial. `kind` is `llm`, `mcp`, `http` or `tunnel`, and

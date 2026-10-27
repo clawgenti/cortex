@@ -41,7 +41,7 @@ func sampleTimeline() *timeline.Timeline {
 			{Agent: timeline.MainAgent, Start: tlAt(0), End: tlPtr(200), Finish: "tool_use", Seq: 1},
 			{Agent: timeline.MainAgent, Start: tlAt(290), End: tlPtr(300), Finish: "end_turn", Seq: 5},
 			{Agent: timeline.MainAgent, Start: tlAt(600), End: tlPtr(900), Error: true, Seq: 20},
-			{Agent: timeline.MainAgent, Start: tlAt(960), End: tlPtr(1200), Finish: "end_turn", Seq: 30},
+			{Agent: timeline.MainAgent, Start: tlAt(960), End: tlPtr(1200), Finish: "end_turn", Resent: true, Seq: 30},
 			{Agent: timeline.MainAgent, Start: tlAt(1500), End: tlPtr(1800), Finish: "end_turn", Seq: 40},
 			{Agent: "a1", Start: tlAt(300), End: tlPtr(500), Finish: "tool_use", Seq: 7},
 			{Agent: "a1", Start: tlAt(560), End: tlPtr(580), Finish: "end_turn", Seq: 15},
@@ -111,6 +111,19 @@ func TestTimelineLayout_MainRowSharesEachState(t *testing.T) {
 			!near(got.subs, tc.want.subs) || !near(got.user, tc.want.user) {
 			t.Errorf("%s at %vs: %+v, want %+v", tc.name, tc.sec, got, tc.want)
 		}
+	}
+}
+
+// A failed call followed by a new message is the user's time, not a retry: a refusal the user
+// answered by rephrasing re-sends nothing.
+func TestTimelineLayout_FailedCallThenNewMessageIsNotRetry(t *testing.T) {
+	tl := sampleTimeline()
+	for i := range tl.Turns {
+		tl.Turns[i].Resent = false
+	}
+	lay := buildTimelineLayout(tl, tlAt(0), tlAt(1800), 60, tlAt(3600))
+	if got := lay.agents[0].cells[cellOf(t, lay, 930)]; got.retry != 0 {
+		t.Errorf("gap after a failed call with no re-send: %+v, want no retry share", got)
 	}
 }
 
