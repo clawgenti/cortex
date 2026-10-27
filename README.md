@@ -20,7 +20,7 @@ curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh
 
 # then, in a new terminal:
 agentop configure claude-code enable    # once — or opencode, codex, bob
-claude                                  # start your agent as you always do
+claude                                  # start (or restart) your agent as you always do
 agentop observe                         # in another terminal: watch it live
 ```
 
