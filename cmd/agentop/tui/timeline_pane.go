@@ -304,10 +304,22 @@ func (m *model) timelineLayoutNow() (tlLayout, bool) {
 // one that keeps a row's bars off the next row's.
 const timelineFixedLines = 7
 
-// timelineRowBudget is how many two-line rows fit under the fixed lines. A body too short for
-// the legend drops it; see renderTimeline.
-func (m *model) timelineRowBudget() int {
-	fixed := timelineFixedLines
+// tlEmptyLines is what an empty side draws in place of its rows: a note and a blank line.
+func tlEmptyLines(lay tlLayout) int {
+	n := 0
+	if len(lay.agents) == 0 {
+		n += 2
+	}
+	if len(lay.hosts) == 0 {
+		n += 2
+	}
+	return n
+}
+
+// timelineRowBudget is how many two-line rows fit under the fixed lines and any empty side's
+// note. A body too short for the legend drops it; see renderTimeline.
+func (m *model) timelineRowBudget(lay tlLayout) int {
+	fixed := timelineFixedLines + tlEmptyLines(lay)
 	if m.bodyHeight < timelineFixedLines+2*4 {
 		fixed-- // no legend
 	}
@@ -317,13 +329,13 @@ func (m *model) timelineRowBudget() int {
 // timelineAgentRows is how many agent rows fit, sharing the body with the host rows: hosts get
 // up to three rows and agents the rest, agents first when only one row fits.
 func (m *model) timelineAgentRows(lay tlLayout) int {
-	rows := m.timelineRowBudget()
+	rows := m.timelineRowBudget(lay)
 	hosts := min(len(lay.hosts), 3, max(rows-1, 0))
 	return max(min(len(lay.agents), rows-hosts), 0)
 }
 
 func (m *model) timelineHostRows(lay tlLayout, agentRows int) int {
-	return max(min(len(lay.hosts), m.timelineRowBudget()-agentRows), 0)
+	return max(min(len(lay.hosts), m.timelineRowBudget(lay)-agentRows), 0)
 }
 
 // timelineCursorSeq is the event under the cursor: the first tool started there in a visible
@@ -475,13 +487,13 @@ func (m *model) renderTimeline() string {
 		b.WriteString(styleMuted.Render("  loading…") + "\n")
 		return b.String()
 	}
-	// The chart needs its fixed lines and one row; below that, say so rather than run past the
-	// terminal.
-	if m.bodyHeight < timelineFixedLines+1 {
+	// The chart needs its fixed lines, any empty side's note and one row; below that, say so
+	// rather than run past the terminal.
+	lay, _ := m.timelineLayoutNow()
+	if m.bodyHeight < timelineFixedLines+tlEmptyLines(lay)+1 {
 		b.WriteString(styleMuted.Render("  make the terminal taller to see the timeline"))
 		return b.String()
 	}
-	lay, _ := m.timelineLayoutNow()
 	_, _, now, win := m.timelineRange()
 	var tabs []string
 	for _, i := range offeredWindows(t.sessionSpan(now)) {

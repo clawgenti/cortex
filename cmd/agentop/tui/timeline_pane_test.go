@@ -870,3 +870,30 @@ func TestTimelineOpenSpans_EndAtTheLastEventOnceTheSessionStopped(t *testing.T) 
 		t.Errorf("a live session's running tool brings tool time to %v, want it growing to now", got)
 	}
 }
+
+// A session with no agents, or no hosts, draws a note in that side's place; the other side's
+// rows make room for it rather than push the pane past the terminal.
+func TestTimelinePane_FitsWithOneSideEmpty(t *testing.T) {
+	forceColor(t)
+	noHosts := sampleTimeline()
+	noHosts.Hosts = nil
+	for i := 0; i < 20; i++ {
+		id := string(rune('b' + i))
+		noHosts.Agents = append(noHosts.Agents, timeline.Agent{ID: id, Parent: timeline.MainAgent, Label: "subagent " + id})
+		noHosts.Turns = append(noHosts.Turns, timeline.Turn{Agent: id, Start: tlAt(float64(100 * i)), End: tlPtr(float64(100*i + 50))})
+	}
+	noAgents := &timeline.Timeline{ID: "s", Start: tlAt(0), End: tlAt(600), Agents: []timeline.Agent{}}
+	for i := 0; i < 20; i++ {
+		noAgents.Hosts = append(noAgents.Hosts, timeline.Host{Host: "h" + string(rune('a'+i)) + ".example", Kind: timeline.KindHTTP, Start: tlAt(float64(i * 10)), End: tlPtr(float64(i*10 + 5))})
+	}
+	sizes := append([][2]int{{100, 10}, {100, 12}, {100, 14}, {100, 16}, {100, 18}}, fitSizes...)
+	for name, tl := range map[string]*timeline.Timeline{"no hosts": noHosts, "no agents": noAgents} {
+		for _, d := range sizes {
+			m := timelineModel(t, d[0], d[1])
+			m.timeline.tl = tl
+			m.timeline.windowIdx = 3
+			m.layout()
+			assertFits(t, m, name)
+		}
+	}
+}
