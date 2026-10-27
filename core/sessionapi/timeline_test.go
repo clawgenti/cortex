@@ -390,15 +390,21 @@ func TestTimelineDroppedHistoryIsCollectable(t *testing.T) {
 	t.Error("a replaced history is still reachable")
 }
 
-// A history older than timelineStale goes when another is stored.
-func TestTimelineStaleHistoryIsSwept(t *testing.T) {
+// A held history goes timelinePrefixTTL after it was read, though nothing else is stored.
+func TestTimelineIdleHistoryExpires(t *testing.T) {
+	defer func(d time.Duration) { timelinePrefixTTL = d }(timelinePrefixTTL)
+	timelinePrefixTTL = 10 * time.Millisecond
 	var c timelineCache
-	c.putPrefix("old", 0, &timelinePrefix{events: make([]pipeline.SessionEvent, 1), readAt: time.Now().Add(-2 * timelineStale)})
-	c.putPrefix("new", 0, &timelinePrefix{events: make([]pipeline.SessionEvent, 1), readAt: time.Now()})
-	c.mu.Lock()
-	_, old := c.prefixes["old"]
-	c.mu.Unlock()
-	if old {
-		t.Error("a stale history was kept")
+	c.putPrefix("a", 0, &timelinePrefix{events: make([]pipeline.SessionEvent, 1), readAt: time.Now()})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		n := len(c.prefixes)
+		c.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
+	t.Error("an idle history was kept past its expiry")
 }

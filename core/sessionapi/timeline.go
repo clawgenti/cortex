@@ -101,6 +101,9 @@ const timelinePrefixEvents = 10_000
 // unanswered requests against now, so the same events can draw differently later.
 const timelineStale = time.Minute
 
+// timelinePrefixTTL is how long a held history outlives its read; a var so a test can shorten it.
+var timelinePrefixTTL = timelineStale
+
 // get returns a private copy, since the caller clips it.
 func (c *timelineCache) get(s *Server, id string) (*timeline.Timeline, bool) {
 	// The session's newest Seq: memory's when it holds the session, else the archive's,
@@ -219,11 +222,15 @@ func (c *timelineCache) putPrefix(id string, epoch uint64, p *timelinePrefix) {
 	c.uses++
 	p.used = c.uses
 	c.prefixes[id] = p
-	for k, v := range c.prefixes {
-		if p.readAt.Sub(v.readAt) >= timelineStale {
-			delete(c.prefixes, k)
+	// Captures the id and read time, not p, so a replaced history is not kept alive by its timer.
+	at := p.readAt
+	time.AfterFunc(timelinePrefixTTL, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if q := c.prefixes[id]; q != nil && q.readAt.Equal(at) {
+			delete(c.prefixes, id)
 		}
-	}
+	})
 	for {
 		total, oldest := 0, ""
 		for k, v := range c.prefixes {
