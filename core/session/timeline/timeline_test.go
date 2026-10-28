@@ -606,9 +606,16 @@ func TestReplyWithoutAFinishIsAnError(t *testing.T) {
 	r.turn("", 0, 1, h, nil, "")
 	r.turn("", 2, 1, h, nil, "refusal")
 	r.turn("", 4, 1, h, nil, "end_turn")
+	r.turn("", 6, 1, h, nil, "content_filter")
+	r.turn("", 8, 1, h, nil, "failed")
+	r.turn("", 10, 1, h, nil, "cancelled")
+	r.turn("", 12, 1, h, nil, "incomplete")
 	tl := Build("s", r.events, time.Time{})
-	if !tl.Turns[0].Error || !tl.Turns[1].Error || tl.Turns[2].Error {
-		t.Errorf("errors = %v %v %v, want the cut stream and the refusal only", tl.Turns[0].Error, tl.Turns[1].Error, tl.Turns[2].Error)
+	want := []bool{true, true, false, true, true, true, false}
+	for i, w := range want {
+		if tl.Turns[i].Error != w {
+			t.Errorf("turn %d finish %q: error = %v, want %v", i, tl.Turns[i].Finish, tl.Turns[i].Error, w)
+		}
 	}
 }
 
@@ -642,6 +649,17 @@ func TestBackgroundJobRunsUntilItsNotification(t *testing.T) {
 	tl := Build("s", r.events, time.Time{})
 	if len(tl.Jobs) != 1 || tl.Jobs[0].ID != "bk42" || !tl.Jobs[0].Start.Equal(at(2)) || tl.Jobs[0].End == nil || !tl.Jobs[0].End.Equal(at(60)) {
 		t.Fatalf("jobs = %+v, want bk42 from 2s to 60s", tl.Jobs)
+	}
+}
+
+// A result that only quotes the acknowledgement, a file or diff read back, starts no job.
+func TestQuotedBackgroundMarkerStartsNoJob(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t1", Name: "Read"})
+	r.turn("", 2, 1, h, []pipeline.InferenceToolResult{result("t1", `+	r.turn("", 2, 1, h, result("t1", "Command running in background with ID: bk42."))`)}, "end_turn")
+	if tl := Build("s", r.events, time.Time{}); len(tl.Jobs) != 0 {
+		t.Errorf("jobs = %+v, want none", tl.Jobs)
 	}
 }
 

@@ -37,6 +37,51 @@ agents added mid-session — verified across `KeepAlive`, `StartInterval` and
 `RunAtLoad` — so the supervisor is what makes crash recovery work. On Linux there is
 one process; systemd handles it.
 
+## Linux: staying up after you log out
+
+On Linux, Cortex is a systemd **user** unit, which runs under your own systemd
+manager. That manager normally starts at login and stops when your last session ends,
+taking Cortex with it. **Lingering** keeps it running with nobody logged in, and
+starts it at boot. Setup turns it on for you, which on a headless or SSH-only box is
+what keeps Cortex up between logins.
+
+Turning lingering on for yourself needs **polkit**. logind asks polkit whether you
+may, and systemd's own policy says yes, with no password. But that policy is applied
+by `polkitd`, a separate package, and a minimal install can lack it — Debian with
+only the SSH server, for one. Without it logind has no one to ask and refuses, and
+setup says so:
+
+```text
+loaded, but lingering could not be turned on: Cortex will stop when you log out.
+  loginctl enable-linger: Could not enable linger: Access denied
+  polkit is not installed, and logind needs it to let a user turn lingering on.
+```
+
+Cortex is still installed and running; it just stops at your next logout. Either fix
+works, and neither needs Cortex reinstalled:
+
+```sh
+# Install polkit, then turn lingering on for yourself
+sudo apt install polkitd      # Debian and Ubuntu; on Fedora, Arch and others the package is polkit
+loginctl enable-linger
+
+# Or turn it on directly, as root
+sudo loginctl enable-linger "$(id -un)"
+```
+
+Re-running `agentop setup` after installing polkit is not enough: setup finds Cortex
+installed and healthy, changes nothing, and does not retry lingering.
+
+When polkit *is* installed and still refuses, the system's policy has decided users may
+not keep services running, and setup says that instead; only the root fix applies. Any
+other failure, after polkit has said yes, is shown in loginctl's own words, again with
+only the root fix. Check where you stand with
+`loginctl show-user "$(id -un)" --property=Linger`.
+
+Setup records that it turned lingering on, and `agentop uninstall` turns it back off
+only then. Lingering you turned on yourself, by either fix above, is left on when you
+uninstall: turn it off with `loginctl disable-linger` if you no longer want it.
+
 ## Re-running the installer is safe
 
 The one-liner is how you upgrade, so it is meant to be run repeatedly. When nothing has
@@ -64,10 +109,10 @@ restarting.
 A restart does not wait for those requests either. On a stop the proxy closes every port at
 once and exits, typically in well under a second, and its supervisor kills one that has not
 gone within 3s — inside launchd's 5s, so no proxy is ever left behind holding the ports. The
-proxy that replaces it binds its ports before it opens anything in `~/.cortex`, then replays
-the session archive (up to 5s, see below) before it serves; a client that connects during
-the replay is answered when it ends rather than refused. When a restart genuinely is needed, `agentop service install` says how many
-connections it is about to cut. Setup does not pass that line on.
+proxy that replaces it binds its ports before it opens anything in `~/.cortex`, so a client
+that connects before it serves is answered once it does rather than refused. When a restart
+genuinely is needed, `agentop service install` says how many connections it is about to cut.
+Setup does not pass that line on.
 
 To restart deliberately: `agentop service restart`.
 
@@ -340,9 +385,10 @@ own eviction (`session.max_sessions`, a `session.ttl`). `agentop` lists every se
 holds beside the ones in memory, and Enter opens one like any other. Each session keeps its
 figures across a restart too — events, tokens, cost, title: the proxy adds what the archive holds
 from before the restart to what it has seen since. LAST 1H and the usage pane's hour windows
-survive a restart as well: at startup, before it serves anything, the proxy replays the archive's
-last six hours into them. If that would take longer than 5 seconds it gives up, and they start
-empty as they used to.
+survive a restart as well: at startup the proxy replays the archive's last six hours into them,
+while it is already serving. For the few seconds that takes they count only traffic since the
+start, then fill in. If the replay would take longer than a minute it gives up, and they count
+only traffic since the start, as they used to.
 
 **Unlike the cost ledger, this is the content.** Prompts, completions, tool arguments and
 tool results — everything the session API serves — sit in

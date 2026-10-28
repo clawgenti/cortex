@@ -27,8 +27,13 @@ var (
 	spawnedIDRe    = regexp.MustCompile(`agentId: ([A-Za-z0-9_-]+)`)
 	// backgroundRe is Claude Code's result for a shell command it started in the background;
 	// the command's <task-notification> later names the same id.
-	backgroundRe = regexp.MustCompile(`Command running in background with ID: ([A-Za-z0-9_-]+)`)
+	backgroundRe = regexp.MustCompile(`^Command running in background with ID: ([A-Za-z0-9_-]+)`)
 )
+
+// failedFinish are the finish reasons of a reply that did not complete: none at all, a refusal
+// (Anthropic "refusal", OpenAI chat "content_filter"), and a Responses API status of "failed" or
+// "cancelled".
+var failedFinish = map[string]bool{"": true, "refusal": true, "content_filter": true, "failed": true, "cancelled": true}
 
 // previewMax bounds a tool's preview: enough to tell two Bash calls apart in a one-line strip.
 const previewMax = 80
@@ -168,7 +173,7 @@ func buildAgents(t *Timeline, events []pipeline.SessionEvent) {
 		// No finish reason is a reply that never finished: the proxy records a stream cut
 		// mid-reply as the 200 it started as. A refusal is a call that failed too.
 		turn.Error = c.resp.Phase == pipeline.SessionDenied || c.resp.Error != nil || c.resp.StatusCode >= 400 ||
-			turn.Finish == "" || turn.Finish == "refusal"
+			failedFinish[turn.Finish]
 		t.Turns = append(t.Turns, turn)
 		if c.resp.Inference == nil {
 			continue

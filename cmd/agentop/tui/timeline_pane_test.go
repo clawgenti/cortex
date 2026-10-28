@@ -114,6 +114,19 @@ func TestTimelineLayout_MainRowSharesEachState(t *testing.T) {
 	}
 }
 
+// A failed call followed by a new message is not a retry: a refusal the user answered by
+// rephrasing re-sends nothing.
+func TestTimelineLayout_FailedCallThenNewMessageIsNotRetry(t *testing.T) {
+	tl := sampleTimeline()
+	for i := range tl.Turns {
+		tl.Turns[i].Resent = false
+	}
+	lay := buildTimelineLayout(tl, tlAt(0), tlAt(1800), 60, tlAt(3600))
+	if got := lay.agents[0].cells[cellOf(t, lay, 930)]; got.retry != 0 {
+		t.Errorf("gap after a failed call with no re-send: %+v, want no retry share", got)
+	}
+}
+
 // A subagent is measured against the part of the cell it was alive for: a cell it only half
 // lived in, busy all that half, is a full bar.
 func TestTimelineLayout_SubagentIsScaledToItsLifetime(t *testing.T) {
