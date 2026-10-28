@@ -851,3 +851,42 @@ func TestSelfTraffic_AServiceThatNamesItsSessionInsideATunnelIsAnAgents(t *testi
 		t.Errorf("%d /api/info rows: a claim made inside a tunnel did not make the service an agent's", n)
 	}
 }
+
+// A client that sends attribution headers chooses nothing: they never reach the upstream, and
+// the row lands where the proxy's own resolution puts it.
+func TestForwardProxy_StripsCortexAttributionHeaders(t *testing.T) {
+	var saw http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { saw = r.Header.Clone() }))
+	defer upstream.Close()
+	store := session.New(0, 0, 0)
+	defer store.Close()
+	p, _ := pipeline.New(nil)
+	srv := &Server{OutboundPipeline: pipeline.NewHolder(p), Sessions: store, Client: http.DefaultClient,
+		SessionIDHeaders: []string{session.ClaudeCodeSessionHeader}, ClientAffinity: true}
+	proxy := httptest.NewServer(srv.Handler())
+	defer proxy.Close()
+	via := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(mustParseURL(proxy.URL))}}
+
+	req, _ := http.NewRequest(http.MethodGet, upstream.URL, nil)
+	req.Header.Set("User-Agent", procClaudeUA)
+	req.Header.Set(session.ClaudeCodeSessionHeader, "real")
+	req.Header.Set(attribution.HeaderSession, "forged")
+	req.Header.Set(attribution.HeaderProc, "1.1")
+	req.Header.Set(attribution.HeaderSource, string(pipeline.SessionSourceHeader))
+	resp, err := via.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	for _, k := range []string{attribution.HeaderSession, attribution.HeaderProc, attribution.HeaderSource} {
+		if v := saw.Get(k); v != "" {
+			t.Errorf("upstream saw %s: %q", k, v)
+		}
+	}
+	if store.View("forged") != nil || store.View("real") == nil {
+		t.Errorf("the row went to the forged session; want it under real")
+	}
+	if e := store.View("real").Events[0]; e.Proc != "" {
+		t.Errorf("the row carries proc %q from the forged header; no lookup ran", e.Proc)
+	}
+}

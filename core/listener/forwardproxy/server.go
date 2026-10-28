@@ -329,6 +329,9 @@ func (s *Server) serveOutbound(w http.ResponseWriter, r *http.Request, tl *tunne
 	if isBridge {
 		s.bridgedRequests.Add(1)
 	}
+	// Before anything reads the headers: a client must not assert its own attribution, and
+	// no hop in front of this listener is trusted to (attribution.Strip).
+	attribution.Strip(r.Header)
 	pctx := &pipeline.Context{
 		Direction: pipeline.Outbound,
 		Method:    r.Method,
@@ -2085,6 +2088,7 @@ const connectDialTimeout = 30 * time.Second
 // GitHub API, etc.) where the agent's existing TLS is the right answer.
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	s.noteTunnel()
+	attribution.Strip(r.Header)
 	pctx := &pipeline.Context{
 		Direction: pipeline.Outbound,
 		Method:    r.Method, // always "CONNECT" here, but populated for parity with handleRequest
