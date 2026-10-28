@@ -64,8 +64,13 @@ export default function (pi: any) {
 // ~/.pi/agent, then extensions/.
 func piExtensionPath(home string) string {
 	dir := strings.TrimSpace(os.Getenv(piAgentDirEnv))
-	if dir == "" {
+	switch {
+	case dir == "":
 		dir = filepath.Join(home, piAgentDirRel)
+	case dir == "~" || strings.HasPrefix(dir, "~/"):
+		// Pi expands a leading ~ itself (getAgentDir's normalizePath), so a quoted one
+		// still means HOME there; left as is it would name a directory called ~.
+		dir = filepath.Join(home, dir[1:])
 	}
 	return filepath.Join(dir, "extensions", piExtName)
 }

@@ -167,6 +167,21 @@ func TestPiExtensionFollowsAgentDirOverride(t *testing.T) {
 	}
 }
 
+// Pi expands a leading ~ in PI_CODING_AGENT_DIR itself, so a quoted "~/pi" means
+// $HOME/pi — not a directory named ~ under wherever agentop ran.
+func TestPiExtensionExpandsTildeInAgentDir(t *testing.T) {
+	home := piHome(t)
+	for env, want := range map[string]string{
+		"~/elsewhere": filepath.Join(home, "elsewhere", "extensions", piExtName),
+		"~":           filepath.Join(home, "extensions", piExtName),
+	} {
+		t.Setenv(piAgentDirEnv, env)
+		if got := piExtensionPath(home); got != want {
+			t.Errorf("PI_CODING_AGENT_DIR=%q: path = %q, want %q", env, got, want)
+		}
+	}
+}
+
 // Without a terminal and without --yes, nothing is written and the exit says declined.
 func TestPiDeclineWritesNothing(t *testing.T) {
 	home := piHome(t)
