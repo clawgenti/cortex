@@ -34,7 +34,11 @@ tool results.
   "id": "…", "createdAt": "…", "updatedAt": "…", "eventCount": 42, "active": true,
   "title": "…", "agent": "claude-code", "totalTokens": 1186300, "costMicros": 254600,
   "avoidedMicros": 3700, "promptContext": {"tokens": 16384, "stated": true,
-  "at": "2026-10-15T20:01:02Z", "msgs": 12}, "inferenceHost": "api.anthropic.com"
+  "at": "2026-10-15T20:01:02Z", "msgs": 12}, "inferenceHost": "api.anthropic.com",
+  "procs": ["41963.1791718279766260000"], "lastRequestAt": "…"
+}, {
+  "id": "pending:claude-code@41963.1791718279766260000", "eventCount": 12, "…": "…",
+  "linkedTo": [{"session": "…", "until": "…"}], "linkedAll": true
 }]}
 ```
 
@@ -52,6 +56,18 @@ knowing by name:
   rather than the host the client named. `inferenceHostFromHistory` is `true`
   when that host came only from the archive's fold, because no request the
   proxy's current entry for the session holds has set it.
+- **`procs`** — the processes, `<pid>.<start>`, whose own session header named
+  this session. Recorded from each request's `proc` and `sessionHeader`, and
+  continued from the archive's fold like the other figures.
+- **Pending buckets.** A coding agent's calls before its process names a session
+  are recorded under `pending:<agent>@<pid>.<start>` (or `pending:<agent>` when
+  the process could not be looked up), carrying their `proc`. Nothing renames a
+  bucket. Instead, when the list is read, a bucket whose process later named a
+  session gets **`linkedTo`** — each session it names, with the time its calls up
+  to belong there (`until`) — and **`linkedAll`** when every request in it falls
+  before one of them. A response goes where its request went. agentop hides a
+  `linkedAll` bucket and shows its calls inside those sessions; a bucket with
+  calls after its process's last claim stays a row of its own.
 - **`?archived=true`** adds history where the proxy runs a session archive
   (`session.archive`, laptop only): every session the archive holds and memory
   does not, marked `resident: false`, plus a top-level `archive` object —
