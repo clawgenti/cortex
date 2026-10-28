@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -80,6 +81,28 @@ func TestRebuildAgentsTable_ASessionOnlyAgentShowsDashesForTheWindow(t *testing.
 	if cc := rows[1]; cc[0] != "claude-code" || cc[1] != "2" || cc[2] != "just now" || cc[3] != "$113.63" {
 		t.Errorf("claude-code row = %v, want its figures untouched", cc)
 	}
+}
+
+// A session over a day old shows as a date, and a two-digit day is relTime's widest form: at 11
+// columns "Oct 23 14:02" lost its last minute digit.
+func TestRebuildAgentsTable_LastSeenFitsATwoDigitDay(t *testing.T) {
+	m := morningAfterFixture()
+	m.sessions[3].UpdatedAt = time.Date(2025, time.October, 23, 14, 2, 0, 0, time.Local)
+	m.rebuildAgentsTable()
+	for _, r := range m.agentsTbl.Rows() {
+		if r[0] != "bob-shell" {
+			continue
+		}
+		// AGENT, SESSIONS, LAST SEEN: the fixture runs no router, so SERVER is not inserted.
+		if r[2] != "Oct 23 14:02" {
+			t.Fatalf("bob-shell LAST SEEN = %q, want the date form", r[2])
+		}
+		if w, n := sessionsColumnWidth(m.agentsTbl.Columns(), "LAST SEEN"), utf8.RuneCountInString(r[2]); w < n {
+			t.Errorf("LAST SEEN is %d columns for the %d of %q", w, n, r[2])
+		}
+		return
+	}
+	t.Fatalf("no bob-shell row in %v", m.agentsTbl.Rows())
 }
 
 // THE REPORTED DEFECT, driven the way it was met: `A` on the sessions pane, the reply carrying one

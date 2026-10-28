@@ -334,7 +334,7 @@ func (m *model) rebuildAgentsTable() {
 	//
 	// SQUEEZING AGENT ON A NARROW TERMINAL, NOT DROPPED AS THE SESSIONS TABLE'S IS, and on
 	// purpose: this column is the one place the pane shows where each agent's new sessions go.
-	// AGENT is the widest, so the fitter takes the room from it — 34 to 27 at 80 columns with
+	// AGENT is the widest, so the fitter takes the room from it — 34 to 26 at 80 columns with
 	// SESSIONS and LAST SEEN up — and what survives is at least the agent's name and minor version,
 	// "claude-code/2.1…". That name is what SERVER and S act on, so two patch versions' rows that
 	// read alike there are one agent with one server
@@ -550,8 +550,8 @@ func (m *model) agentSessionsCell(label string) string {
 	return formatCount(n)
 }
 
-// agentsLastSeenWidth fits relTime's widest form, "Jan 2 15:04".
-const agentsLastSeenWidth = 11
+// agentsLastSeenWidth fits relTime's widest form, a two-digit day: "Oct 23 15:04".
+const agentsLastSeenWidth = len("Oct 23 15:04")
 
 // agentLastSeen is the newest UpdatedAt among the listed sessions agentSessionsCell counts for
 // label, or zero when it lists none. Other's cached-only rows carry no summary and add no time.
