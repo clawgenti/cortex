@@ -24,9 +24,9 @@ func TestSessionsPane_HidesAFullyLinkedBucket(t *testing.T) {
 	for i := range m.sessions {
 		switch m.sessions[i].ID {
 		case all:
-			m.sessions[i].LinkedTo, m.sessions[i].LinkedAll = []session.PendingLink{{Session: uuidOpened, Until: until}}, true
+			m.sessions[i].LinkedTo, m.sessions[i].LinkedAll = []session.PendingLink{{Session: uuidOpened, First: until, Last: until}}, true
 		case part:
-			m.sessions[i].LinkedTo = []session.PendingLink{{Session: uuidOpened, Until: until}}
+			m.sessions[i].LinkedTo = []session.PendingLink{{Session: uuidOpened, First: until, Last: until}}
 		}
 	}
 	m.rebuildSessionsTable()
@@ -66,7 +66,7 @@ func TestSnapshot_MergesLinkedCallsByTime(t *testing.T) {
 
 	m := &model{ctx: context.Background(), client: apiclient.New(ts.URL), sessions: []session.SessionSummary{
 		{ID: "s1"},
-		{ID: bucket, LinkedTo: []session.PendingLink{{Session: "s1", Until: at(100)}}},
+		{ID: bucket, LinkedTo: []session.PendingLink{{Session: "s1", First: at(100), Last: at(100)}}},
 	}}
 	msg := m.snapshotCmd("s1")().(snapshotLoadedMsg)
 	var got []string
@@ -103,4 +103,70 @@ func ids(events []pipeline.SessionEvent) []string {
 		out = append(out, e.RequestID)
 	}
 	return out
+}
+
+// A bucket is folded only when it belongs to exactly one session: one linked to two (a /clear
+// in its middle) stays a row, because its calls and its spend cannot be given to one row.
+func TestFoldedInto(t *testing.T) {
+	one := []session.PendingLink{{Session: "s1"}}
+	two := []session.PendingLink{{Session: "s1"}, {Session: "s2"}}
+	for _, tc := range []struct {
+		s    session.SessionSummary
+		want string
+	}{
+		{session.SessionSummary{ID: "pending:a@1.1", LinkedTo: one, LinkedAll: true}, "s1"},
+		{session.SessionSummary{ID: "pending:a@1.1", LinkedTo: one}, ""},
+		{session.SessionSummary{ID: "pending:a@1.1", LinkedTo: two, LinkedAll: true}, ""},
+	} {
+		if got := foldedInto(tc.s); got != tc.want {
+			t.Errorf("foldedInto(%+v) = %q, want %q", tc.s, got, tc.want)
+		}
+	}
+}
+
+// A folded bucket's spend and tokens are its session's row's: hidden, they would show nowhere.
+func TestSessionsPane_AFoldedBucketsFiguresJoinItsSession(t *testing.T) {
+	const bucket = "pending:bob@1.1"
+	m := uuidPicker(t, 200, uuidOpened, bucket)
+	for i := range m.sessions {
+		m.sessions[i].CostMicros, m.sessions[i].TotalTokens = 1_000_000, 100
+		if m.sessions[i].ID == bucket {
+			m.sessions[i].LinkedTo, m.sessions[i].LinkedAll = []session.PendingLink{{Session: uuidOpened}}, true
+		}
+	}
+	m.rebuildSessionsTable()
+	row := m.sessionsTbl.Rows()[rowOf(t, m, uuidOpened)]
+	if !slices.ContainsFunc(row, func(c string) bool { return strings.Contains(c, "$2.00") }) {
+		t.Errorf("session row %v, want the bucket's $1.00 added to its own", row)
+	}
+}
+
+// Paging back into a session merges the folded calls that fall in the older page, so a fresh
+// launch's handshake is reachable in a session longer than one snapshot.
+func TestOlderPage_MergesTheLinkedCallsItCovers(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	page := []pipeline.SessionEvent{{SessionID: "s1", RequestID: "p1", At: at(10)}, {SessionID: "s1", RequestID: "p2", At: at(20)}}
+	linked := []pipeline.SessionEvent{{SessionID: "b", RequestID: "init", At: at(5)}, {SessionID: "b", RequestID: "later", At: at(500)}}
+	got := ids(pageLinked(page, linked, true))
+	if !slices.Equal(got, []string{"init", "p1", "p2"}) {
+		t.Errorf("oldest page = %v, want the handshake before it merged", got)
+	}
+	got = ids(pageLinked(page, linked, false))
+	if !slices.Equal(got, []string{"p1", "p2"}) {
+		t.Errorf("a middle page = %v, want only calls inside its span (none)", got)
+	}
+}
+
+// Erasing a session erases the buckets folded into it: the calls the operator saw inside it
+// would otherwise come back as a row of their own.
+func TestEraseTargets_IncludeTheBucketsFoldedIntoTheSession(t *testing.T) {
+	m := &model{sessions: []session.SessionSummary{
+		{ID: "s1"},
+		{ID: "pending:a@1.1", LinkedTo: []session.PendingLink{{Session: "s1"}}, LinkedAll: true},
+		{ID: "pending:a@2.2", LinkedTo: []session.PendingLink{{Session: "s1"}, {Session: "s2"}}, LinkedAll: true},
+	}}
+	if got := m.withFolded([]string{"s1"}); !slices.Equal(got, []string{"s1", "pending:a@1.1"}) {
+		t.Errorf("withFolded = %v, want s1 and only the bucket folded into it alone", got)
+	}
 }

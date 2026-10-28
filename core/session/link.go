@@ -8,75 +8,96 @@ import (
 	"github.com/rossoctl/cortex/core/pipeline"
 )
 
-// PendingLink is one session a pending bucket's calls belong to: those made after the
-// previous link's Until (the bucket's start for the first) and at or before this one's.
+// PendingLink is one session a pending bucket's process named, with the span of its naming
+// requests: the first and the last. Which of a bucket's calls are whose is OwnerAt's answer.
 type PendingLink struct {
 	Session string    `json:"session"`
-	Until   time.Time `json:"until"`
+	First   time.Time `json:"first"`
+	Last    time.Time `json:"last"`
+}
+
+// OwnerAt is the session a call its process made at t belongs to, "" for none: the first session
+// the process named at or after t. Concretely, among the links whose span has not ended by t
+// (Last >= t), the one whose naming resumed soonest — a span already covering t resumed "at t",
+// so it beats one that begins later, and between two that both cover t the one begun more
+// recently is the one the process had just named.
+//
+// LAST DECIDES ELIGIBILITY, FIRST DECIDES ORDER. Ordering by Last instead sent an OpenCode
+// service's start-up calls into a session it began naming minutes after them, because that
+// session's span happened to end before the first one's. Eligibility by Last is what keeps the
+// restart case: a session named yesterday and again today, after a restart lost the claim,
+// still takes the calls made today before it was named again.
+func OwnerAt(links []PendingLink, t time.Time) string {
+	best, bestAt := "", time.Time{}
+	for _, l := range links {
+		if l.Last.Before(t) {
+			continue
+		}
+		at := l.First
+		if at.Before(t) {
+			at = t
+		}
+		if best == "" || at.Before(bestAt) || (at.Equal(bestAt) && l.First.After(firstOf(links, best))) {
+			best, bestAt = l.Session, at
+		}
+	}
+	return best
+}
+
+func firstOf(links []PendingLink, id string) time.Time {
+	for _, l := range links {
+		if l.Session == id {
+			return l.First
+		}
+	}
+	return time.Time{}
 }
 
 // Link marks every pending bucket in list whose calls a process made before naming a
-// session: LinkedTo is those sessions, in the order of the process's claims, and LinkedAll
-// says every request in the bucket falls before one of them. It is how a process's
-// pre-session calls reach their session now that nothing renames a bucket into one — the
-// answer is computed from what is recorded, each time the list is read, so it survives a
-// restart and needs no merge.
-//
-// THE RULE: an event in process P's bucket belongs to the first session P named at or after
-// the event's time. A response goes where its request went, which is why a bucket's figure
-// is its newest REQUEST (LastRequestAt): a stream opened before the claim and closed after it
-// still belongs before the claim. "Named at or after" reads each session's span for P by its
-// LAST naming request, not its first: a resumed session P named yesterday, then names again
-// today after a restart lost the claim, still takes the calls P made today before naming it.
+// session: LinkedTo is the sessions its process named — no earlier than the bucket's first
+// call, ordered by First — and LinkedAll says every request in the bucket has an owner
+// (OwnerAt), which holds when the newest request is no later than some link's Last. It is how
+// a process's pre-session calls reach their session now that nothing renames a bucket into
+// one: computed from what is recorded, each time the list is read, so it survives a restart
+// and needs no merge. A response goes where its request went, which is why the bucket's figure
+// is its newest REQUEST (LastRequestAt).
 //
 // Only a per-process bucket links. The agent-wide pending:<agent> — a client the lookup could
 // not name — and the default bucket carry no process, and linking them would be a guess.
 //
-// list is modified in place and returned. O(sessions × procs), with no allocation for a
-// session that no process named; called once per list request.
+// list is modified in place and returned. O(sessions × procs); called once per list request.
 func Link(list []SessionSummary) []SessionSummary {
-	type claim struct {
-		id   string
-		last time.Time
-	}
-	byProc := map[string][]claim{}
+	byProc := map[string][]PendingLink{}
 	for i := range list {
 		for p, sp := range list[i].procSpans {
-			byProc[p] = append(byProc[p], claim{list[i].ID, sp.Last})
+			byProc[p] = append(byProc[p], PendingLink{Session: list[i].ID, First: sp.First, Last: sp.Last})
 		}
 	}
 	if len(byProc) == 0 {
 		return list
-	}
-	for p := range byProc {
-		slices.SortFunc(byProc[p], func(a, b claim) int { return a.last.Compare(b.last) })
 	}
 	for i := range list {
 		_, proc, ok := ParsePending(list[i].ID)
 		if !ok || proc == "" {
 			continue
 		}
-		claims := byProc[proc]
-		if len(claims) == 0 {
-			continue
-		}
 		var to []PendingLink
-		for _, c := range claims {
-			if c.last.Before(list[i].CreatedAt) {
+		var latest time.Time
+		for _, l := range byProc[proc] {
+			if l.Last.Before(list[i].CreatedAt) {
 				continue
 			}
-			if n := len(to); n > 0 && to[n-1].Session == c.id {
-				to[n-1].Until = c.last
-				continue
+			to = append(to, l)
+			if l.Last.After(latest) {
+				latest = l.Last
 			}
-			to = append(to, PendingLink{Session: c.id, Until: c.last})
 		}
 		if len(to) == 0 {
 			continue
 		}
+		slices.SortFunc(to, func(a, b PendingLink) int { return a.First.Compare(b.First) })
 		list[i].LinkedTo = to
-		// Every request falls before a claim when the newest one does.
-		list[i].LinkedAll = !claims[len(claims)-1].last.Before(list[i].LastRequestAt)
+		list[i].LinkedAll = !latest.Before(list[i].LastRequestAt)
 	}
 	return list
 }
@@ -92,20 +113,21 @@ func ParsePending(id string) (agent, proc string, ok bool) {
 	return agent, proc, agent != ""
 }
 
-// LinkedEvents is the part of a linked bucket's events that one of its links takes: requests
-// after after and at or before before, each with its response, wherever the response landed
-// in time. after is the previous link's Until, zero for the first link.
-func LinkedEvents(events []pipeline.SessionEvent, after, before time.Time) []pipeline.SessionEvent {
+// LinkedEvents is the part of a linked bucket's events that belongs to session: the requests
+// OwnerAt gives it, each with its response, wherever the response landed in time.
+func LinkedEvents(events []pipeline.SessionEvent, links []PendingLink, session string) []pipeline.SessionEvent {
 	keep := map[string]bool{}
 	out := events[:0:0]
 	for i := range events {
 		e := &events[i]
 		if e.Phase == pipeline.SessionRequest {
-			if e.At.After(before) || (!after.IsZero() && !e.At.After(after)) {
+			if OwnerAt(links, e.At) != session {
 				continue
 			}
-			keep[e.RequestID] = true
-		} else if !keep[e.RequestID] {
+			if e.RequestID != "" {
+				keep[e.RequestID] = true
+			}
+		} else if e.RequestID == "" || !keep[e.RequestID] {
 			continue
 		}
 		out = append(out, *e)

@@ -51,6 +51,9 @@ type Attribution struct {
 	// client's chain when the client is an agent's, the pending bucket's process for a
 	// pending answer, else the client itself. "" when the client could not be looked up.
 	Proc string
+	// ClientProc is the client process itself, when it differs from Proc — a worker below its
+	// launcher, Proc being the launcher. Its own pending bucket links through it. "" otherwise.
+	ClientProc string
 	// Session is a session the request belongs to, DefaultSessionID for a process of no
 	// agent while an agent is active, or "": not named yet (Source pending) or nothing known
 	// (fall back to the store's ActiveSession).
@@ -170,6 +173,9 @@ func (a *Attributor) resolveLocked(h http.Header, agent string, chain []Proc, no
 		out.Session, out.Header, out.Source = sid, header, pipeline.SessionSourceHeader
 		if len(chain) > 0 {
 			out.Proc = a.claimProcessLocked(sid, agent, chain, now)
+			if self := chain[0].Key(); self != out.Proc {
+				out.ClientProc = self
+			}
 		}
 		if a.cfg.ClientAffinity {
 			a.claimLocked(sid, agent)

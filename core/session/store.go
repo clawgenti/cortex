@@ -7,6 +7,7 @@ package session
 
 import (
 	"log/slog"
+	"maps"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -1115,7 +1116,7 @@ func (s *Store) ListSessions() []SessionSummary {
 			// Read, not computed, like Title: Append folds it.
 			InferenceHost: sess.inferenceHost,
 			Procs:         procsList(sess.procs),
-			procSpans:     sess.procs,
+			procSpans:     maps.Clone(sess.procs),
 			LastRequestAt: sess.lastRequestAt,
 		}
 		s.withPriorLocked(&sum, id, sess)

@@ -543,7 +543,7 @@ func (m *model) agentSessionsCell(label string) string {
 		n = m.otherSessionsCount()
 	} else {
 		for _, s := range m.sessions {
-			if sessionAgent(s) == label {
+			if sessionAgent(s) == label && foldedInto(s) == "" {
 				n++
 			}
 		}

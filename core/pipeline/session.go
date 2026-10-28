@@ -349,6 +349,11 @@ type SessionEvent struct {
 	// (session.Link), so it is recorded on rows in a session as well as on pending ones.
 	Proc string
 
+	// ClientProc is the client process itself when it differs from Proc: a worker naming the
+	// session its launcher (Proc) is attributed with. Only on a request that named its
+	// session. The fold records a span for it too, so the worker's own pending bucket links.
+	ClientProc string
+
 	// SessionHeader is the session-id header that named this row's session, "" when the
 	// session was not named by the request (process, affinity, ActiveSession). Recorded so
 	// the fold can tell which processes NAMED a session from those merely filed into it,
@@ -564,6 +569,7 @@ type sessionEventWire struct {
 	// omitempty: absent wherever the listener could not name the client's process, and on
 	// every event recorded before the field existed.
 	Proc          string `json:"proc,omitempty"`
+	ClientProc    string `json:"clientProc,omitempty"`
 	SessionHeader string `json:"sessionHeader,omitempty"`
 }
 
@@ -598,6 +604,7 @@ func (e SessionEvent) MarshalJSON() ([]byte, error) {
 		Subagent:        e.Subagent,
 		ParentSubagent:  e.ParentSubagent,
 		Proc:            e.Proc,
+		ClientProc:      e.ClientProc,
 		SessionHeader:   e.SessionHeader,
 	})
 }
@@ -640,6 +647,7 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 		Subagent:        w.Subagent,
 		ParentSubagent:  w.ParentSubagent,
 		Proc:            w.Proc,
+		ClientProc:      w.ClientProc,
 		SessionHeader:   w.SessionHeader,
 	}
 	return nil

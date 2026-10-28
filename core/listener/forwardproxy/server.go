@@ -1219,7 +1219,7 @@ func (s *Server) recordingSessionID(resolved string, clientHeaders http.Header, 
 // returns the bucket they go in: the attribution's, else ActiveSession(), else default.
 func (s *Server) attributeForRecording(pctx *pipeline.Context, clientHeaders http.Header, chain []attribution.Proc) string {
 	at := s.attribute(clientHeaders, chain)
-	pctx.SetAttribution(at.Proc, at.Header)
+	pctx.SetAttribution(at.Proc, at.ClientProc, at.Header)
 	if sid := at.RecordID(); sid != "" {
 		return sid
 	}
@@ -1389,6 +1389,7 @@ func (s *Server) recordOutboundRequestEvent(tl *tunnelLog, pctx *pipeline.Contex
 		Subagent:        pctx.Subagent(),
 		ParentSubagent:  pctx.ParentSubagent(),
 		Proc:            pctx.AttributedProc(),
+		ClientProc:      pctx.AttributedClientProc(),
 		SessionHeader:   pctx.NamingHeader(),
 	}
 	s.appendOutbound(tl, sid, ev)
@@ -1507,7 +1508,7 @@ type pluginSession struct {
 // local, which recording reads instead of pctx.
 func (s *Server) hydrateSession(pctx *pipeline.Context, clientHeaders http.Header, chain []attribution.Proc) string {
 	at := s.attribute(clientHeaders, chain)
-	pctx.SetAttribution(at.Proc, at.Header)
+	pctx.SetAttribution(at.Proc, at.ClientProc, at.Header)
 	sid, how := s.pluginSessionOf(at)
 	if sid != "" {
 		pctx.Session = s.sessionViewFor(sid)

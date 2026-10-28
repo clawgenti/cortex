@@ -26,10 +26,20 @@ const maxProcsPerSession = 64
 // Requests only: a response, a tunnel's close or a denial is not the process naming anything,
 // and a response arriving after a later claim would stretch the span past it.
 func applyProcs(procs map[string]ProcSpan, sessionID string, e *pipeline.SessionEvent) map[string]ProcSpan {
-	if e.Proc == "" || e.SessionHeader == "" || e.Phase != pipeline.SessionRequest || !IsConversation(sessionID) {
+	if e.SessionHeader == "" || e.Phase != pipeline.SessionRequest || !IsConversation(sessionID) {
 		return procs
 	}
-	sp, ok := procs[e.Proc]
+	for _, p := range []string{e.Proc, e.ClientProc} {
+		if p != "" {
+			procs = applyProc(procs, p, e.At)
+		}
+	}
+	return procs
+}
+
+// applyProc widens p's span in procs to cover at.
+func applyProc(procs map[string]ProcSpan, p string, at time.Time) map[string]ProcSpan {
+	sp, ok := procs[p]
 	if !ok {
 		if procs == nil {
 			procs = make(map[string]ProcSpan, 1)
@@ -37,15 +47,15 @@ func applyProcs(procs map[string]ProcSpan, sessionID string, e *pipeline.Session
 		if len(procs) >= maxProcsPerSession {
 			delete(procs, oldestProc(procs))
 		}
-		sp.First = e.At
+		sp.First = at
 	}
-	if e.At.After(sp.Last) {
-		sp.Last = e.At
+	if at.After(sp.Last) {
+		sp.Last = at
 	}
-	if e.At.Before(sp.First) {
-		sp.First = e.At
+	if at.Before(sp.First) {
+		sp.First = at
 	}
-	procs[e.Proc] = sp
+	procs[p] = sp
 	return procs
 }
 

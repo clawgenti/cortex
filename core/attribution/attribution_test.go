@@ -359,3 +359,16 @@ func TestLookup_NamesTheClientsChain(t *testing.T) {
 		t.Errorf("an unnamed connection: %v %v, want an error and no chain", chain, err)
 	}
 }
+
+// The worker's headered request names the launcher as its process and itself as the client.
+func TestResolve_AWorkersClaimCarriesBothProcesses(t *testing.T) {
+	a, _ := newTest()
+	launcher, worker := pchain(820, 50), pchain(821, 820, 50)
+	a.Resolve(req(bobUA, ""), launcher)
+	h := req(bobUA, "")
+	h.Set(session.BobSessionHeader, "task-1")
+	got := a.Resolve(h, worker)
+	if got.Proc != launcher[0].Key() || got.ClientProc != worker[0].Key() {
+		t.Errorf("Proc %q ClientProc %q, want %q and %q", got.Proc, got.ClientProc, launcher[0].Key(), worker[0].Key())
+	}
+}

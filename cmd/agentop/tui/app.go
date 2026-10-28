@@ -1288,7 +1288,7 @@ func (m *model) snapshotCmd(id string) tea.Cmd {
 		if err != nil {
 			return errMsg{where: "snapshot " + id, err: err}
 		}
-		view.Events = mergeLinked(view.Events, inWindow(fetchLinked(m.ctx, m.client, windows), view))
+		view.Events = mergeLinked(view.Events, inWindow(fetchLinked(m.ctx, m.client, id, windows), view))
 		older := 0
 		if view.TotalEvents > len(view.Events) {
 			older = view.TotalEvents - len(view.Events)

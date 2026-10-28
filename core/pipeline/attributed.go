@@ -7,13 +7,17 @@ package pipeline
 //
 // proc is attribution.Attribution.Proc, header the session-id header that named the session
 // ("" when none did).
-func (c *Context) SetAttribution(proc, header string) {
+func (c *Context) SetAttribution(proc, clientProc, header string) {
 	if c.attributed {
 		return
 	}
 	c.attributed = true
-	c.attributedProc, c.namingHeader = proc, header
+	c.attributedProc, c.clientProc, c.namingHeader = proc, clientProc, header
 }
+
+// AttributedClientProc is the pinned client process when it differs from AttributedProc (a
+// worker under its launcher), "" otherwise. Recorded as SessionEvent.ClientProc.
+func (c *Context) AttributedClientProc() string { return c.clientProc }
 
 // AttributedProc is the pinned process, "" when the listener could not name it or pinned
 // nothing. Recorded as SessionEvent.Proc.

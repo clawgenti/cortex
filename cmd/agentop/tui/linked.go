@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"slices"
-	"time"
 
 	"github.com/rossoctl/cortex/cmd/agentop/apiclient"
 	"github.com/rossoctl/cortex/core/pipeline"
@@ -17,36 +16,56 @@ import (
 // (SessionID is the bucket's). A partly linked bucket stays a row of its own and also feeds
 // the sessions it links to.
 
-// linkedInto is, for each session, the bucket windows that feed it: which bucket, and the
-// window of that bucket's requests it takes (session.LinkedEvents).
-type linkedWindow struct {
-	bucket        string
-	after, before time.Time
+// linkedBucket is one bucket that feeds a session, with that bucket's links (OwnerAt decides
+// which of its calls are the session's).
+type linkedBucket struct {
+	bucket string
+	links  []session.PendingLink
 }
 
-func (m *model) linkedInto(id string) []linkedWindow {
-	var out []linkedWindow
+// linkedInto is every bucket whose links name id.
+func (m *model) linkedInto(id string) []linkedBucket {
+	var out []linkedBucket
 	for _, s := range m.sessions {
-		var after time.Time
-		for _, l := range s.LinkedTo {
-			if l.Session == id {
-				out = append(out, linkedWindow{bucket: s.ID, after: after, before: l.Until})
-			}
-			after = l.Until
+		if slices.ContainsFunc(s.LinkedTo, func(l session.PendingLink) bool { return l.Session == id }) {
+			out = append(out, linkedBucket{bucket: s.ID, links: s.LinkedTo})
 		}
 	}
 	return out
 }
 
-// hiddenAsLinked reports whether the list hides id: a pending bucket every request of which
-// belongs to a session it names, so its calls are read inside those sessions instead.
-func (m *model) hiddenAsLinked(id string) bool {
+// foldedInto is the session a bucket is folded into, "" when it is not: a bucket every request
+// of which belongs to one session (LinkedAll, one link). Its row is hidden, its figures join
+// that session's row, and erasing the session erases it. A bucket linked to two sessions — a
+// /clear in its middle — stays a row: its calls and spend cannot be given to one of them.
+func foldedInto(s session.SessionSummary) string {
+	if !s.LinkedAll || len(s.LinkedTo) != 1 {
+		return ""
+	}
+	return s.LinkedTo[0].Session
+}
+
+// foldedFigures is what the buckets folded into id add to its row: cost, savings and tokens.
+func (m *model) foldedFigures(id string) (cost, avoided int64, tokens int) {
 	for _, s := range m.sessions {
-		if s.ID == id {
-			return s.LinkedAll
+		if foldedInto(s) == id {
+			cost += s.CostMicros
+			avoided += s.AvoidedMicros
+			tokens += s.TotalTokens
 		}
 	}
-	return false
+	return cost, avoided, tokens
+}
+
+// withFolded is ids plus every bucket folded into one of them, for an erase.
+func (m *model) withFolded(ids []string) []string {
+	out := slices.Clone(ids)
+	for _, s := range m.sessions {
+		if to := foldedInto(s); to != "" && slices.Contains(ids, to) && !slices.Contains(out, s.ID) {
+			out = append(out, s.ID)
+		}
+	}
+	return out
 }
 
 // linkedEventsCap bounds what one session's linked buckets add to its first snapshot. A bucket
@@ -56,14 +75,14 @@ const linkedEventsCap = 500
 
 // fetchLinked is the events every bucket linked into id adds to it, oldest first. A bucket
 // that cannot be fetched adds nothing: the session itself is still worth showing.
-func fetchLinked(ctx context.Context, c *apiclient.Client, windows []linkedWindow) []pipeline.SessionEvent {
+func fetchLinked(ctx context.Context, c *apiclient.Client, id string, buckets []linkedBucket) []pipeline.SessionEvent {
 	var out []pipeline.SessionEvent
-	for _, w := range windows {
-		view, err := c.GetSessionTail(ctx, w.bucket, linkedEventsCap)
+	for _, b := range buckets {
+		view, err := c.GetSessionTail(ctx, b.bucket, linkedEventsCap)
 		if err != nil || view == nil {
 			continue
 		}
-		out = append(out, session.LinkedEvents(view.Events, w.after, w.before)...)
+		out = append(out, session.LinkedEvents(view.Events, b.links, id)...)
 	}
 	return out
 }
@@ -77,6 +96,20 @@ func inWindow(linked []pipeline.SessionEvent, view *pipeline.SessionView) []pipe
 	}
 	first := view.Events[0].At
 	return slices.DeleteFunc(linked, func(e pipeline.SessionEvent) bool { return e.At.Before(first) })
+}
+
+// pageLinked is an older page with the linked calls inside its span merged in. oldest says the
+// page is the session's first, which also takes every linked call before it: a fresh launch's
+// handshake precedes the session's first request.
+func pageLinked(page, linked []pipeline.SessionEvent, oldest bool) []pipeline.SessionEvent {
+	if len(page) == 0 || len(linked) == 0 {
+		return page
+	}
+	from, to := page[0].At, page[len(page)-1].At
+	in := slices.DeleteFunc(slices.Clone(linked), func(e pipeline.SessionEvent) bool {
+		return e.At.After(to) || (!oldest && e.At.Before(from))
+	})
+	return mergeLinked(page, in)
 }
 
 // mergeLinked is a session's events with its linked calls among them by time, stable so a

@@ -193,6 +193,7 @@ type Context struct {
 
 	// attributedProc, namingHeader and attributed hold SetAttribution's pin.
 	attributedProc string
+	clientProc     string
 	namingHeader   string
 	attributed     bool
 

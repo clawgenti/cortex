@@ -92,6 +92,14 @@ func TestLink(t *testing.T) {
 			call(s, clk, "s2", p, "turn-2", true)
 		}, []string{"s1", "s2"}, true},
 
+		{"one service naming several sessions: start-up calls go to the first it named after them", func(s *Store, clk *procTestClock) {
+			call(s, clk, bucket, p, "startup", false)
+			call(s, clk, "A", p, "a-1", true)
+			call(s, clk, "B", p, "b-1", true)
+			call(s, clk, "B", p, "b-2", true)
+			call(s, clk, "A", p, "a-2", true)
+		}, []string{"A", "B"}, true},
+
 		{"a claim before the bucket existed does not take it", func(s *Store, clk *procTestClock) {
 			call(s, clk, "s1", p, "turn-1", true)
 			call(s, clk, bucket, p, "later", false)
@@ -159,11 +167,12 @@ func TestLinkedEvents_AResponseFollowsItsRequest(t *testing.T) {
 		ev(pipeline.SessionResponse, "stream", 300), // closes long after both claims
 		ev(pipeline.SessionRequest, "after", 400),
 	}
-	first := LinkedEvents(events, time.Time{}, at(10))
+	links := []PendingLink{{Session: "s1", First: at(10), Last: at(10)}, {Session: "s2", First: at(30), Last: at(30)}}
+	first := LinkedEvents(events, links, "s1")
 	if got := ids(first); !slices.Equal(got, []string{"stream", "stream"}) {
 		t.Errorf("first link = %v, want the stream's request and its late response", got)
 	}
-	second := LinkedEvents(events, at(10), at(30))
+	second := LinkedEvents(events, links, "s2")
 	if got := ids(second); !slices.Equal(got, []string{"between", "between"}) {
 		t.Errorf("second link = %v, want the call between the claims", got)
 	}
@@ -192,5 +201,49 @@ func TestParsePending(t *testing.T) {
 		if agent != tc.agent || proc != tc.proc || ok != tc.ok {
 			t.Errorf("ParsePending(%q) = %q %q %v", tc.id, agent, proc, ok)
 		}
+	}
+}
+
+// OwnerAt is the session a call made at t belongs to: the first session its process named at
+// or after t. A session the process was still naming at t (its span covers t) wins over one it
+// started naming later; between two spans that both cover t, the one begun more recently.
+func TestOwnerAt(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	links := []PendingLink{
+		{Session: "A", First: at(10), Last: at(1000)},
+		{Session: "B", First: at(500), Last: at(600)},
+	}
+	for _, tc := range []struct {
+		t    int
+		want string
+	}{
+		{1, "A"},   // before both: A is named first after it
+		{300, "A"}, // inside A's span only
+		{550, "B"}, // inside both: B began more recently
+		{800, "A"}, // after B's last, inside A's
+		{1001, ""}, // after every claim
+	} {
+		if got := OwnerAt(links, at(tc.t)); got != tc.want {
+			t.Errorf("OwnerAt(%d) = %q, want %q", tc.t, got, tc.want)
+		}
+	}
+}
+
+// A Bob worker's calls before the launcher spoke wait in the worker's own bucket; the naming
+// request is attributed to the launcher (the agent root) but carries the worker too, so that
+// bucket links as well — what adoption did for PendingProcessID(chain[0]).
+func TestLink_AWorkersOwnBucketLinksThroughItsLaunchersClaim(t *testing.T) {
+	s, clk, _ := linkFixture()
+	defer s.Close()
+	const launcher, worker = "820.1", "821.1"
+	call(s, clk, PendingID("bob", worker), worker, "probe", false)
+	clk.advance(time.Second)
+	e := named(launcher, clk.now())
+	e.ClientProc = worker
+	s.Append("task-1", e)
+	got := linked(t, s, PendingID("bob", worker))
+	if !slices.Equal(linkIDs(got.LinkedTo), []string{"task-1"}) || !got.LinkedAll {
+		t.Errorf("worker bucket LinkedTo %v LinkedAll %v, want [task-1] true", linkIDs(got.LinkedTo), got.LinkedAll)
 	}
 }

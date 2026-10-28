@@ -252,7 +252,7 @@ func (f *SummaryFold) Summary(sessionID string) SessionSummary {
 		PromptContext: f.promptContext(),
 		InferenceHost: f.inferenceHost,
 		Procs:         procsList(f.procs),
-		procSpans:     f.procs,
+		procSpans:     maps.Clone(f.procs),
 		LastRequestAt: f.lastRequestAt,
 		Agent:         pickAgent(sessionID, f.owner, nil, f.agents),
 	}

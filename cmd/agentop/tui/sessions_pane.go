@@ -292,7 +292,7 @@ func (m *model) rebuildSessionsTable() {
 	}
 	q := m.searchQuery(paneSessions)
 	for _, s := range m.sessions {
-		if !m.sessionListed(s, scope) || s.LinkedAll {
+		if !m.sessionListed(s, scope) || foldedInto(s) != "" {
 			continue
 		}
 		b := newRowBuilder(q != "")
@@ -331,6 +331,10 @@ func (m *model) rebuildSessionsTable() {
 		// traffic. The cached-only rows below use len(cached) because the server does not list
 		// those at all.
 		b.cell(padLeft(fmt.Sprintf("%d", s.EventCount), eventsW))
+		// The buckets folded into this session are its calls; their figures are its too.
+		if fc, fa, ft := m.foldedFigures(s.ID); fc != 0 || fa != 0 || ft != 0 {
+			s.CostMicros, s.AvoidedMicros, s.TotalTokens = s.CostMicros+fc, s.AvoidedMicros+fa, s.TotalTokens+ft
+		}
 		b.cell(padLeft(sessionTokens(s.TotalTokens, m.events[s.ID]), tokensW))
 		cost := func() string { return sessionMoneyCellIn(s.CostMicros, s.Saturated, noLimit, s.Currencies) }
 		saved := func() string { return sessionMoneyCellIn(s.AvoidedMicros, s.Saturated, noLimit, s.Currencies) }

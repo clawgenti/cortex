@@ -122,8 +122,16 @@ func (m *model) loadOlderPage() tea.Cmd {
 }
 
 func (m *model) olderPageCmd(id string, before, gen uint64) tea.Cmd {
+	buckets := m.linkedInto(id)
 	return func() tea.Msg {
 		view, err := m.client.GetSessionPage(m.ctx, id, before, apiclient.SnapshotEventLimit)
+		if err == nil && len(buckets) > 0 {
+			// The calls linked into the session that fall in this page — or, for its first
+			// page, before it — are merged here, so a long session's start-up calls are not
+			// only reachable through a row the list hides.
+			first := len(view.Events) > 0 && view.Events[0].Seq <= view.OldestSeq
+			view.Events = pageLinked(view.Events, fetchLinked(m.ctx, m.client, id, buckets), first)
+		}
 		if err != nil {
 			// Its OWN message type, not errMsg. errMsg's handler decides severity by
 			// string-prefixing `where`, and anything it does not recognise flips the whole
