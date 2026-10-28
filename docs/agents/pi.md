@@ -50,20 +50,43 @@ export default function (pi: any) {
   left alone and reported, and `enable` exits 1.
 - `disable` removes only what `enable` wrote. An edited block, or one there twice, gets
   "remove it by hand between the markers" instead.
-- An rc file reached through one symlink (a dotfiles repo) is edited at its target. A
-  longer chain, or a shell other than zsh and bash, gets the block printed for you to
-  place.
+- The rc file follows the same rules as the `bob` shell function: `$SHELL` picks
+  `~/.zshrc` or `~/.bashrc`, one symlink is followed, and anything else gets the block
+  printed for you to place. See [bob.md's shell half](bob.md#which-file-it-writes),
+  including the bash-on-macOS login-shell case.
 
 `agentop uninstall` removes both pieces by the same rules.
 
 **`status`** says `enabled` when both pieces are in place, and `partly enabled` with the
-missing piece named when only one is. It also says whether `CORTEX_PI` is set in the
-current shell. If it is not, that terminal predates `enable`, so open a new one.
+missing piece named when only one is. Unlike the bob function's status, it reads both
+files, so it does not need a new terminal to say `enabled`. It also says whether
+`CORTEX_PI` is set in the current shell. If it is not, that terminal predates `enable`,
+so open a new one. As with bob, the variable is only evidence: `type pi` in a shell says
+`pi is a shell function` when the function is live there.
 
 ### Without the shell function
 
 `agentop exec -- pi` does the same as the function for one run. Put the extension in place
 by hand, or run `enable` and delete the block, to keep the session ids.
+
+### Undoing it by hand
+
+Without `agentop`: delete the lines between `# >>> cortex agentop (pi) >>>` and
+`# <<< cortex agentop (pi) <<<` in your rc file, and delete the extension.
+
+```sh
+$EDITOR ~/.zshrc                                   # or ~/.bashrc
+rm ~/.pi/agent/extensions/cortex-session.ts       # under $PI_CODING_AGENT_DIR if set
+```
+
+## CA trust
+
+Cortex's TLS bridge decrypts Pi's HTTPS with certificates forged from its own CA, so Pi
+has to trust that CA. `agentop exec` sets `NODE_EXTRA_CA_CERTS` to `ca.crt`, which Node
+**adds** to its own roots, so hosts the bridge does not terminate still verify. Node reads
+it once at startup and Pi has no setting for it, which is why the routing is a shell
+function rather than a Pi setting. Pi's `httpProxy` setting alone would send traffic to
+the proxy with no CA, and the bridge would fall back to opaque tunnels.
 
 ## What Cortex shows for it
 
@@ -75,7 +98,28 @@ by hand, or run `enable` and delete the block, to keep the session ids.
 - **Inference** on Anthropic Messages, OpenAI Chat Completions and OpenAI Responses: model,
   messages, tool calls, token counts and cost.
 
-Verified on Pi 1.4.0 with a LiteLLM gateway on `openai-completions`.
+## Verified depth
+
+Tested live with Pi 1.4.0 on macOS 26 (arm64), against a LiteLLM gateway on
+`openai-completions`, under a scratch `HOME`:
+
+- `configure pi enable`, then a new interactive zsh: `type pi` named the function and
+  `CORTEX_PI` was set. `pi -p` with a `read` tool call ran through Cortex.
+- Cortex recorded it as its own session, `pilive-0001`, titled from the prompt, with the
+  model, tool call, tokens and cost. Parsing those means the bridge terminated, so the CA
+  was trusted.
+- `disable` returned `~/.zshrc` to its original bytes and removed the extension.
+- Before this change: the extension alone gave Pi its own session even when Pi was
+  started from inside a Claude Code session.
+
+Not tested live:
+
+- **The `pi` agent name.** The live run used a Cortex release from before this change, so
+  the row showed Pi's raw User-Agent. Recognition, its version and the fold that router
+  pins and the Agents pane key on are covered by unit tests (`TestParseUserAgent_Pi`).
+- **Linux and bash.** Covered by unit tests only.
+- **Pi's Anthropic, OpenAI and OpenRouter providers,** and Pi's interactive mode. Only
+  `pi -p` on a LiteLLM gateway was run.
 
 ## Known issues
 

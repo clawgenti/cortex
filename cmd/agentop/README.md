@@ -1506,7 +1506,7 @@ becomes worth showing, so a remembered dismissal would go stale then.
 
 **Agents the proxy does not recognise share one row, `Other`**, listed last. The
 proxy names an agent only from a User-Agent it recognises (`claude-code`, `bob`,
-`opencode`); anything else is reported under its raw
+`opencode`, `codex`, `pi`); anything else is reported under its raw
 User-Agent, and one program can send several — the IBM Bob IDE was three rows before
 it was recognised, and none of them could reach its session ([#1210]). Picking `Other`
 lists every session that names no recognised agent, including the `default` and
