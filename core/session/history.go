@@ -191,4 +191,13 @@ func (s *Store) withPriorLocked(sum *SessionSummary, id string, sess *entry) {
 	if sum.InferenceHost == "" && f.inferenceHost != "" {
 		sum.InferenceHost, sum.InferenceHostFromHistory = f.inferenceHost, true
 	}
+	// The processes that named the session before this entry still named it, so a resumed
+	// session links calls a process made before the restart.
+	if len(f.procs) > 0 {
+		sum.procSpans = mergeProcs(f.procs, sum.procSpans)
+		sum.Procs = procsList(sum.procSpans)
+	}
+	if f.lastRequestAt.After(sum.LastRequestAt) {
+		sum.LastRequestAt = f.lastRequestAt
+	}
 }

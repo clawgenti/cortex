@@ -83,6 +83,8 @@ func fullEvent() pipeline.SessionEvent {
 		// Set only on a Claude Code subagent's requests; the parent only on a nested one's.
 		Subagent:       "a1a2e36cb5946f31c",
 		ParentSubagent: "a0974b0b8591dc76b",
+		Proc:           "100.5",
+		SessionHeader:  "X-Claude-Code-Session-Id",
 	}
 }
 
@@ -166,6 +168,11 @@ func TestSummarizeEvent_DropsPayloadsKeepsTimelineFields(t *testing.T) {
 	if got.ParentSubagent != full.ParentSubagent {
 		t.Errorf("parentSubagent = %q, want %q — the tree of agents is built from it",
 			got.ParentSubagent, full.ParentSubagent)
+	}
+	// proc is kept: agentop merges a session's linked process rows into its timeline by it.
+	if got.Proc != full.Proc || got.SessionHeader != full.SessionHeader {
+		t.Errorf("proc %q sessionHeader %q, want %q %q — the linked-row fold reads them",
+			got.Proc, got.SessionHeader, full.Proc, full.SessionHeader)
 	}
 	if got.Direction != full.Direction || got.Phase != full.Phase {
 		t.Error("direction/phase did not survive")
@@ -360,7 +367,9 @@ func TestSummarizeEvent_ShapeIsGuarded(t *testing.T) {
 		// 27 since Subagent, which is TIMELINE data: it says which agent made the row. A
 		// scalar capped at maxClientLen, so the struct copy keeps it; asserted above.
 		// 28 since ParentSubagent, TIMELINE data for the same reason; asserted above.
-		{"SessionEvent", reflect.TypeOf(pipeline.SessionEvent{}), 28},
+		// 30 since Proc and SessionHeader, TIMELINE data: agentop folds a session's linked
+		// process rows by them. Asserted above.
+		{"SessionEvent", reflect.TypeOf(pipeline.SessionEvent{}), 30},
 		// 25 since AgentRole, which is TIMELINE data: agentop's CONTEXT gauge reads it on every
 		// row the timeline serves. It needs no assertion of its own in the projection test
 		// beyond the equality one there — a scalar survives the struct copy, unlike the two

@@ -166,6 +166,13 @@ type entry struct {
 	// A LATEST VALUE, NOT A SUM, so in context's class above: a trim has nothing to subtract, and
 	// the request that set it is the newest of its kind, which is the last a trim would take.
 	inferenceHost string
+
+	// procs is each process that NAMED this session through its own header, with when it first
+	// and last did (applyProcs); owner is the agent whose header named it first (applyOwner).
+	// Neither is shed on trim. lastRequestAt is the newest request's time, for Link.
+	procs         map[string]ProcSpan
+	owner         string
+	lastRequestAt time.Time
 }
 
 // MaxSessionIDLen is the longest session ID the store keeps intact; longer ids
@@ -569,6 +576,11 @@ func (s *Store) appendLocked(sessionID string, b *Bucket, event pipeline.Session
 	// the local parameter, for the reason given there.
 	if h := inferenceHostOf(&event); h != "" {
 		sess.inferenceHost = h
+	}
+	sess.procs = applyProcs(sess.procs, sessionID, &event)
+	sess.owner = applyOwner(sess.owner, sessionID, agentName, &event)
+	if event.Phase == pipeline.SessionRequest && event.At.After(sess.lastRequestAt) {
+		sess.lastRequestAt = event.At
 	}
 	if b == nil {
 		sess.UpdatedAt = now
@@ -1031,6 +1043,22 @@ type SessionSummary struct {
 	// omitempty on a bool drops exactly the false the wire needs; absent then means "resident",
 	// so a client reading a proxy that predates the archive sees every row as it always did.
 	Resident *bool `json:"resident,omitempty"`
+
+	// Procs are the processes that named this session through their own session header,
+	// "<pid>.<start>", sorted. Absent when none did, and on a summary from before the field.
+	Procs []string `json:"procs,omitempty"`
+	// LastRequestAt is the time of the newest request this session holds, zero when it holds
+	// none. On a pending bucket it is what Link compares with a process's claims.
+	LastRequestAt time.Time `json:"lastRequestAt,omitzero"`
+	// LinkedTo, on a pending bucket, is the sessions its process went on to name, in the order
+	// it named them; LinkedAll says every request in the bucket falls before one of them. Set
+	// by Link when the list is read, never stored. agentop folds a fully linked bucket into
+	// those sessions and lists a partly linked one as its own row.
+	LinkedTo  []string `json:"linkedTo,omitempty"`
+	LinkedAll bool     `json:"linkedAll,omitempty"`
+
+	// procSpans is Procs with each process's span, for Link; not on the wire.
+	procSpans map[string]ProcSpan
 }
 
 // sessionAgent is one client's first label in a session.
@@ -1150,6 +1178,9 @@ func (s *Store) ListSessions() []SessionSummary {
 			PromptContext: sess.context.Publish(),
 			// Read, not computed, like Title: Append folds it.
 			InferenceHost: sess.inferenceHost,
+			Procs:         procsList(sess.procs),
+			procSpans:     sess.procs,
+			LastRequestAt: sess.lastRequestAt,
 		}
 		s.withPriorLocked(&sum, id, sess)
 		out = append(out, sum)
