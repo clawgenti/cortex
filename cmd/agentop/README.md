@@ -608,7 +608,8 @@ with its own URL and key, `agentop server`
 chooses which one an agent's **new** sessions use, through the
 [`inference-router`](../../docs/plugin-catalog.md#inference-router) plugin. A
 session stays on the server it started on, including one already running when its
-agent is first routed. Routing is opt-in per agent: until an agent is given
+agent is first routed, until you move it with `agentop server move` or `S` on the
+sessions pane. Routing is opt-in per agent: until an agent is given
 a server, its traffic goes where the agent sends it. Once it is given one, its
 inference goes to that server wherever the agent addressed it — Anthropic,
 OpenCode Zen, Bob's gateway, or another server — so the agent needs no setting of
@@ -666,10 +667,12 @@ refusal is believed for an hour, and a session keeps the model it was given.
   including an agent that has not run yet. **`reset --agent <agent>`** stops
   routing it. Either way a session already running stays where it is: its pin holds
   it, kept in `~/.cortex/plugin-state.json` so a proxy restart forgets none.
+  **`move <session-id> <name>`** moves one running session; `own` sends it back to
+  its agent's own provider.
 - **`remove <name>`** refuses while an agent is routed to the server, and names
   the command that takes the agent off it; it also refuses the last server. A
   session that started on a removed server gets a 503 asking for a new session
-  until the server is added back. So when
+  until the server is added back or the session is moved. So when
   sessions the proxy is running last sent their inference to the server, `remove`
   warns how many before it goes ahead. It leaves
   out the default and `pending:` buckets, which the router never pins.
@@ -764,8 +767,8 @@ agentop is for, and the other four are surfaces you visit and leave.
   server each session's inference traffic last went to, which for a session that
   was running when its agent was switched is still the one it started on. A host no
   server has, such as an unrouted agent's own provider, is shown without its port in
-  parentheses, and a session with no inference traffic seen as an em dash. Read-only:
-  no key here moves a session, since that would move a running conversation. On a
+  parentheses, and a session with no inference traffic seen as an em dash. `S` on a
+  session's row moves it; see [`agentop server`](#choosing-an-inference-server-agentop-server). On a
   terminal too narrow for it the column is left out, not squeezed, and so is
   `AGENT`; neither shows until `COST` and `SAVED` do, so widening the window never
   takes one away.
@@ -1556,7 +1559,8 @@ went somewhere other than the new choice (for a switch back to its own choice, t
 of the servers), and is left out when there are none. A switch moves none of them:
 the router keeps a running session on the server it started on, across a proxy
 restart too (see [`agentop server`](#choosing-an-inference-server-agentop-server)).
-The sessions table's `SERVER` column shows where each one is.
+The sessions table's `SERVER` column shows where each one is, and `S` on a session's
+row moves that one.
 
 When the switch does not go through, a panel over the pane says so, whole, and where
 it left the config file; `Esc`, `q`, `Ctrl+C` or `↵` closes it. A reload the proxy
