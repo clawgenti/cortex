@@ -1266,7 +1266,8 @@ agentop is for, and the other four are surfaces you visit and leave.
   bottom: amber the agent's tools running, purple its model generating, red
   retrying after a failed model call, teal waiting on its subagents, grey waiting
   on you. Blank is idle. Waiting is read from the gaps between an agent's model
-  calls: after a failed call it is retrying; a gap that one of its subagents was
+  calls: after a failed call that the next call re-sends unchanged it is
+  retrying; a gap that one of its subagents was
   running in, or that a subagent's result ended, is waiting on subagents; a gap
   after a finished reply otherwise is waiting on you, for the main agent only. A
   subagent's cells are measured against the part of the cell it was alive for, so

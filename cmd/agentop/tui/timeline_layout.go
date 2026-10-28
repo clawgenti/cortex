@@ -359,9 +359,9 @@ func (v ivs) cover(lo, hi time.Time) time.Duration {
 	return d
 }
 
-// waits classifies the gaps between an agent's consecutive turns. After a failed call it was
-// retrying. When the next turn was woken by a subagent's result, or one of its subagents was
-// running, it was waiting on its subagents. After a finished reply otherwise, it was waiting
+// waits classifies the gaps between an agent's consecutive turns. After a failed call that the
+// next call re-sent unchanged, it was retrying. When the next turn was woken by a subagent's
+// result, or one of its subagents was running, it was waiting on its subagents. After a finished reply otherwise, it was waiting
 // on the user; only the main agent has one.
 func waits(tl *timeline.Timeline, agent string, children []string, life map[string][2]time.Time, now time.Time) (retry, subs, user ivs) {
 	var kids [][2]time.Time
@@ -389,7 +389,7 @@ func waits(tl *timeline.Timeline, agent string, children []string, life map[stri
 			continue
 		}
 		switch {
-		case turns[i].Error:
+		case turns[i].Error && turns[i+1].Resent:
 			r = append(r, [2]time.Time{g0, g1})
 		case woke[g1.UnixNano()]:
 			s = append(s, [2]time.Time{g0, g1})

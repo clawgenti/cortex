@@ -93,9 +93,10 @@ answers 404 rather than a neighbour when neither holds that seq.
 The session's history as spans, for agentop's Timeline pane. Computed from the
 whole session: memory first, then the archive behind it (a 6,000-event session
 takes a few milliseconds; reading one that is only on disk takes over a second).
-The result is cached per session until its newest event changes, or for a minute
-on an idle session, so a pane refreshing every second costs one compute per new
-event. Reads at most 50,000 events, newest first;
+The result is cached per session until its newest event changes, however long
+that takes; an unanswered request still ages out on each read, as it would on a
+fresh compute. A pane refreshing every second costs one compute per new event,
+and a session only on disk is read once. Reads at most 50,000 events, newest first;
 `truncated: true` says older ones exist. 404 for an unknown session. `?from=` and
 `?to=` (RFC 3339) keep only the spans that overlap the range; `agents` is always
 the whole list.
@@ -106,6 +107,7 @@ the whole list.
              {"id": "a1bf9707ee0e71012", "parent": "main", "label": "Survey the code",
               "type": "Explore", "spawnTool": "toolu_…", "spawnedAt": "…", "returnedAt": "…"}],
  "turns":   [{"agent": "main", "start": "…", "end": "…", "finish": "tool_use", "seq": 12}],
+ "jobs":    [{"agent": "main", "id": "bk42", "start": "…", "end": "…", "seq": 40}],
  "tools":   [{"agent": "main", "id": "toolu_…", "name": "Bash", "start": "…", "end": "…",
               "preview": "go test ./...", "seq": 13}],
  "returns": [{"agent": "a1bf9707ee0e71012", "into": "main", "at": "…", "seq": 90}],
@@ -118,7 +120,11 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
 
 - A **turn** is one model call, request to end of response. Claude Code's
   progress-label calls and tool-less side calls (titler, classifier) are left
-  out. `error` marks a call that failed.
+  out. `error` marks a call that failed: an upstream error, a refusal, the
+  client giving up, a finish of `content_filter`, `failed` or `cancelled`, or a
+  response that ended with no finish reason, which is a stream cut mid-reply.
+  `resent` marks a call that sent its agent's previous call's conversation again
+  unchanged: a retry.
 - A **tool** runs from the response that requested it to the agent's first
   request carrying its result (`inference.toolResults[].toolUseId`). A tool
   Claude Code started while the response was still streaming can have its
@@ -131,6 +137,13 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
 - A **return** is a subagent's result reaching another agent:
   `<agent-message from="…">` or `<task-notification>` in a message that agent
   had not sent before.
+- A **job** is a background shell command, from the tool result that
+  acknowledged it (`Command running in background with ID: …`) to the first
+  `<task-notification>` naming that id. Its tool call ends at the
+  acknowledgement, so the job is what shows it still running. A job with no
+  `end` is one no notification named: still running, or never reported, as a
+  server left running when its agent exited is. Absent when the session
+  started none.
 
 **Hosts** are every outbound request paired with its response, every opaque
 tunnel, and every denial. `kind` is `llm`, `mcp`, `http` or `tunnel`, and
