@@ -152,8 +152,61 @@ func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 	}
 	buildAgents(t, events)
 	buildHosts(t, events)
+	endStrandedTools(t)
 	t.LoseUnanswered(now)
 	return t
+}
+
+// endStrandedTools ends each tool still open, and each background job its agent made no turn
+// after, at the first failed request to a model host that follows. buildAgents has already lost
+// every open tool whose agent moved on, so what is left had no later turn: the failure is the
+// agent's own attempt to report back, and where it stopped. On real sessions a cut VPN left a
+// 5-minute Bash drawn running for 7.7 hours and a background job for 10, out to the session's
+// last unrelated event. Only a failure with no inference parse counts: a CONNECT that could not
+// be dialed, which names no agent, so it is matched by host, any host a turn of the session went
+// to. A failed call that was parsed is some agent's own call, a turn or a side call such as the
+// titler, and is no one else's attempt.
+//
+// shortcut: two agents stranded by one outage both end at its first failure; upgrade if CONNECTs
+// come to carry the agent id.
+func endStrandedTools(t *Timeline) {
+	turnSeq := map[uint64]bool{}
+	lastTurn := map[string]time.Time{}
+	for _, x := range t.Turns {
+		turnSeq[x.Seq] = true
+		if x.Start.After(lastTurn[x.Agent]) {
+			lastTurn[x.Agent] = x.Start
+		}
+	}
+	model := map[string]bool{}
+	for _, h := range t.Hosts {
+		if turnSeq[h.Seq] {
+			model[h.Host] = true
+		}
+	}
+	firstFailure := func(after time.Time) *time.Time {
+		for _, h := range t.Hosts {
+			if h.Error && h.Kind != KindLLM && model[h.Host] && h.Start.After(after) {
+				at := h.Start
+				return &at
+			}
+		}
+		return nil
+	}
+	for i := range t.Tools {
+		if x := &t.Tools[i]; x.End == nil {
+			x.End = firstFailure(x.Start)
+		}
+	}
+	for i := range t.Jobs {
+		if j := &t.Jobs[i]; j.End == nil {
+			after := j.Start
+			if last := lastTurn[j.Agent]; last.After(after) {
+				after = last
+			}
+			j.End = firstFailure(after)
+		}
+	}
 }
 
 // LoseUnanswered ends, as lost, each request still unanswered hostLostAfter before the later
