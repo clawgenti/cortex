@@ -39,6 +39,7 @@ AuthBridge pipeline YAML, not whether it is compiled into the binary
 | [`session-budget`](#session-budget) | Enforces per-session token, call, and duration budgets via Redis. | Alpha | Outbound | No |
 | [`token-broker`](#token-broker) | Exchanges incoming tokens against a configured IdP via a broker service. | Alpha | Outbound | No |
 | [`token-exchange`](#token-exchange) | RFC 8693 outbound token exchange per route. | Ready | Outbound | YES |
+| [`token-exchange-aiac`](#token-exchange-aiac) | Outbound token exchange with no routes: the audience comes from the destination host, and Keycloak decides which hosts are targets. | Alpha | Outbound | No |
 | [`tool-prune`](#tool-prune) | Removes unused tool definitions from inference requests. | Alpha | Outbound | No |
 
 ## `a2a-parser`
@@ -205,6 +206,16 @@ interface each IdP implements, see
 [idp-plugin-contract.md](./idp-plugin-contract.md).
 
 Full reference: [`token-exchange-plugin.md`](token-exchange-plugin.md).
+
+## `token-exchange-aiac`
+
+Outbound token exchange that needs no routes. The audience comes from the
+in-cluster destination host through `audience_template`. Keycloak issuing a
+token means exchange; "Audience not found" means passthrough; any other answer
+means deny. An alternative to [`token-exchange`](#token-exchange), not a
+complement; its reference covers the Keycloak setup it requires.
+
+Full reference: [`token-exchange-aiac-plugin.md`](token-exchange-aiac-plugin.md).
 
 ## `script`
 
