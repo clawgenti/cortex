@@ -961,3 +961,46 @@ func TestServiceAccountNamespaceIsTheDefault(t *testing.T) {
 		t.Errorf("namespace = %q, want none without the file", p.cfg.Namespace)
 	}
 }
+
+// The stale own-token retry runs once. Here every own token is rejected after
+// it is cached and the cache always holds one, as when concurrent requests
+// keep refilling it between the drop and the retry; the request must end in a
+// bounded number of IdP calls rather than loop.
+func TestStaleSelfTokenRetryIsBounded(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	kc.override = func(w http.ResponseWriter, form map[string]string) bool {
+		if form["grant_type"] == grantTokenExchange {
+			oauthError(w, 400, "invalid_request", "Invalid token")
+			return true
+		}
+		return false
+	}
+	p := configured(t, srv, `,"no_token_policy":"client-credentials"`)
+	refill := func() {
+		p.tokens.put(selfTokenKey, issuedToken{accessToken: "stale-self", expiresIn: time.Hour})
+	}
+	refill()
+	calls := kc.calls.Load()
+
+	// A cache that always answers stands in for the racing writers.
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				refill()
+			}
+		}
+	}()
+	a := p.OnRequest(context.Background(), outbound("github-tool", ""))
+	close(done)
+	if a.Type != pipeline.Reject || a.Violation.Status != http.StatusServiceUnavailable {
+		t.Errorf("action = %v %+v, want 503", a.Type, a.Violation)
+	}
+	// At most: exchange with the stale token, client_credentials, exchange again.
+	if n := kc.calls.Load() - calls; n > 3 {
+		t.Errorf("IdP calls = %d, want at most 3: the retry is not bounded", n)
+	}
+}

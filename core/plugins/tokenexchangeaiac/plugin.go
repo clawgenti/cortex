@@ -486,16 +486,24 @@ func (p *TokenExchangeAIAC) exchangeCached(ctx context.Context, creds credential
 // A cached own token the IdP no longer accepts — after a Keycloak restart or a
 // realm key rotation — is dropped and fetched again, once, so that it does not
 // fail every request until it would have expired.
+//
+// The retry is bounded by a flag, not by the cache: a concurrent request can
+// put another own token between the drop and the retry's read, and that one
+// may be rejected too.
 func (p *TokenExchangeAIAC) exchangeSelf(ctx context.Context, creds credentials, audience string) (string, bool, error) {
+	return p.exchangeSelfOnce(ctx, creds, audience, true)
+}
+
+func (p *TokenExchangeAIAC) exchangeSelfOnce(ctx context.Context, creds credentials, audience string, mayRetry bool) (string, bool, error) {
 	self, fromCache, err := p.selfToken(ctx, creds)
 	if err != nil {
 		slog.Warn(PluginName+": client-credentials grant failed", "error", err)
 		return "", false, fmt.Errorf("could not obtain this workload's own token: %w", err)
 	}
 	tok, hit, err := p.exchangeCached(ctx, creds, self, audience)
-	if fromCache && classify(err) == outcomeSubjectInvalid {
+	if mayRetry && fromCache && classify(err) == outcomeSubjectInvalid {
 		p.tokens.drop(selfTokenKey)
-		return p.exchangeSelf(ctx, creds, audience)
+		return p.exchangeSelfOnce(ctx, creds, audience, false)
 	}
 	return tok, hit, err
 }

@@ -39,7 +39,7 @@ no-token policies `allow`, `deny` and `client-credentials`, and both default to
 | In-cluster, no Keycloak client by that name | 400 `invalid_client` "Audience not found" | forwarded unchanged; remembered for `unknown_audience_ttl` | `skip / audience_unknown` |
 | In-cluster, client exists but is **not granted** to this workload | 400 `invalid_request` "Requested audience not available" | **403** | `deny / audience_not_granted` |
 | In-cluster, the destination's client is **disabled** | 400 `invalid_client` "Client disabled" | **403** | `deny / target_disabled` |
-| In-cluster, bearer Keycloak rejects (expired, bad signature, an API key it never issued) | 400 `invalid_request` "Invalid token"; asked again with the workload's own token | that second answer decides: unknown → forwarded unchanged, bearer intact; a granted target → **401** | `skip / audience_unknown` or `deny / subject_invalid` |
+| In-cluster, bearer Keycloak rejects (expired, bad signature, an API key it never issued) | 400 `invalid_request` "Invalid token"; asked again with the workload's own token | that second answer decides: unknown → forwarded unchanged, bearer intact; a granted target → **401**; not granted or disabled → **403**; anything else → **503** | `skip / audience_unknown`, `deny / subject_invalid`, `deny / audience_not_granted`, `deny / target_disabled` or `deny / exchange_failed` |
 | Keycloak down, timeout, 5xx, bad credentials, any other error | — | **503** | `deny / exchange_failed` |
 | Credentials not yet loaded from `/shared/` | not asked | **503** | `deny / credentials_not_ready` |
 | Any host, bearer is a placeholder that can't be resolved (`resolve_placeholders: true`) | not asked | **401** | `deny / placeholder_unresolved` |
@@ -228,7 +228,7 @@ it, spaces included. When there is none, `no_token_policy` decides:
 
 | `no_token_policy` | Result | Session event |
 |---|---|---|
-| `deny` (default) | a target: **401** `auth.unauthorized`, "missing Authorization header" | `deny / no_token` |
+| `deny` (default) | a target: **401** `auth.unauthorized`, "missing Authorization header" (a host in another namespace is judged first: see below) | `deny / no_token` |
 | `allow` | forwarded unchanged, with no `Authorization` | `skip / no_token` |
 | `client-credentials` | exchanged with the workload's own token as the subject | `modify / token_exchanged` |
 
@@ -242,6 +242,13 @@ workload's own token as the subject, and uses only the answer: a token, or a
 cached one, means 401; "Audience not found" passes the request through without
 an `Authorization` header, as it would with a bearer; any other answer is the
 403 or 503 of the table at the top. The issued token is never forwarded.
+
+A host in another namespace, under a template without `{namespace}`, is judged
+before `no_token_policy` is looked at, except under `allow`, which asks
+Keycloak nothing. Under `deny` and `client-credentials` alike, such a host whose
+name is a client's is a **403** `deny / foreign_namespace`, not a 401 or an
+exchange; see [Which hosts are offered to
+Keycloak](#which-hosts-are-offered-to-keycloak).
 
 With `no_token_policy: client-credentials`, the plugin gets the
 workload's own token with `client_credentials` (cached until shortly before it
@@ -298,6 +305,14 @@ in the same shape `token-exchange` produces:
 | `identity.client_id` | this workload's own client ID |
 | `identity.scopes` | `scope` of the issued token |
 | `identity.service_id` | the target audience |
+
+That table holds when the request carries no validated identity, which is the
+usual case outbound. When it does carry one (`pctx.Identity`, set by a
+validating plugin earlier on the chain), `opa` builds `input.identity` from it
+instead: `subject`, `client_id` and `scopes` are that identity's, and
+`service_id` is absent. `input.delegation` is unaffected either way, and its
+hop still records the issued token's scopes; the hop's `subject_id` is then
+that identity's subject.
 | `delegation.chain[].strategy` | `"token-exchange-aiac"` |
 
 Subject and scopes are read from the token Keycloak just issued, not from the
