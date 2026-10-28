@@ -164,8 +164,8 @@ and the source session's for a fork, so a subagent or fork is filed under the se
 belongs to, as Claude Code's subagents are. Cortex reads `X-Session-Id` on a laptop
 install: it is in the list the installer writes, and in the built-in default wherever
 every listener binds loopback (`listener.bind_loopback_only`). A cluster deployment's
-default does not read it, because it is a generic name as well, which Pi (Inflection AI)
-and similar frameworks send too. OpenCode also sends `X-Opencode-Session-Id`, the
+default does not read it, because it is a generic name as well, which Pi (through the
+extension `agentop configure pi` installs) and similar frameworks send too. OpenCode also sends `X-Opencode-Session-Id`, the
 session's own id, which is not read. Traffic that carries no such header is filed by the
 process that sent it (see below), and where that has no answer falls back to the previous
 behavior — the most recently active session, or the `default` bucket. In practice

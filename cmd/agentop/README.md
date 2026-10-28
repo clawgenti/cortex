@@ -211,6 +211,7 @@ claude-code   enabled       ~/.claude/settings.json
 bob           uncertain     editor: ~/Library/.../IBM Bob/User does not exist, so IBM Bob has not run here; shell: CORTEX_BOBSHELL is unset in this shell
 opencode      uncertain     opencode not found on PATH or in ~/.opencode/bin
 codex         not enabled   no Cortex values in ~/.codex/.env
+pi            not enabled   extension: missing; shell: no pi function in ~/.zshrc
 
 For the detail on one of them: agentop configure <harness> status
 ```
@@ -578,6 +579,21 @@ stopped, or running with its old environment, and `opencode service restart`
 applies the change. Everything else — undo by hand, CA trust, the record
 file, verified depth, known issues — is in
 [opencode.md](../../docs/agents/opencode.md).
+
+## Routing Pi through Cortex (`agentop configure pi`)
+
+```sh
+agentop configure pi enable    # a pi shell function, plus Pi's session extension
+agentop configure pi disable   # remove both
+agentop configure pi status    # which of the two is in place
+```
+
+The shell function runs `agentop exec -- pi`, because Pi reads the bridge CA only
+from `NODE_EXTRA_CA_CERTS` at startup. The extension,
+`~/.pi/agent/extensions/cortex-session.ts`, sends Pi's session id as `x-session-id`,
+which Pi does not send on its own. `enable` and `disable` take `[--yes]`. Both
+pieces are fixed text, so a file or block agentop did not write is left alone and
+reported. Everything else is in [pi.md](../../docs/agents/pi.md).
 
 ## Installing a bundled script plugin (`agentop script`)
 
