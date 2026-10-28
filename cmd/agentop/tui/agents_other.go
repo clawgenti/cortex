@@ -121,8 +121,7 @@ func foldOtherAgents(snap *usage.Snapshot) *usage.Snapshot {
 
 // otherSessionsCount is how many sessions the Other scope lists: every server-listed session that
 // names no recognised agent, plus the cached-only rows — sessions the server no longer lists,
-// which therefore name no agent at all. An adopted pending bucket is not counted, because the
-// list does not show it; see rebuildSessionsTable.
+// which therefore name no agent at all.
 func (m *model) otherSessionsCount() int {
 	n := 0
 	for _, s := range m.sessions {
@@ -130,12 +129,7 @@ func (m *model) otherSessionsCount() int {
 			n++
 		}
 	}
-	adopted := m.adoptedSessionIDs()
-	for _, id := range m.cachedOnlySessionIDs() {
-		if !adopted[id] {
-			n++
-		}
-	}
+	n += len(m.cachedOnlySessionIDs())
 	return n
 }
 

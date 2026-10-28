@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/pem"
 	"fmt"
+	"github.com/rossoctl/cortex/core/attribution"
 	"io"
 	"net"
 	"net/http"
@@ -750,10 +751,11 @@ func TestSelfTraffic_AnEventStreamIsRelayedAsItArrives(t *testing.T) {
 	}
 }
 
-// A process's own pending bucket is certainly its calls; the agent-wide one is a guess
-// about a process the lookup could not name. When a header claims a session and both
-// buckets exist, the process's own is the one adopted.
-func TestProcessAttribution_AProcessAdoptsItsOwnPendingBucketFirst(t *testing.T) {
+// A process's calls before its first header stay in its own pending bucket, carrying the
+// process, and its headered request carries the same process and the header that named the
+// session: the two facts session.Link joins on. A call the lookup could not name goes to the
+// agent-wide bucket and carries no process, so nothing can link it.
+func TestProcessAttribution_RecordsTheProcessOnEveryRow(t *testing.T) {
 	procs := newFakeProcs(fproc(100, 50, "/bin/claude"))
 	store := session.New(0, 0, 0)
 	defer store.Close()
@@ -764,8 +766,29 @@ func TestProcessAttribution_AProcessAdoptsItsOwnPendingBucketFirst(t *testing.T)
 	sendAs(t, unnamed, backendURL+"/guess", procClaudeUA, "", "")
 	sendAs(t, claude, backendURL+"/own", procClaudeUA, "", "")
 	sendAs(t, claude, backendURL+"/v1/messages", procClaudeUA, session.ClaudeCodeSessionHeader, "s1")
-	if got := strings.Join(recordedPaths(store, "s1"), ","); got != "/own,/v1/messages" {
-		t.Errorf("s1 = %s, want the process's own pre-header call adopted", got)
+
+	proc := attribution.Proc{PID: 100, Start: time.Unix(100, 0).UnixNano()}.Key()
+	own := store.View(session.PendingID("claude-code", proc))
+	if own == nil || len(own.Events) != 2 || own.Events[0].HTTPPath != "/own" {
+		t.Fatalf("the process's bucket = %+v, want /own and its response", own)
+	}
+	for _, e := range own.Events {
+		if e.Proc != proc || e.SessionHeader != "" {
+			t.Errorf("%s %s: proc %q header %q, want %q and none", e.Phase, e.HTTPPath, e.Proc, e.SessionHeader, proc)
+		}
+	}
+	s1 := store.View("s1")
+	if s1 == nil || s1.Events[0].Proc != proc || s1.Events[0].SessionHeader != session.ClaudeCodeSessionHeader {
+		t.Fatalf("s1's request = %+v, want proc %q named by the Claude header", s1, proc)
+	}
+	var guess *pipeline.SessionView
+	if guess = store.View(session.PendingSessionID("claude-code")); guess == nil || guess.Events[0].Proc != "" {
+		t.Errorf("the unnamed client's bucket = %+v, want /guess with no process", guess)
+	}
+	for _, sum := range store.ListSessions() {
+		if sum.ID == "s1" && (len(sum.Procs) != 1 || sum.Procs[0] != proc) {
+			t.Errorf("s1's Procs = %v, want [%s]", sum.Procs, proc)
+		}
 	}
 }
 

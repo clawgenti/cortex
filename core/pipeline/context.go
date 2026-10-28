@@ -191,6 +191,11 @@ type Context struct {
 	parentSubagent string
 	subagentParsed bool
 
+	// attributedProc, namingHeader and attributed hold SetAttribution's pin.
+	attributedProc string
+	namingHeader   string
+	attributed     bool
+
 	Agent    *AgentIdentity
 	Identity Identity // nil before an auth plugin runs
 

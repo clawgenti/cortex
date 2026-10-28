@@ -13,7 +13,4 @@ func TestPendingID(t *testing.T) {
 			t.Errorf("PendingID(%q, %q) = %q, want %q", tc.agent, tc.proc, got, tc.want)
 		}
 	}
-	if got, want := PendingID("claude-code", "100.5"), PendingProcessID("claude-code", Proc{PID: 100, Start: 5}); got != want {
-		t.Errorf("PendingID = %q, PendingProcessID = %q: the two formats must agree until Task 3 removes the second", got, want)
-	}
 }

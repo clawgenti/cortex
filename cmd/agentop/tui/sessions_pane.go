@@ -353,12 +353,10 @@ func (m *model) rebuildSessionsTable() {
 	// restart, so without this the picker is empty and the retained history is
 	// unreachable. One with an archive lists everything it holds, and these rows
 	// are then mostly absent.
-	adopted := m.adoptedSessionIDs()
 	for _, id := range m.cachedOnlySessionIDs() {
-		// A scope lists only sessions the server names an agent for, and an adopted pending bucket
-		// lives on under the session that adopted it. Other is the exception: a session the server
-		// no longer lists names no agent, which is that row's definition.
-		if (scope != "" && scope != otherAgents) || adopted[id] {
+		// A scope lists only sessions the server names an agent for. Other is the exception: a
+		// session the server no longer lists names no agent, which is that row's definition.
+		if scope != "" && scope != otherAgents {
 			continue
 		}
 		cached := m.events[id]
@@ -494,20 +492,6 @@ func (m *model) sessionsListTwoAgents(scope string) bool {
 		}
 	}
 	return false
-}
-
-// adoptedSessionIDs is the set of pending buckets a listed session says it adopted.
-func (m *model) adoptedSessionIDs() map[string]bool {
-	var out map[string]bool
-	for _, s := range m.sessions {
-		for _, id := range s.Adopted {
-			if out == nil {
-				out = make(map[string]bool)
-			}
-			out[id] = true
-		}
-	}
-	return out
 }
 
 // sessionTitle names a session from the harvested metadata, or "" when nothing names it.
