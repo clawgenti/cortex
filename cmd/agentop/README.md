@@ -731,7 +731,7 @@ so their `--main` and
 router does not read. A prompt larger than the server's window is trimmed by Ollama
 rather than refused, so set its context length above the agent's prompts: Claude
 Code's opening turn can pass 64k tokens, Bob's reach about 21k. On a Mac with
-less than 64 GB, see [Fit the model to your memory](../../docs/laptop-local-model.md#fit-the-model-to-your-memory).
+less than 64 GB, see [Choose a model](../../docs/laptop-local-model.md#choose-a-model).
 
 ## Panes
 

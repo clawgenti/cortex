@@ -1,124 +1,46 @@
 # Run an agent on a local model
 
-When an inference provider is out — a dead key, a rate limit, an outage — or
-when you would rather the traffic never leave the machine, Cortex can send an
-agent's new sessions to a model server running locally. This page walks the
-whole path: standing the server up, adding it to Cortex, and what changes for
-the agent.
+Cortex can send an agent's inference to a model server on your own machine.
+Use it when your provider is down or out of quota, or when you want the
+traffic to stay local.
 
-The reference setup is [Ollama](https://ollama.com) running `granite4.2:8b`:
-an 8.8B model that calls tools, thinks before answering, and runs on a laptop.
-Any OpenAI- or Anthropic-compatible server works the same way — LM Studio,
-llama.cpp's `llama-server`, vLLM — and is added with the same two commands;
-[Local model servers](../cmd/agentop/README.md#local-model-servers) covers
-their specifics.
+This page uses [Ollama](https://ollama.com) and IBM's Granite models. Any
+OpenAI- or Anthropic-compatible server works the same way: LM Studio,
+llama.cpp's `llama-server`, vLLM. See
+[Local model servers](../cmd/agentop/README.md#local-model-servers) for their
+details.
 
-Two things to know before starting:
+Before you start:
 
-- **A local model is a lesser model.** `granite4.2:8b` follows instructions
-  and calls tools reliably, but it is not a frontier model: expect more
-  retries and wrong turns on hard work. It is a fallback that keeps you
-  working — and one whose traffic stays on your machine — not a replacement.
-- **Only new sessions move.** A conversation already running keeps the server
-  it started on, wherever the agent addressed its requests. Switch before
-  starting new work, not in the middle of it.
+- **A local model is weaker than a frontier model.** Expect more retries and
+  wrong turns on hard work. It keeps you working; it does not replace your
+  provider.
+- **Nothing restarts.** You add the server and route the agent with two
+  commands, and the proxy reloads them.
 
-## Stand up the server
+## Choose a model
 
-| | |
+Pick the model by how much memory your Mac has. The model's own size is
+small. What grows is the cache that holds the context: the bigger the window,
+the more memory it takes. When it does not fit in GPU memory, the Mac swaps
+and everything slows down. A 36 GB Mac, for example, runs `granite4.2:8b`
+slowly at a 64k window and stalls at 128k.
+
+| Your Mac's memory | Model |
 |---|---|
-| macOS | the app from [ollama.com/download](https://ollama.com/download) |
-| Linux | `curl -fsSL https://ollama.com/install.sh \| sh` |
+| 64 GB or more | `granite4.2:8b` |
+| 32–48 GB | `granite4.2:3b` |
+| Under 32 GB | `granite4:tiny-h` |
 
-Start Ollama — the macOS app does this at login, and on Linux the installer
-starts an `ollama` service (where there is no systemd, run `ollama serve`) —
-and pull the model:
-
-```sh
-ollama pull granite4.2:8b      # a 5.3 GB download
-```
-
-Check that it answers:
-
-```sh
-curl -s localhost:11434/v1/models | jq -r '.data[].id'
-```
-
-`granite4.2:8b` should be on the list. Ollama serves both dialects an agent
-sends — the OpenAI chat-completions format and the Anthropic Messages format
-— so Claude Code and OpenAI-dialect agents route to it alike, with no
-translation gateway between.
-
-### Context length
-
-This is the one setting that matters. Ollama does not refuse a prompt too
-large for its window: it trims it silently. And a fresh install does not give
-a model its own window. It picks one from the GPU memory it finds — **4k
-below about 24 GB, 32k below about 48 GB**, the model's full window only
-above that. On Apple silicon that is part of the unified memory: a 64 GB Mac
-reports 51.8 GB. Claude Code's opening turn can pass 64k tokens, so routed
-to an Ollama that picked 4k or 32k its instructions would be cut down with
-no error anywhere — the agent would simply behave strangely, and nothing
-would say why.
-
-Set the window to the model's full 131k where the server is started:
-
-- **The macOS app:** Settings → Context length → 128k, the slider's name for
-  131072. The app restarts its server when the value changes. Use the slider
-  rather than `launchctl setenv`: the app overrides `OLLAMA_CONTEXT_LENGTH`
-  with the slider's value once the slider has been set, and `launchctl
-  setenv` does not survive a reboot.
-- **The Linux service the installer set up:** it already holds port 11434,
-  so a second `ollama serve` cannot start. Set the variable on the service:
-  run `sudo systemctl edit ollama.service`, add
-
-  ```ini
-  [Service]
-  Environment="OLLAMA_CONTEXT_LENGTH=131072"
-  ```
-
-  where the editor says, save, then `sudo systemctl restart ollama`.
-- **A server run from a shell:** `OLLAMA_CONTEXT_LENGTH=131072 ollama serve`.
-
-Then check what actually loaded. With the model running, `ollama ps` shows
-the window in its CONTEXT column — that is the truth, whatever was
-configured:
-
-```
-NAME             SIZE     CONTEXT
-granite4.2:8b    27 GB    131072
-```
-
-The cost is memory: the cache grows with the window, and `granite4.2:8b`
-measured 27 GB resident at full context. On a Mac with less than 64 GB, pick
-the window and the model together — see the next section.
-
-### Fit the model to your memory
-
-On a Mac with less than 64 GB, `granite4.2:8b` can be slow. A 36 GB Mac runs
-it slowly at 64k and stalls at 128k.
-
-The model itself is small. What grows is the cache that holds the context:
-the bigger the window, the more memory it takes. When it no longer fits in
-GPU memory, the Mac swaps and everything slows down.
-
-**Pick a model and window by memory:**
-
-| Your Mac's memory | Model | Window for Bob | Window for Claude Code |
-|---|---|---|---|
-| 64 GB or more | `granite4.2:8b` | 32k | 128k |
-| 32–48 GB | `granite4.2:3b` | 32k | 64k |
-| Under 32 GB | `granite4:tiny-h` | 32k | 64k |
-
-**Pick the window by agent.** The window must hold the agent's largest
-prompt. A bigger window only costs memory and time.
+Pick the window by agent. It must hold the agent's largest prompt. Anything
+bigger only costs memory and time.
 
 | Agent | Largest prompt seen | Window |
 |---|---|---|
 | Bob | about 21k tokens | 32k |
 | Claude Code | over 64k tokens | 64k or more |
 
-**Memory each model uses** (GiB):
+**Memory each model uses**, in GiB:
 
 | Model | 32k | 64k | 128k |
 |---|---|---|---|
@@ -134,9 +56,9 @@ prompt. A bigger window only costs memory and time.
 | `granite4.2:3b` | 23 s | 82 tokens/s |
 | `granite4:tiny-h` | 8.5 s | 124 tokens/s |
 
-The wait happens once, at the start of a conversation. Later turns start in
-about 0.1 s. These numbers come from an M4 Max with Ollama 0.40.5; a smaller
-chip is slower.
+You wait once, at the start of a conversation. Later turns start in about
+0.1 s. These numbers come from an M4 Max with Ollama 0.40.5; a smaller chip
+is slower.
 
 **What you give up:**
 
@@ -144,126 +66,133 @@ chip is slower.
 |---|---|---|
 | `granite4.2:8b` | Best answers | Needs the most memory |
 | `granite4.2:3b` | Thinks before answering; twice as fast as 8b | Weaker answers than 8b |
-| `granite4:tiny-h` | Fastest; memory hardly grows with the window | No thinking; older Granite 4.0; not yet tried with an agent end to end |
+| `granite4:tiny-h` | Fastest; memory hardly grows with the window | Older Granite 4.0; cannot think; not yet tried with an agent end to end |
 
-`granite4:tiny-h` cannot think, and Ollama refuses a request that asks it to
+Ollama refuses a thinking request to `granite4:tiny-h`
 (`"granite4:tiny-h" does not support thinking`). If you see that error, use
-`granite4.2:3b` instead.
+`granite4.2:3b`.
 
-**Check that it fits.** Run `ollama ps` while the model is loaded. The
-PROCESSOR column should say `100% GPU`. Any CPU share means the model did not
-fit and will be slow. Leave room for macOS, the agent and your editor.
+Do not use `granite3.3`. It mixes its reasoning into the answer, and the
+agent reads that as part of its work. Granite 4.2 keeps the two apart.
 
-**Save a little more memory.** Setting `OLLAMA_KV_CACHE_TYPE=q8_0` where the
-server starts, the same way as the context length above, shrinks the cache.
-It cuts `granite4.2:8b` to 7.4 GiB at 32k and 15.7 GiB at 128k. It does not
-make anything faster. The macOS app has no setting for it.
+## Install Ollama and pull the model
 
-**Change the model.** Pull it, then replace the server entry with `--yes`:
+| | |
+|---|---|
+| macOS | the app from [ollama.com/download](https://ollama.com/download) |
+| Linux | `curl -fsSL https://ollama.com/install.sh \| sh` |
+
+The macOS app starts Ollama at login. On Linux the installer starts an
+`ollama` service; without systemd, run `ollama serve`.
+
+Pull the model you chose:
 
 ```sh
 ollama pull granite4.2:3b
-echo ollama | agentop server add ollama http://localhost:11434 \
-  --main granite4.2:3b --helper granite4.2:3b --key-stdin --yes
 ```
 
-Then start a new session. Sessions already running keep the old model.
+Check that Ollama lists it:
 
-### Thinking
+```sh
+curl -s localhost:11434/v1/models | jq -r '.data[].id'
+```
 
-The model thinks before answering, on by default, and Ollama keeps the
-thinking out of the answer: an Anthropic-format reply carries it as separate
-`thinking` blocks, an OpenAI one as a `reasoning` field. Leave it on. The
-separation is why the reference model is granite **4.2** — granite3.3, the
-previous release, leaks its reasoning into the answer, and an agent reading
-that answer gets the model's deliberations mixed into its work.
+## Context length
+
+Set the window yourself. Ollama does not refuse a prompt that is too long; it
+cuts it without an error, and the agent then behaves strangely with nothing
+saying why. A fresh install also picks a small window from your GPU memory,
+not the one your agent needs.
+
+Set it where the server starts. The examples use 32k (`32768`); use the
+window you chose above.
+
+| Where Ollama runs | How to set it |
+|---|---|
+| macOS app | Settings → Context length. The app restarts its server. Use the slider: once set, it overrides `OLLAMA_CONTEXT_LENGTH`. |
+| Linux service | `sudo systemctl edit ollama.service`, add the lines below, then `sudo systemctl restart ollama` |
+| From a shell | `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` |
+
+```ini
+[Service]
+Environment="OLLAMA_CONTEXT_LENGTH=32768"
+```
+
+**Optional: a smaller cache.** `OLLAMA_KV_CACHE_TYPE=q8_0`, set the same way
+(the macOS app has no setting for it), cuts `granite4.2:8b` to 7.4 GiB at
+32k and 15.7 GiB at 128k. It does not make anything faster.
+
+**Check what loaded.** Send the model one prompt, then run `ollama ps`:
+
+```
+NAME             SIZE      PROCESSOR    CONTEXT
+granite4.2:3b    4.7 GB    100% GPU     32768
+```
+
+- **CONTEXT** is the window you really got, whatever was configured.
+- **PROCESSOR** should say `100% GPU`. Any CPU share means the model did not
+  fit and will be slow. Leave room for macOS, the agent and your editor.
 
 ## Route the agent to it
 
-Two commands, and nothing restarts:
-
 ```sh
 echo ollama | agentop server add ollama http://localhost:11434 \
-  --main granite4.2:8b --helper granite4.2:8b --key-stdin
-agentop server use ollama --agent claude-code
+  --main granite4.2:3b --helper granite4.2:3b --key-stdin
+agentop server use ollama --agent <agent>
 ```
 
-- Ollama checks no key, but `add` insists on one, so `echo ollama |` supplies
-  a placeholder; it is read from stdin, so it never lands in shell history.
-- `--main` and `--helper` are model words. `add` reads the server's model
-  list and refuses a word that names none of its models — which is also what
-  catches a wrong URL, or a server that is not running. A word names the
-  newest model whose name contains it, judged by the numbers in the name, so
-  give the full tag: a bare `granite` names granite3.3 if that is pulled too.
-  Even the full tag only matches, and pulling another tag of the model, such
-  as `granite4.2:8b-q8_0`, can move it there. `add` prints what each word
-  names — `main granite4.2:8b → granite4.2:8b` — and `agentop server` shows
-  it again at any time. `main` is sent for a request with tools, the agent's
-  main work; `helper` for one without, such as a title.
-- `--agent` takes the name agentop shows the agent — `agentop configure
-  status` lists yours. In the TUI, `S` on the agents pane makes the same
-  choice.
+- **The key:** Ollama checks none, but `add` needs one, so `echo ollama`
+  gives a placeholder.
+- **`--main` and `--helper`:** the model for the agent's main work and for
+  side requests such as titles. Give the full tag: a bare `granite` picks
+  `granite3.3` if that is pulled too. `add` prints what each one picked, and
+  refuses one that names no model on the server, which also catches a wrong
+  URL or a stopped server.
+- **`--agent`:** the agent's name as agentop shows it, such as `bob` or
+  `claude-code`. `agentop configure status` lists yours. In the TUI, `S` on
+  the agents pane does the same.
 
-The agent needs no setting of its own beyond going through Cortex. The full
-command reference — removing a server, rotating a key, what each refusal
-means — is [Choosing an inference
-server](../cmd/agentop/README.md#choosing-an-inference-server-agentop-server).
+To change the model later, run the same `add` with the new model and `--yes`,
+which replaces the entry.
 
 ## What happens next
 
-- **New sessions only.** A session is pinned to the server its first request
-  reached and stays there, and the pin survives a proxy restart. Start a new
-  `claude` after switching — and switch before a `/clear`, not after: the
-  conversation `/clear` begins is what gets pinned.
-- **The model.** The agent keeps asking for its own model names — Claude
-  Code's, say — which the local server does not have, and refuses. Before
-  the agent sees the refusal, the router sends the request again with the
-  word's model: one refused round trip, then the substitute is remembered
-  for an hour and sent from the start, and the session keeps the model it
-  was given.
-- **Where it shows.** agentop's agents pane carries a `SERVER` column naming
-  the server each agent's new sessions go to. The sessions table gains one,
-  naming where each session's inference went, once more than one server is
-  configured and where the terminal has room for it. The detail pane's
-  `redirected:` and `model:` lines name the host and the model the agent
-  asked for when they were others.
-- **What it costs.** Tokens are counted as for any server, and the model
-  reports unpriced until you give it a rate ([pricing](pricing.md)) — a
-  local model's marginal cost is electricity.
-- **Switching back.** `agentop server use <name> --agent <agent>` routes new
-  sessions to the other server; conversations running on the local model
-  finish where they are.
-- **Nothing fails over.** If the local server is down, its sessions' requests
-  fail. Route the agent elsewhere and start a new session; Cortex moves no
-  conversation on its own.
+| | |
+|---|---|
+| **New sessions** | Go to the local server. |
+| **Running sessions** | Stay where they are. To move one, press `S` on it in the sessions pane, or run `agentop server move <session-id> ollama`. |
+| **The model** | The agent still asks for its own model names, which Ollama does not have. Cortex sends the request again with your `--main` or `--helper` model before the agent sees the refusal, and remembers that for an hour. |
+| **Where it shows** | The agents pane's `SERVER` column names each agent's server. With more than one server configured, the sessions table gets one too. |
+| **Cost** | Tokens are counted, but the model shows as unpriced until you give it a rate ([pricing](pricing.md)). |
+| **Switching back** | `agentop server use <server> --agent <agent>`, or `agentop server reset --agent <agent>` to go back to the agent's own provider. |
+| **If Ollama stops** | Its sessions' requests fail. Nothing fails over on its own; move the session or route the agent elsewhere. |
 
-## Picking a different model
+**Moving a long session is slow and may not fit.** Its first turn on Ollama
+sends the whole conversation, with no cache, so the wait is long. If the
+conversation is bigger than the window, Ollama cuts it without an error.
+Prefer starting a new session for a local model.
 
-The reference model was picked by criteria, not brand. Check any candidate
-the same way:
+## Trying another model
 
-1. **Tool use** — the make-or-break: a model that cannot call tools cannot
-   drive a coding agent. `ollama show <model>` lists it under capabilities.
-2. **Separated thinking** — reasoning that leaks into the answer confuses the
-   agent reading it. Ask the model something trivial and check the thinking
-   arrives in its own field, not in the answer.
-3. **Context window** — at least the agent's largest turn; see
-   [Context length](#context-length).
-4. **Memory** — the weights, plus the cache at the window you run. The pull
-   size is only the weights; `ollama ps` shows the real figure. See
-   [Fit the model to your memory](#fit-the-model-to-your-memory).
+Check any model the same way before you rely on it:
 
-Then give it a small real task through the agent before trusting it with a
-large one.
+| Check | How |
+|---|---|
+| Calls tools | `ollama show <model>` lists `tools` under capabilities. A model that cannot call tools cannot drive a coding agent. |
+| Keeps thinking apart from the answer | Ask it something small. The thinking should arrive in its own field (`thinking` blocks or `reasoning`), not in the answer. |
+| Window fits the agent | See [Choose a model](#choose-a-model). |
+| Fits in memory | `ollama ps` shows the real size and `100% GPU`. The download size is only the weights. |
+
+Then give it a small real task through the agent before a large one.
 
 ## See also
 
 - [Choosing an inference server](../cmd/agentop/README.md#choosing-an-inference-server-agentop-server) —
-  every `agentop server` command, and the refusal wordings it reads
+  every `agentop server` command
 - [Local model servers](../cmd/agentop/README.md#local-model-servers) —
-  vLLM, llama.cpp and LM Studio specifics
-- [The inference-router](inference-router-plugin.md) — the routing rules,
-  pins and substitution in full
-- [Your agent's guide](agents/) — each has a switching section with its
-  agent's own caveats
-- [Pricing](pricing.md) — rates, and what reports unpriced
+  vLLM, llama.cpp and LM Studio
+- [The inference-router](inference-router-plugin.md) — routing, pins and
+  model substitution in full
+- [Claude Code](agents/claude-code.md) and [OpenCode](agents/opencode.md) —
+  their switching sections
+- [Pricing](pricing.md) — adding a rate
