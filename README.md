@@ -3,7 +3,7 @@
 **`top` for your coding agent.** Watch every model call, tool call and dollar your
 agent spends, live — then cut the waste.
 
-Claude Code · OpenCode · Codex · IBM Bob · any agent that can use an HTTPS proxy.
+Claude Code · OpenCode · Codex · IBM Bob · Pi · any agent that can use an HTTPS proxy.
 One binary on macOS or Linux. No Kubernetes, no account.
 
 <img src="./docs/assets/cortex-demo.svg" width="100%"
@@ -22,7 +22,7 @@ curl -fsSL https://www.rossoctl.dev/cortex/install.sh | sh
 Then, in a new terminal:
 
 ```sh
-agentop configure claude-code enable    # once — or opencode, codex, bob
+agentop configure claude-code enable    # once — or opencode, codex, bob, pi
 claude                                  # start (or restart) your agent as you always do
 agentop observe                         # in another terminal: watch it live
 ```
@@ -83,6 +83,7 @@ on your machine, runs it through a pipeline of plugins, and sends it on re-encry
 | **OpenCode** | `agentop configure opencode enable` | [Guide](./docs/agents/opencode.md) |
 | **Codex** | `agentop configure codex enable` | [Guide](./docs/agents/codex.md) |
 | **IBM Bob** | `agentop configure bob enable` — the editor and the `bob` shell command both | [Guide](./docs/agents/bob.md) |
+| **Pi** | `agentop configure pi enable` | [Guide](./docs/agents/pi.md) |
 | **Any other agent** | `agentop exec -- <command>` | [Guide](./docs/agents/any-agent.md) |
 
 `status` and `disable` check and undo each one.
