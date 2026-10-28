@@ -292,7 +292,7 @@ func (m *model) rebuildSessionsTable() {
 	}
 	q := m.searchQuery(paneSessions)
 	for _, s := range m.sessions {
-		if !m.sessionListed(s, scope) {
+		if !m.sessionListed(s, scope) || s.LinkedAll {
 			continue
 		}
 		b := newRowBuilder(q != "")
@@ -474,7 +474,7 @@ func (m *model) sessionListed(s session.SessionSummary, scope string) bool {
 	case otherAgents:
 		return inOtherAgents(s)
 	}
-	return s.Agent == scope
+	return sessionAgent(s) == scope
 }
 
 // sessionsListTwoAgents reports whether the listed sessions name two or more agents, which is when
@@ -482,12 +482,13 @@ func (m *model) sessionListed(s session.SessionSummary, scope string) bool {
 func (m *model) sessionsListTwoAgents(scope string) bool {
 	var first string
 	for _, s := range m.sessions {
-		if s.Agent == "" || !m.sessionListed(s, scope) {
+		agent := sessionAgent(s)
+		if agent == "" || !m.sessionListed(s, scope) {
 			continue
 		}
 		if first == "" {
-			first = s.Agent
-		} else if s.Agent != first {
+			first = agent
+		} else if agent != first {
 			return true
 		}
 	}

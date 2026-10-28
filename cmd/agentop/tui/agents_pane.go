@@ -112,11 +112,12 @@ func agentsPaneApplies(rows []agentRow) bool {
 func (m *model) agentChoices() []agentRow {
 	var extra []string
 	for _, s := range m.sessions {
-		if !knownAgentLabel(s.Agent) || slices.Contains(extra, s.Agent) ||
-			slices.ContainsFunc(m.agents, func(a agentRow) bool { return a.label == s.Agent }) {
+		agent := sessionAgent(s)
+		if !knownAgentLabel(agent) || slices.Contains(extra, agent) ||
+			slices.ContainsFunc(m.agents, func(a agentRow) bool { return a.label == agent }) {
 			continue
 		}
-		extra = append(extra, s.Agent)
+		extra = append(extra, agent)
 	}
 	if len(extra) == 0 {
 		return m.agents
@@ -542,7 +543,7 @@ func (m *model) agentSessionsCell(label string) string {
 		n = m.otherSessionsCount()
 	} else {
 		for _, s := range m.sessions {
-			if s.Agent == label {
+			if sessionAgent(s) == label {
 				n++
 			}
 		}
@@ -556,7 +557,7 @@ func (m *model) agentSessionsCell(label string) string {
 // sessionsNameAgents reports whether any listed session names its agent.
 func (m *model) sessionsNameAgents() bool {
 	for _, s := range m.sessions {
-		if s.Agent != "" {
+		if sessionAgent(s) != "" {
 			return true
 		}
 	}

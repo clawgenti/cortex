@@ -1282,11 +1282,13 @@ func streamPump(ch <-chan apiclient.StreamEvent) tea.Cmd {
 func (m *model) snapshotCmd(id string) tea.Cmd {
 	// Read here, on the Update goroutine, not in the closure: the closure runs on its own.
 	gen := m.eraseGen
+	windows := m.linkedInto(id)
 	return func() tea.Msg {
 		view, err := m.client.GetSession(m.ctx, id)
 		if err != nil {
 			return errMsg{where: "snapshot " + id, err: err}
 		}
+		view.Events = mergeLinked(view.Events, inWindow(fetchLinked(m.ctx, m.client, windows), view))
 		older := 0
 		if view.TotalEvents > len(view.Events) {
 			older = view.TotalEvents - len(view.Events)

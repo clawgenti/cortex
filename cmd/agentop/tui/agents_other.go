@@ -40,10 +40,10 @@ func knownAgentLabel(label string) bool {
 }
 
 // inOtherAgents reports whether a session belongs to the Other row: it names no recognised agent.
-// That includes the default and pending buckets, which the server attributes to no one agent —
-// see session.SessionSummary.Agent — and which would otherwise be unreachable under any scope.
+// That includes the default bucket, which is no one agent's. A pending bucket belongs to the agent
+// its id names; see sessionAgent.
 func inOtherAgents(s session.SessionSummary) bool {
-	return !knownAgentLabel(s.Agent)
+	return !knownAgentLabel(sessionAgent(s))
 }
 
 // foldOtherAgents returns a copy of a group=agent snapshot with every unrecognised series merged

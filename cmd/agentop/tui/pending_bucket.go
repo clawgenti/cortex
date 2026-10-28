@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/rossoctl/cortex/core/pipeline"
 	"github.com/rossoctl/cortex/core/session"
 )
 
@@ -41,13 +42,26 @@ func sessionIDCell(id string, w int) string {
 	return trunc(id, w)
 }
 
-// sessionAgentCell is the AGENT cell: the server's agent, or a pending bucket's from its id.
-// The server leaves Agent blank on a bucket so that it is counted as no session's agent; the
-// cell can still say whose calls they are.
-func sessionAgentCell(s session.SessionSummary, w int) string {
-	agent := s.Agent
-	if a, _, ok := pendingBucket(s.ID); ok && agent == "" {
-		agent = a
+// sessionAgent is the agent a row belongs to: the server's Agent, or — for a pending bucket,
+// which the server leaves blank — the agent its id names, by canonical name so a bucket
+// recorded under a retired spelling (bob-shell) lands under today's row. The default bucket
+// names no agent and stays Other's.
+//
+// THE ONE PLACE A ROW'S AGENT IS DECIDED. The AGENTS pane, the Other partition, a scope's
+// sessions list and the AGENT cell all read it, so a bucket is listed and counted under the
+// agent whose spend it is — which the server already attributes by User-Agent — and never
+// under Other while its spend sits under its agent.
+func sessionAgent(s session.SessionSummary) string {
+	if s.Agent != "" {
+		return s.Agent
 	}
-	return trunc(sanitizeLabel(agent), w)
+	if a, _, ok := pendingBucket(s.ID); ok {
+		return pipeline.AgentName(a)
+	}
+	return ""
+}
+
+// sessionAgentCell is the AGENT cell: sessionAgent, truncated to w.
+func sessionAgentCell(s session.SessionSummary, w int) string {
+	return trunc(sanitizeLabel(sessionAgent(s)), w)
 }
