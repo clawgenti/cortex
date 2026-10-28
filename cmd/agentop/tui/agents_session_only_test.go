@@ -58,9 +58,9 @@ func TestPickerRows_AnAgentWithSessionsButNoSpendHasARow(t *testing.T) {
 	}
 }
 
-// Its row says it has sessions and that the window has nothing for it: SESSIONS counts what the
-// scope lists, and every figure is a dash. "0" requests beside a "—" cost read as a measured zero
-// with an unknown price, where the truth is that this window holds no traffic for it at all.
+// Its row says it has sessions, when it was last seen, and that the window has nothing for it:
+// SESSIONS and LAST SEEN describe what the scope lists, and the window's one figure is a dash.
+// LAST SEEN is what tells "not used today" from "broken".
 func TestRebuildAgentsTable_ASessionOnlyAgentShowsDashesForTheWindow(t *testing.T) {
 	m := morningAfterFixture()
 	m.rebuildAgentsTable()
@@ -74,10 +74,10 @@ func TestRebuildAgentsTable_ASessionOnlyAgentShowsDashesForTheWindow(t *testing.
 	if oc == nil {
 		t.Fatalf("no opencode row in %v", rows)
 	}
-	if want := []string{"opencode", "1", emptyCell, emptyCell, emptyCell}; !slices.Equal(oc, want) {
+	if want := []string{"opencode", "1", "18h ago", emptyCell}; !slices.Equal(oc, want) {
 		t.Errorf("opencode row = %v, want %v", oc, want)
 	}
-	if cc := rows[1]; cc[0] != "claude-code" || cc[2] != "412" || cc[4] != "$113.63" {
+	if cc := rows[1]; cc[0] != "claude-code" || cc[1] != "2" || cc[2] != "just now" || cc[3] != "$113.63" {
 		t.Errorf("claude-code row = %v, want its figures untouched", cc)
 	}
 }
