@@ -24,6 +24,10 @@ type target struct {
 	service   string
 	namespace string // "" when the host did not name one and none is configured
 	audience  string
+	// foreign: the host names a namespace other than this workload's, and the
+	// audience does not carry the namespace. The audience is then a claim on a
+	// target elsewhere, which the host cannot back; see targetResolver.
+	foreign bool
 }
 
 // targetResolver turns a Host header into a target, or into the reason it is
@@ -47,14 +51,26 @@ type target struct {
 // namespace from a TLD is the hole described above. IP literals are refused
 // too: they name no service.
 //
-// Anyone who can create a Service in the cluster can still choose a name that
-// matches an IdP client. That is the same trust every in-cluster caller already
-// extends to the cluster's DNS, and no host-derived scheme can do better; one
-// that reads the peer's SPIFFE ID from an mTLS handshake could.
+// The same hole opens one level down when the template has no {namespace}.
+// The audience then cannot tell github-tool.team1.svc from
+// github-tool.attacker.svc, so a tenant who creates a Service named github-tool
+// in their own namespace would be handed a real github-tool token. A caller
+// that dials the short name trusts its own namespace's DNS, not every
+// namespace's, so under such a template a qualified host in any other
+// namespace — or in any namespace at all when this workload's is not known — is
+// resolved as foreign. The plugin never exchanges for a foreign target: it asks
+// the IdP whether the audience names a client, passes the request through when
+// it does not, and denies it when it does, since a Service elsewhere is then
+// claiming a target's name. A template with {namespace} puts the namespace into
+// the audience and needs no such rule.
+//
+// Within the namespaces it accepts, anyone who can create a Service can still
+// choose a name that matches an IdP client. No host-derived scheme can do
+// better; one that reads the peer's SPIFFE ID from an mTLS handshake could.
 type targetResolver struct {
 	template      string
 	clusterSuffix string // ".svc." + cluster domain
-	namespace     string // used for short names
+	namespace     string // used for short names; the only one a namespace-blind template accepts
 }
 
 func newTargetResolver(template, clusterDomain, namespace string) (*targetResolver, error) {
@@ -103,9 +119,11 @@ func (r *targetResolver) resolve(host string) (target, string) {
 	}
 
 	var t target
+	qualified := true
 	switch labels := strings.Split(host, "."); {
 	case len(labels) == 1:
 		t = target{service: labels[0], namespace: r.namespace}
+		qualified = false
 	case len(labels) == 3 && labels[2] == "svc":
 		t = target{service: labels[0], namespace: labels[1]}
 	case strings.HasSuffix(host, r.clusterSuffix) &&
@@ -117,8 +135,14 @@ func (r *targetResolver) resolve(host string) (target, string) {
 	if !validLabel(t.service) || (t.namespace != "" && !validLabel(t.namespace)) {
 		return target{}, reasonHostNotInCluster
 	}
-	if r.usesNamespace() && t.namespace == "" {
-		return target{}, reasonNamespaceUnknown
+	if r.usesNamespace() {
+		if t.namespace == "" {
+			return target{}, reasonNamespaceUnknown
+		}
+	} else if qualified && t.namespace != r.namespace {
+		// The audience drops the namespace, so only the one a short name
+		// would resolve to may be named. r.namespace == "" lands here too.
+		t.foreign = true
 	}
 	t.audience = strings.NewReplacer(
 		placeholderService, t.service,

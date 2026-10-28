@@ -33,10 +33,13 @@ no-token policies `allow`, `deny` and `client-credentials`, and both default to
 | Destination | Keycloak's answer | Result | Session event |
 |---|---|---|---|
 | Host outside the cluster (`api.openai.com`, an IP, `github-tool.evil.example`) | not asked | forwarded unchanged | `skip / host_not_in_cluster` |
+| Host in another namespace, under a template without `{namespace}`; its name is no client's | asked with the workload's own token: "Audience not found" | forwarded unchanged; remembered for `unknown_audience_ttl` | `skip / audience_unknown` |
+| Host in another namespace, under a template without `{namespace}`; its name is a client's | asked with the workload's own token: any answer naming a client | **403**, never exchanged | `deny / foreign_namespace` |
 | In-cluster, audience granted to this workload | 200, token for that audience | `Authorization` replaced | `modify / token_exchanged` (or `cache_hit`) |
 | In-cluster, no Keycloak client by that name | 400 `invalid_client` "Audience not found" | forwarded unchanged; remembered for `unknown_audience_ttl` | `skip / audience_unknown` |
 | In-cluster, client exists but is **not granted** to this workload | 400 `invalid_request` "Requested audience not available" | **403** | `deny / audience_not_granted` |
 | In-cluster, the destination's client is **disabled** | 400 `invalid_client` "Client disabled" | **403** | `deny / target_disabled` |
+| In-cluster, bearer Keycloak rejects (expired, bad signature, an API key it never issued) | 400 `invalid_request` "Invalid token"; asked again with the workload's own token | that second answer decides: unknown → forwarded unchanged, bearer intact; a granted target → **401** | `skip / audience_unknown` or `deny / subject_invalid` |
 | Keycloak down, timeout, 5xx, bad credentials, any other error | — | **503** | `deny / exchange_failed` |
 | Credentials not yet loaded from `/shared/` | not asked | **503** | `deny / credentials_not_ready` |
 | Any host, bearer is a placeholder that can't be resolved (`resolve_placeholders: true`) | not asked | **401** | `deny / placeholder_unresolved` |
@@ -47,6 +50,13 @@ Two rules hold throughout:
   other failure, including an outage, denies. If a Keycloak upgrade rewords that
   message, unknown destinations start being denied; nothing is ever wrongly
   passed through.
+- **A rejected bearer is not a verdict on the destination.** Keycloak checks the
+  subject token before the audience, so it answers "Invalid token" for every
+  audience alike. The plugin then asks again with the workload's own token,
+  which Keycloak accepts, and the destination is judged by that answer. An
+  in-cluster model gateway called with its own API key therefore passes through,
+  and an expired user token is a 401 at a target only. If the workload's own
+  token is rejected too, the request is a 503.
 - **The token sent to X is always a token for X.** The plugin checks the `aud`
   claim of every token Keycloak issues and denies if the requested audience is
   missing. It never sends an exchange without an audience: Keycloak answers that
@@ -67,16 +77,39 @@ inside the cluster are eligible:
 | Host form | Example | Namespace taken from |
 |---|---|---|
 | short name | `github-tool`, `github-tool:9090` | the `namespace` setting |
-| `service.namespace.svc` | `github-tool.team1.svc` | the host |
-| FQDN | `github-tool.team1.svc.cluster.local` | the host |
+| `service.namespace.svc` | `github-tool.team1.svc` | the host (see below) |
+| FQDN | `github-tool.team1.svc.cluster.local` | the host (see below) |
+
+When `audience_template` has no `{namespace}` (the default `{service}` has
+none), the audience cannot tell `github-tool.team1.svc` from
+`github-tool.attacker.svc`, so a tenant who creates a Service named after a
+target in their own namespace would receive that target's token. Under such a
+template, a host that names any namespace but this workload's own — the
+namespace a short name resolves to — is **never exchanged**, whatever its
+bearer. Instead the plugin asks Keycloak, with the workload's own token, whether
+the derived audience names a client:
+
+- **No client by that name:** the request is forwarded unchanged, like any
+  destination Keycloak doesn't know. A model gateway in another namespace,
+  called with its own API key, keeps working.
+- **A client by that name** (granted, not granted or disabled alike): **403**
+  `deny / foreign_namespace`. The host is claiming a target's name, so it gets
+  neither that target's token nor the caller's own bearer.
+
+When this workload's namespace is not known, every namespace counts as another
+one. To exchange for targets in other namespaces, use a template with
+`{namespace}`, which puts the namespace into the audience; nothing is then
+foreign. Operator-registered workloads are already named that way (see
+[Choosing `audience_template`](#choosing-audience_template)).
 
 `github-tool.team1` is **not** eligible. Kubernetes resolves it, but it has the
 same shape as `example.com`. IP literals, extra labels, a different cluster
 domain, and anything that is not an RFC 1123 label are refused too. A refused
 host is forwarded unchanged and never reaches Keycloak.
 
-Anyone who can create a Service can still pick a name that matches a Keycloak
-client. That is the trust every in-cluster caller already places in cluster DNS.
+Within this workload's own namespace, anyone who can create a Service can
+still pick a name that matches a Keycloak client. That is the trust a caller
+already places in its own namespace's DNS when it dials a short name.
 
 ## Configuration
 
@@ -107,8 +140,8 @@ pipeline:
 | `client_id` / `client_id_file` | `/shared/client-id.txt` | This workload's client ID. The inline value wins. |
 | `client_secret` / `client_secret_file` | `/shared/client-secret.txt` | This workload's client secret. The inline value wins. |
 | `audience_template` | `{service}` | Audience requested for a destination. Placeholders: `{service}`, `{namespace}`. Must contain `{service}`. |
-| `namespace` | — | Namespace assumed for short names, for templates that use `{namespace}`. Without it (or `namespace_file`), short names pass through with `skip / namespace_unknown`. |
-| `namespace_file` | — | Read once at start when `namespace` is empty. Meant for `/var/run/secrets/kubernetes.io/serviceaccount/namespace`, which the kubelet projects from the pod's own metadata, so it is right in every copy of a config shared across namespaces. An absent or blank file, or one that is not a DNS label, refuses at start. |
+| `namespace` | the pod's own | This workload's namespace; must be a DNS label. It is assumed for short names, and under a template without `{namespace}` it is the only namespace a host may name and be exchanged for. Under a template with `{namespace}`, short names without one pass through with `skip / namespace_unknown`. |
+| `namespace_file` | see meaning | Read once at start when `namespace` is empty. An absent or blank file, or one that is not a DNS label, refuses at start. When neither field is set, the plugin reads `/var/run/secrets/kubernetes.io/serviceaccount/namespace` if it exists. The kubelet projects that file from the pod's own metadata, so it is right in every copy of a config shared across namespaces. Outside a pod (a laptop) there is no file, and no namespace. |
 | `cluster_domain` | `cluster.local` | Cluster DNS domain, for recognising FQDNs. |
 | `no_token_policy` | `deny` | The request carries no bearer token: `deny` answers 401, `allow` forwards it unchanged, `client-credentials` exchanges the workload's own token (see below). The same values and default as `token-exchange`. |
 | `unknown_audience_ttl` | `5m` | How long a destination Keycloak doesn't know is passed through without asking again. `0` asks on every request. |
@@ -130,11 +163,13 @@ The audience must be the target's Keycloak **client ID**, which is also what the
 target's own sidecar validates as `aud`.
 
 - **Clients named after their Service** (`github-tool` serving at
-  `github-tool`): use the default, `{service}`.
+  `github-tool`): use the default, `{service}`. Targets must then be in the
+  caller's own namespace; see [Which hosts are offered to
+  Keycloak](#which-hosts-are-offered-to-keycloak).
 - **Operator-registered workloads**, whose client ID is a SPIFFE ID:
-  `spiffe://<trust-domain>/ns/{namespace}/sa/{service}`, with
-  `namespace_file: /var/run/secrets/kubernetes.io/serviceaccount/namespace`
-  for short names.
+  `spiffe://<trust-domain>/ns/{namespace}/sa/{service}`. Short names take the
+  pod's own namespace, read from its service-account mount by default. This
+  form also reaches targets in other namespaces.
 
 The SPIFFE form only works where the **service account has the same name as the
 Service**. The Host header carries the Service name, never the service account.

@@ -45,6 +45,7 @@ Per-plugin reference docs: [a2a-parser](a2a-parser-plugin.md),
 [session-budget](session-budget-plugin.md),
 [token-broker](token-broker-plugin.md),
 [token-exchange](token-exchange-plugin.md),
+[token-exchange-aiac](token-exchange-aiac-plugin.md),
 [tool-prune](tool-prune-plugin.md).
 
 ## Operator reference

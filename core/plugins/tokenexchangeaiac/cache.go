@@ -53,6 +53,13 @@ func (c *tokenCache) get(key string) (string, bool) {
 	return e.token, true
 }
 
+// drop forgets one entry.
+func (c *tokenCache) drop(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+}
+
 // put caches a token for its lifetime less expirySkew. A token too short-lived
 // to outlast the skew is not cached at all.
 func (c *tokenCache) put(key string, tok issuedToken) {

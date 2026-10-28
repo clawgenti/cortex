@@ -13,9 +13,9 @@ func TestResolveEligibleHosts(t *testing.T) {
 		{"github-tool", "github-tool", "team1"},
 		{"github-tool:9090", "github-tool", "team1"},
 		{"GitHub-Tool.", "github-tool", "team1"},
-		{"github-tool.team2.svc", "github-tool", "team2"},
-		{"github-tool.team2.svc.cluster.local", "github-tool", "team2"},
-		{"github-tool.team2.svc.cluster.local:8080", "github-tool", "team2"},
+		{"github-tool.team1.svc", "github-tool", "team1"},
+		{"github-tool.team1.svc.cluster.local", "github-tool", "team1"},
+		{"github-tool.team1.svc.cluster.local:8080", "github-tool", "team1"},
 	}
 	for _, c := range cases {
 		got, why := r.resolve(c.host)
@@ -54,6 +54,50 @@ func TestResolveRefusesHostsOutsideTheCluster(t *testing.T) {
 		if got, why := r.resolve(host); why != reasonHostNotInCluster {
 			t.Errorf("resolve(%q) = %+v, %q; want refusal %q", host, got, why, reasonHostNotInCluster)
 		}
+	}
+}
+
+// A template without {namespace} gives github-tool.team1.svc and
+// github-tool.attacker.svc the same audience, so a host naming any namespace
+// but this workload's is foreign: never exchanged, only judged. A short name
+// and the workload's own namespace are not.
+func TestNamespaceBlindTemplateMarksOtherNamespacesForeign(t *testing.T) {
+	r, err := newTargetResolver("{service}", "cluster.local", "team1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]bool{
+		"github-tool":                                false,
+		"github-tool.team1.svc":                      false,
+		"github-tool.team1.svc.cluster.local":        false,
+		"github-tool.attacker.svc":                   true,
+		"github-tool.attacker.svc.cluster.local:443": true,
+	} {
+		got, why := r.resolve(host)
+		if why != "" || got.foreign != want || got.audience != "github-tool" {
+			t.Errorf("resolve(%q) = %+v, %q; want foreign=%v, audience github-tool", host, got, why, want)
+		}
+	}
+
+	// With no namespace known, every namespace is someone else's.
+	r, err = newTargetResolver("{service}", "cluster.local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]bool{"github-tool": false, "github-tool.team1.svc": true} {
+		if got, why := r.resolve(host); why != "" || got.foreign != want {
+			t.Errorf("no namespace: resolve(%q) = %+v, %q; want foreign=%v", host, got, why, want)
+		}
+	}
+
+	// A template with {namespace} puts it in the audience: nothing is foreign,
+	// and each namespace gets its own audience.
+	r, err = newTargetResolver("{service}.{namespace}", "cluster.local", "team1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, why := r.resolve("github-tool.attacker.svc"); why != "" || got.foreign || got.audience != "github-tool.attacker" {
+		t.Errorf("namespaced template: %+v %q, want audience github-tool.attacker, not foreign", got, why)
 	}
 }
 

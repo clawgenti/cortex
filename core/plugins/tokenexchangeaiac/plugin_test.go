@@ -27,6 +27,8 @@ import (
 //   - an audience in existing but not granted: 400 invalid_request
 //   - any other audience: 400 invalid_client "Audience not found"
 //   - client_credentials ignores audience and returns every granted audience
+//   - a subject_token it did not issue: 400 invalid_request "Invalid token",
+//     whatever the audience, because Keycloak checks the subject first
 type fakeKeycloak struct {
 	granted  map[string]bool
 	existing map[string]bool
@@ -34,12 +36,16 @@ type fakeKeycloak struct {
 
 	mu       sync.Mutex
 	override func(w http.ResponseWriter, form map[string]string) bool
+	// subjects are the subject tokens it accepts: the user tokens the tests
+	// send, and every token it issued itself.
+	subjects map[string]bool
 }
 
 func newFakeKeycloak(t *testing.T) (*fakeKeycloak, *httptest.Server) {
 	kc := &fakeKeycloak{
 		granted:  map[string]bool{"github-tool": true, "weather-agent": true},
 		existing: map[string]bool{"github-tool": true, "weather-agent": true, "hr-tool": true},
+		subjects: map[string]bool{"user-token": true, " user-token": true, "real-user-token": true},
 	}
 	srv := httptest.NewServer(kc)
 	t.Cleanup(srv.Close)
@@ -72,10 +78,15 @@ func (kc *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for a := range kc.granted {
 			all = append(all, a)
 		}
-		issue(w, append(all, "account"))
+		kc.accept(issue(w, append(all, "account")))
 	case grantTokenExchange:
 		aud := form["audience"]
+		kc.mu.Lock()
+		known := kc.subjects[form["subject_token"]]
+		kc.mu.Unlock()
 		switch {
+		case !known:
+			oauthError(w, 400, "invalid_request", "Invalid token")
 		case aud == "":
 			issue(w, []string{"github-tool", "weather-agent", "account"})
 		case kc.granted[aud]:
@@ -90,16 +101,23 @@ func (kc *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func issue(w http.ResponseWriter, aud []string) {
-	issueClaims(w, map[string]any{"aud": aud})
+func (kc *fakeKeycloak) accept(subject string) {
+	kc.mu.Lock()
+	kc.subjects[subject] = true
+	kc.mu.Unlock()
 }
 
-func issueClaims(w http.ResponseWriter, claims map[string]any) {
+func issue(w http.ResponseWriter, aud []string) string {
+	return issueClaims(w, map[string]any{"aud": aud})
+}
+
+func issueClaims(w http.ResponseWriter, claims map[string]any) string {
 	payload, _ := json.Marshal(claims)
 	enc := base64.RawURLEncoding.EncodeToString
 	tok := enc([]byte(`{"alg":"RS256"}`)) + "." + enc(payload) + ".sig"
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"access_token": tok, "expires_in": 300})
+	return tok
 }
 
 func oauthError(w http.ResponseWriter, status int, code, desc string) {
@@ -167,7 +185,7 @@ func audOf(t *testing.T, pctx *pipeline.Context) []string {
 
 func TestGrantedTargetIsExchangedAndCached(t *testing.T) {
 	kc, srv := newFakeKeycloak(t)
-	p := configured(t, srv, "")
+	p := configured(t, srv, `,"namespace":"team1"`)
 
 	pctx := outbound("github-tool:9090", "Bearer user-token")
 	if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
@@ -554,8 +572,13 @@ func TestPlaceholderIsNotResolvedByDefault(t *testing.T) {
 	pctx := outbound("github-tool", "")
 	handle := withPlaceholder(t, pctx, "real-user-token")
 	p.OnRequest(context.Background(), pctx)
-	if got := subjects(); len(got) != 1 || got[0] != handle {
-		t.Errorf("subject tokens = %v, want the handle sent as is", got)
+	// The IdP rejects the handle as a subject, so the plugin asks again with
+	// its own token to learn whether github-tool is a target.
+	if got := subjects(); len(got) == 0 || got[0] != handle {
+		t.Errorf("subject tokens = %v, want the handle sent as is first", got)
+	}
+	if got := pctx.Headers.Get("Authorization"); got != "Bearer "+handle {
+		t.Errorf("Authorization = %q, want the handle left in place", got)
 	}
 }
 
@@ -670,6 +693,7 @@ func TestConfigure(t *testing.T) {
 		"unknown field":  `{"token_url":"http://kc","routes":{"file":"/etc/authproxy/routes.yaml"}}`,
 		"token scopes":   `{"token_url":"http://kc","token_scopes":"openid"}`,
 		"empty cluster":  `{"token_url":"http://kc","cluster_domain":"."}`,
+		"bad namespace":  `{"token_url":"http://kc","namespace":"Team1"}`,
 		"malformed json": `{`,
 	}
 	for name, cfg := range cases {
@@ -769,5 +793,171 @@ func TestInitPicksUpCredentialFilesThatArriveLater(t *testing.T) {
 	pctx := outbound("github-tool", "Bearer user-token")
 	if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
 		t.Fatalf("after load: %v %+v", a.Type, a.Violation)
+	}
+}
+
+// Keycloak rejects a subject it did not issue, or one that has expired, with
+// "Invalid token" before it looks at the audience, so that answer cannot tell a
+// target from a stranger. The plugin asks again with its own token: a
+// destination the IdP has no client for still passes through, bearer intact,
+// and is remembered; a target answers 401 rather than 503.
+func TestInvalidBearerIsJudgedByTheDestination(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	p := configured(t, srv, `,"namespace":"team1"`)
+
+	gateway := outbound("litellm.team1.svc", "Bearer sk-not-a-keycloak-token")
+	if a := p.OnRequest(context.Background(), gateway); a.Type != pipeline.Continue {
+		t.Fatalf("non-target: action = %v %+v, want Continue", a.Type, a.Violation)
+	}
+	if got := gateway.Headers.Get("Authorization"); got != "Bearer sk-not-a-keycloak-token" {
+		t.Errorf("non-target: Authorization = %q, want it forwarded unchanged", got)
+	}
+	if inv := lastInvocation(t, gateway); inv.Reason != reasonAudienceUnknown {
+		t.Errorf("non-target: reason = %s, want %s", inv.Reason, reasonAudienceUnknown)
+	}
+	calls := kc.calls.Load()
+	p.OnRequest(context.Background(), outbound("litellm", "Bearer sk-not-a-keycloak-token"))
+	if n := kc.calls.Load(); n != calls {
+		t.Errorf("IdP calls rose from %d to %d; the unknown destination was not remembered", calls, n)
+	}
+
+	target := outbound("github-tool", "Bearer expired-user-token")
+	a := p.OnRequest(context.Background(), target)
+	if a.Type != pipeline.Reject || a.Violation.Status != http.StatusUnauthorized || a.Violation.Code != "auth.unauthorized" {
+		t.Fatalf("target: action = %v %+v, want 401 auth.unauthorized", a.Type, a.Violation)
+	}
+	if inv := lastInvocation(t, target); inv.Action != pipeline.ActionDeny || inv.Reason != reasonSubjectInvalid {
+		t.Errorf("target: invocation = %s/%s, want deny/%s", inv.Action, inv.Reason, reasonSubjectInvalid)
+	}
+	if got := target.Headers.Get("Authorization"); got != "Bearer expired-user-token" {
+		t.Errorf("target: Authorization changed to %q on a denied request", got)
+	}
+
+	notGranted := outbound("hr-tool", "Bearer expired-user-token")
+	if a := p.OnRequest(context.Background(), notGranted); a.Type != pipeline.Reject || a.Violation.Status != http.StatusForbidden {
+		t.Errorf("not granted: action = %v %+v, want 403", a.Type, a.Violation)
+	}
+}
+
+// The workload's own token is the one the re-ask relies on; if the IdP rejects
+// that too, nothing is known about the destination and the request is denied.
+func TestInvalidSelfTokenStillDenies(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	kc.override = func(w http.ResponseWriter, form map[string]string) bool {
+		if form["grant_type"] == grantTokenExchange {
+			oauthError(w, 400, "invalid_request", "Invalid token")
+			return true
+		}
+		return false
+	}
+	p := configured(t, srv, "")
+	a := p.OnRequest(context.Background(), outbound("litellm", "Bearer sk-key"))
+	if a.Type != pipeline.Reject || a.Violation.Status != http.StatusServiceUnavailable {
+		t.Errorf("action = %v %+v, want 503", a.Type, a.Violation)
+	}
+}
+
+// A cached own token the IdP stops accepting (a Keycloak restart, a realm key
+// rotation) is fetched again rather than failing every request until it would
+// have expired.
+func TestStaleSelfTokenIsRefetched(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	p := configured(t, srv, `,"no_token_policy":"client-credentials"`)
+	if a := p.OnRequest(context.Background(), outbound("github-tool", "")); a.Type != pipeline.Continue {
+		t.Fatalf("first request: %v %+v", a.Type, a.Violation)
+	}
+
+	// Keycloak forgets every token it issued.
+	kc.mu.Lock()
+	kc.subjects = map[string]bool{}
+	kc.mu.Unlock()
+
+	pctx := outbound("weather-agent", "")
+	if a := p.OnRequest(context.Background(), pctx); a.Type != pipeline.Continue {
+		t.Fatalf("after the IdP forgot the cached own token: %v %+v, want Continue", a.Type, a.Violation)
+	}
+	if got := audOf(t, pctx); len(got) != 1 || got[0] != "weather-agent" {
+		t.Errorf("aud = %v, want [weather-agent]", got)
+	}
+}
+
+// Tests never read this machine's service-account mount: a CI runner in a pod
+// has one, and its namespace would leak into every config that sets none.
+func TestMain(m *testing.M) {
+	serviceAccountNamespaceFile = "/nonexistent/serviceaccount/namespace"
+	os.Exit(m.Run())
+}
+
+// A host in another namespace, under a template without {namespace}, is never
+// exchanged. It passes through when its name is no client's, and is denied —
+// not forwarded with the caller's bearer — when it shares a target's name.
+func TestForeignNamespaceIsJudgedNotExchanged(t *testing.T) {
+	kc, srv := newFakeKeycloak(t)
+	subjects := subjectSeen(kc)
+	p := configured(t, srv, `,"namespace":"team1"`)
+
+	for _, host := range []string{"github-tool.attacker.svc", "hr-tool.attacker.svc.cluster.local"} {
+		pctx := outbound(host, "Bearer user-token")
+		a := p.OnRequest(context.Background(), pctx)
+		if a.Type != pipeline.Reject || a.Violation.Status != http.StatusForbidden || a.Violation.Code != "policy.forbidden" {
+			t.Errorf("%s: action = %v %+v, want 403 policy.forbidden", host, a.Type, a.Violation)
+		}
+		if inv := lastInvocation(t, pctx); inv.Action != pipeline.ActionDeny || inv.Reason != reasonForeignNamespace {
+			t.Errorf("%s: invocation = %s/%s, want deny/%s", host, inv.Action, inv.Reason, reasonForeignNamespace)
+		}
+		if pctx.Extensions.Delegation != nil {
+			t.Errorf("%s: a foreign host was exchanged", host)
+		}
+	}
+	for _, s := range subjects() {
+		if s == "user-token" {
+			t.Error("the caller's bearer was sent to the IdP for a foreign host")
+		}
+	}
+
+	gateway := outbound("litellm.models.svc", "Bearer sk-key")
+	if a := p.OnRequest(context.Background(), gateway); a.Type != pipeline.Continue {
+		t.Fatalf("foreign non-target: action = %v %+v, want Continue", a.Type, a.Violation)
+	}
+	if got := gateway.Headers.Get("Authorization"); got != "Bearer sk-key" {
+		t.Errorf("foreign non-target: Authorization = %q, want unchanged", got)
+	}
+	if inv := lastInvocation(t, gateway); inv.Reason != reasonAudienceUnknown {
+		t.Errorf("foreign non-target: reason = %s, want %s", inv.Reason, reasonAudienceUnknown)
+	}
+
+	// Bearer-less under allow: nothing to leak, and allow promises no IdP call.
+	calls := kc.calls.Load()
+	allow := configured(t, srv, `,"namespace":"team1","no_token_policy":"allow"`)
+	if a := allow.OnRequest(context.Background(), outbound("github-tool.attacker.svc", "")); a.Type != pipeline.Continue {
+		t.Errorf("allow, no bearer: action = %v %+v, want Continue", a.Type, a.Violation)
+	}
+	if n := kc.calls.Load(); n != calls {
+		t.Errorf("allow, no bearer: IdP calls rose from %d to %d", calls, n)
+	}
+}
+
+// Neither namespace nor namespace_file set: the service-account file is read
+// when it exists, and ignored when it does not.
+func TestServiceAccountNamespaceIsTheDefault(t *testing.T) {
+	_, srv := newFakeKeycloak(t)
+	saved := serviceAccountNamespaceFile
+	t.Cleanup(func() { serviceAccountNamespaceFile = saved })
+
+	path := t.TempDir() + "/namespace"
+	if err := os.WriteFile(path, []byte("team3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	serviceAccountNamespaceFile = path
+	if p := configured(t, srv, ""); p.cfg.Namespace != "team3" {
+		t.Errorf("namespace = %q, want team3 from the service-account file", p.cfg.Namespace)
+	}
+	if p := configured(t, srv, `,"namespace":"team1"`); p.cfg.Namespace != "team1" {
+		t.Errorf("namespace = %q, want the inline team1", p.cfg.Namespace)
+	}
+
+	serviceAccountNamespaceFile = path + ".absent"
+	if p := configured(t, srv, ""); p.cfg.Namespace != "" {
+		t.Errorf("namespace = %q, want none without the file", p.cfg.Namespace)
 	}
 }

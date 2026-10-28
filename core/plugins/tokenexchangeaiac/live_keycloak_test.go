@@ -73,7 +73,7 @@ func TestLiveKeycloak(t *testing.T) {
 	userToken := passwordGrant(t, tokenURL)
 
 	p := New()
-	cfg := fmt.Sprintf(`{"token_url":%q,"client_id":"agent","client_secret":"s3cret","no_token_policy":"client-credentials"}`, tokenURL)
+	cfg := fmt.Sprintf(`{"token_url":%q,"client_id":"agent","client_secret":"s3cret","no_token_policy":"client-credentials","namespace":"team1"}`, tokenURL)
 	if err := p.Configure(json.RawMessage(cfg)); err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +101,21 @@ func TestLiveKeycloak(t *testing.T) {
 	}
 	if inv := lastInvocation(t, pctx); inv.Reason != reasonAudienceUnknown {
 		t.Errorf("unknown audience reason = %s — has Keycloak reworded \"Audience not found\"?", inv.Reason)
+	}
+
+	// Keycloak rejects a subject it did not issue before it looks at the
+	// audience. A non-target must still pass through with that bearer, and a
+	// target must answer 401.
+	pctx = outbound("other-gateway", "Bearer sk-not-a-keycloak-token")
+	if a := p.OnRequest(ctx, pctx); a.Type != pipeline.Continue {
+		t.Errorf("foreign bearer, unknown audience: %v %+v, want passthrough", a.Type, a.Violation)
+	}
+	if inv := lastInvocation(t, pctx); inv.Reason != reasonAudienceUnknown {
+		t.Errorf("foreign bearer, unknown audience: reason = %s — has Keycloak reworded \"Invalid token\"?", inv.Reason)
+	}
+	pctx = outbound("github-tool", "Bearer sk-not-a-keycloak-token")
+	if a := p.OnRequest(ctx, pctx); a.Type != pipeline.Reject || a.Violation.Status != http.StatusUnauthorized {
+		t.Errorf("foreign bearer, target: %v %+v, want 401", a.Type, a.Violation)
 	}
 
 	pctx = outbound("github-tool", "")

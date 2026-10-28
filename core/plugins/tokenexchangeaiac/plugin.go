@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -40,12 +41,19 @@ const (
 	reasonNoToken           = "no_token"
 	reasonNotGranted        = "audience_not_granted"
 	reasonTargetDisabled    = "target_disabled"
+	reasonSubjectInvalid    = "subject_invalid"
+	reasonForeignNamespace  = "foreign_namespace"
 	reasonExchangeFailed    = "exchange_failed"
 	reasonCredentialsAbsent = "credentials_not_ready"
 	reasonOpaqueTunnel      = "opaque_tunnel"
 
 	reasonPlaceholderUnresolved = "placeholder_unresolved"
 )
+
+// serviceAccountNamespaceFile is where the kubelet projects the pod's own
+// namespace. Read when neither namespace nor namespace_file is set and the file
+// exists, so an in-cluster sidecar knows its namespace without being told.
+var serviceAccountNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 // selfTokenKey caches the caller's own client-credentials token. It cannot
 // collide with a tokenKey, which always starts with 64 hex digits.
@@ -66,7 +74,7 @@ type tokenExchangeAIACConfig struct {
 	// AudienceTemplate maps a destination to the audience requested for it.
 	AudienceTemplate string `json:"audience_template" description:"Audience requested for a destination. Placeholders: {service}, {namespace}." default:"{service}"`
 	ClusterDomain    string `json:"cluster_domain" description:"Cluster DNS domain; hosts ending in .svc.<cluster_domain> are in-cluster." default:"cluster.local"`
-	Namespace        string `json:"namespace" description:"Namespace assumed for short service names, for templates that use {namespace}. Alternatively namespace_file."`
+	Namespace        string `json:"namespace" description:"Namespace assumed for short service names; under a template without {namespace}, also the only namespace a qualified host may name. Alternatively namespace_file."`
 	// NamespaceFile is read once, in Configure, when Namespace is empty. It is
 	// meant for /var/run/secrets/kubernetes.io/serviceaccount/namespace, which
 	// the kubelet projects from the pod's own metadata: the one source that is
@@ -74,7 +82,7 @@ type tokenExchangeAIACConfig struct {
 	// renders one authbridge-runtime-config into each agent namespace), where
 	// an inline namespace is wrong in all but one. No default and no poller,
 	// as for lineage-telemetry's key of the same name.
-	NamespaceFile string `json:"namespace_file" description:"Read when namespace is empty, once at start (e.g. /var/run/secrets/kubernetes.io/serviceaccount/namespace); absent, blank or not a DNS label refuses at start."`
+	NamespaceFile string `json:"namespace_file" description:"Read when namespace is empty, once at start (e.g. /var/run/secrets/kubernetes.io/serviceaccount/namespace); absent, blank or not a DNS label refuses at start. When neither is set, the service-account file is read if it exists."`
 
 	NoTokenPolicy      string `json:"no_token_policy" description:"Outbound request with no bearer: exchange the workload's own client-credentials token, allow it through unchanged, or deny." default:"deny" enum:"client-credentials,allow,deny"`
 	UnknownAudienceTTL string `json:"unknown_audience_ttl" description:"How long an audience the IdP does not know is passed through without asking again. 0 asks every time." default:"5m"`
@@ -188,6 +196,16 @@ func (p *TokenExchangeAIAC) Configure(raw json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("%s config: %w", PluginName, err)
 	}
+	if c.Namespace != "" && !validLabel(c.Namespace) {
+		return fmt.Errorf("%s config: namespace %q is not a DNS label", PluginName, c.Namespace)
+	}
+	if c.Namespace == "" && c.NamespaceFile == "" {
+		// Not configured: use the pod's own namespace where there is one. A
+		// laptop has no such file and carries on without a namespace.
+		if _, err := os.Stat(serviceAccountNamespaceFile); err == nil {
+			c.NamespaceFile = serviceAccountNamespaceFile
+		}
+	}
 	if c.Namespace == "" && c.NamespaceFile != "" {
 		ns, err := config.ReadCredentialFile(c.NamespaceFile)
 		if err != nil {
@@ -202,9 +220,15 @@ func (p *TokenExchangeAIAC) Configure(raw json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("%s config: %w", PluginName, err)
 	}
-	if targets.usesNamespace() && c.Namespace == "" {
+	switch {
+	case c.Namespace != "":
+	case targets.usesNamespace():
 		slog.Warn(PluginName+": audience_template uses {namespace} and namespace is unset; "+
 			"short service names will pass through without an exchange",
+			"audience_template", c.AudienceTemplate)
+	default:
+		slog.Warn(PluginName+": namespace is unset; hosts naming a namespace "+
+			"(service.namespace.svc) are never exchanged, and are denied when they name a target",
 			"audience_template", c.AudienceTemplate)
 	}
 
@@ -330,6 +354,9 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 		pctx.Record(pipeline.Invocation{Action: pipeline.ActionSkip, Reason: reasonNoToken, Details: details})
 		return pipeline.Action{Type: pipeline.Continue}
 	}
+	if t.foreign {
+		return p.judgeForeign(ctx, pctx, details, t.audience)
+	}
 
 	creds := p.creds.Load()
 	if creds == nil {
@@ -342,35 +369,41 @@ func (p *TokenExchangeAIAC) OnRequest(ctx context.Context, pctx *pipeline.Contex
 	// client for. client-credentials forwards the narrowed token; deny uses
 	// the exchange only to find out, so that a non-target still passes through
 	// and only a target answers 401.
-	probeOnly := false
+	var (
+		tok      string
+		cacheHit bool
+		err      error
+	)
 	if subject == "" {
-		self, err := p.selfToken(ctx, *creds)
-		if err != nil {
-			slog.Warn(PluginName+": client-credentials grant failed", "error", err)
-			return p.deny(pctx, details, reasonExchangeFailed, http.StatusServiceUnavailable,
-				"upstream.token-exchange-failed", "could not obtain this workload's own token")
+		tok, cacheHit, err = p.exchangeSelf(ctx, *creds, t.audience)
+		if err == nil {
+			if p.cfg.NoTokenPolicy == auth.NoTokenPolicyDeny {
+				return p.denyNoToken(pctx, details)
+			}
+			return p.replace(pctx, details, tok, cacheHit)
 		}
-		subject = self
-		probeOnly = p.cfg.NoTokenPolicy == auth.NoTokenPolicyDeny
-	}
-
-	key := tokenKey(subject, t.audience)
-	if tok, ok := p.tokens.get(key); ok {
-		p.cacheHits.Add(1)
-		if probeOnly {
-			return p.denyNoToken(pctx, details)
+	} else {
+		tok, cacheHit, err = p.exchangeCached(ctx, *creds, subject, t.audience)
+		if err == nil {
+			return p.replace(pctx, details, tok, cacheHit)
 		}
-		return p.replace(pctx, details, tok, true)
-	}
-
-	issued, err := p.idp.exchange(ctx, *creds, subject, t.audience)
-	if err == nil {
-		p.tokens.put(key, issued)
-		p.exchanged.Add(1)
-		if probeOnly {
-			return p.denyNoToken(pctx, details)
+		// Keycloak judges the subject before the audience, so "Invalid token"
+		// says nothing about the destination: an expired user token, or a
+		// bearer it never issued (an API key for an in-cluster model gateway),
+		// gets it for unknown audiences too. Ask again with the workload's own
+		// token, which the IdP does accept, and let that answer decide.
+		if classify(err) == outcomeSubjectInvalid {
+			bearerErr := err
+			if _, _, err = p.exchangeSelf(ctx, *creds, t.audience); err == nil {
+				return p.deny(pctx, details, reasonSubjectInvalid, http.StatusUnauthorized,
+					"auth.unauthorized", "the bearer token was rejected by the IdP")
+			}
+			if classify(err) == outcomeFailed {
+				// Keep why the bearer was refused in the log, not only why
+				// the second question could not be answered.
+				err = fmt.Errorf("%w (the bearer was refused first: %v)", err, bearerErr)
+			}
 		}
-		return p.replace(pctx, details, issued.accessToken, false)
 	}
 	switch classify(err) {
 	case outcomeUnknownAudience:
@@ -401,6 +434,72 @@ func (p *TokenExchangeAIAC) denyNoToken(pctx *pipeline.Context, details map[stri
 		"auth.unauthorized", "missing Authorization header")
 }
 
+// judgeForeign answers a request to a host in another namespace whose audience
+// does not carry the namespace. It is never exchanged, whatever its bearer:
+// the token would be a target's, sent to a Service that only shares its name.
+// The IdP is asked with the workload's own token whether the audience names a
+// client. When it does not, the request passes through like any other
+// destination the IdP does not know. When it does, the host is claiming a
+// target's name, and the request is denied — never forwarded with the
+// caller's bearer either, which a lookalike Service would otherwise receive.
+func (p *TokenExchangeAIAC) judgeForeign(ctx context.Context, pctx *pipeline.Context, details map[string]string, audience string) pipeline.Action {
+	creds := p.creds.Load()
+	if creds == nil {
+		return p.deny(pctx, details, reasonCredentialsAbsent, http.StatusServiceUnavailable,
+			"upstream.token-exchange-failed", "client credentials are not loaded yet")
+	}
+	_, _, err := p.exchangeSelf(ctx, *creds, audience)
+	switch o := classify(err); {
+	case err != nil && o == outcomeUnknownAudience:
+		p.unknown.add(audience)
+		return p.passUnknown(pctx, details, false)
+	case err == nil, o == outcomeNotGranted, o == outcomeTargetDisabled:
+		slog.Warn(PluginName+": host in another namespace names a target; denied",
+			"host", pctx.Host, "audience", audience)
+		return p.deny(pctx, details, reasonForeignNamespace, http.StatusForbidden,
+			"policy.forbidden", "the destination is in another namespace and shares a target's name")
+	default:
+		slog.Warn(PluginName+": token exchange failed", "host", pctx.Host, "audience", audience, "error", err)
+		return p.deny(pctx, details, reasonExchangeFailed, http.StatusServiceUnavailable,
+			"upstream.token-exchange-failed", "token exchange failed")
+	}
+}
+
+// exchangeCached returns a token for audience in exchange for subject, from
+// the cache when it holds one.
+func (p *TokenExchangeAIAC) exchangeCached(ctx context.Context, creds credentials, subject, audience string) (string, bool, error) {
+	key := tokenKey(subject, audience)
+	if tok, ok := p.tokens.get(key); ok {
+		p.cacheHits.Add(1)
+		return tok, true, nil
+	}
+	issued, err := p.idp.exchange(ctx, creds, subject, audience)
+	if err != nil {
+		return "", false, err
+	}
+	p.tokens.put(key, issued)
+	p.exchanged.Add(1)
+	return issued.accessToken, false, nil
+}
+
+// exchangeSelf is exchangeCached with the workload's own token as the subject.
+// A cached own token the IdP no longer accepts — after a Keycloak restart or a
+// realm key rotation — is dropped and fetched again, once, so that it does not
+// fail every request until it would have expired.
+func (p *TokenExchangeAIAC) exchangeSelf(ctx context.Context, creds credentials, audience string) (string, bool, error) {
+	self, fromCache, err := p.selfToken(ctx, creds)
+	if err != nil {
+		slog.Warn(PluginName+": client-credentials grant failed", "error", err)
+		return "", false, fmt.Errorf("could not obtain this workload's own token: %w", err)
+	}
+	tok, hit, err := p.exchangeCached(ctx, creds, self, audience)
+	if fromCache && classify(err) == outcomeSubjectInvalid {
+		p.tokens.drop(selfTokenKey)
+		return p.exchangeSelf(ctx, creds, audience)
+	}
+	return tok, hit, err
+}
+
 // resolvePlaceholder looks a handle up in the shared store. Returns ok=false
 // (fail closed) when no store is wired or the handle is unknown or expired.
 func resolvePlaceholder(pctx *pipeline.Context, handle string) (string, bool) {
@@ -415,17 +514,18 @@ func resolvePlaceholder(pctx *pipeline.Context, handle string) (string, bool) {
 	return s, ok
 }
 
-// selfToken returns this workload's own client-credentials token, cached.
-func (p *TokenExchangeAIAC) selfToken(ctx context.Context, creds credentials) (string, error) {
+// selfToken returns this workload's own client-credentials token, cached, and
+// whether it came from the cache.
+func (p *TokenExchangeAIAC) selfToken(ctx context.Context, creds credentials) (string, bool, error) {
 	if tok, ok := p.tokens.get(selfTokenKey); ok {
-		return tok, nil
+		return tok, true, nil
 	}
 	issued, err := p.idp.clientCredentials(ctx, creds)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	p.tokens.put(selfTokenKey, issued)
-	return issued.accessToken, nil
+	return issued.accessToken, false, nil
 }
 
 func (p *TokenExchangeAIAC) replace(pctx *pipeline.Context, details map[string]string, token string, cacheHit bool) pipeline.Action {

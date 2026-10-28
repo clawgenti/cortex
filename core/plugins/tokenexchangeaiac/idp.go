@@ -40,6 +40,10 @@ const (
 	// disabled. Deny as forbidden: a deliberate IdP answer, so retrying the
 	// same call cannot succeed.
 	outcomeTargetDisabled
+	// outcomeSubjectInvalid: the IdP rejected the subject token itself, before
+	// looking at the audience, so the answer says nothing about the
+	// destination. The caller asks again with a subject the IdP accepts.
+	outcomeSubjectInvalid
 )
 
 // idpError is a non-200 answer from the token endpoint, carrying the RFC 6749
@@ -57,13 +61,18 @@ func (e *idpError) Error() string {
 	return fmt.Sprintf("token endpoint answered HTTP %d: %s", e.status, e.code)
 }
 
-// classify maps an IdP error to an outcome. The three recognised answers are
+// classify maps an IdP error to an outcome. The four recognised answers are
 // Keycloak's, from its standard token exchange provider, and were confirmed
 // against Keycloak 26.5:
 //
 //	audience names no client             400 invalid_client  "Audience not found"
 //	client exists, caller has no grant   400 invalid_request "Requested audience not available: <aud>"
 //	audience names a disabled client     400 invalid_client  "Client disabled"
+//	subject is not a valid token         400 invalid_request "Invalid token"
+//
+// The last is checked before the audience is: an expired, malformed or
+// wrongly signed subject, or a bearer the IdP never issued (an API key), gets
+// it for every audience, the unknown ones included.
 //
 // Both the code AND the description are matched. invalid_client alone also
 // covers bad client credentials, and invalid_request alone also covers a
@@ -84,6 +93,8 @@ func classify(err error) outcome {
 		return outcomeNotGranted
 	case ie.code == "invalid_client" && ie.description == "Client disabled":
 		return outcomeTargetDisabled
+	case ie.code == "invalid_request" && ie.description == "Invalid token":
+		return outcomeSubjectInvalid
 	}
 	return outcomeFailed
 }
