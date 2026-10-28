@@ -37,6 +37,25 @@ import (
 // continues a local turn the grace cut off; an open codex window reconnects on its own.
 const codexDaemonPIDRel = "app-server-daemon/daemon.pid"
 
+// codexUpdaterPIDRel is where Codex records its auto-updater, the second long-lived
+// process an auto-updatable install runs (`codex app-server daemon pid-update-loop`).
+//
+// IT IS WHY RESTARTING THE DAEMON ALONE IS NOT ENOUGH. The updater also reads the dotenv
+// file only when it starts, and the daemon it starts after installing an update inherits
+// the updater's environment. `daemon restart` replaces the daemon but keeps a running
+// updater: Codex starts one only when its pid file names no live process. So after
+// disable the daemon was clean and the updater still had Cortex's proxy, and the next
+// update put the daemon back on Cortex (reproduced on 0.164.0 updating to 0.165.0).
+// Enable does not need it, since a daemon's own dotenv load adds a proxy it did not
+// inherit; it is stopped on both so the two processes never disagree. Stopping it first
+// lets the restart start a fresh one, which reads the new file.
+const codexUpdaterPIDRel = "app-server-daemon/daemon-updater.pid"
+
+// codexThreadIDEnv is set by Codex in the environment of every command it runs for a
+// turn. Seeing it means agentop is a tool call inside Codex, and that Codex turn is one
+// the restart would have to drain.
+const codexThreadIDEnv = "CODEX_THREAD_ID"
+
 // codexDaemonRestartCmd is Codex's own command for applying a changed environment.
 const codexDaemonRestartCmd = "codex app-server daemon restart"
 
@@ -83,11 +102,48 @@ var codexRestartDaemon = func(codexHome string, want map[string]string) error {
 	return codexRun(bin, codexHome, want, "app-server", "daemon", "restart")
 }
 
+// codexStopUpdater ends the updater recorded under codexHome, if it runs, and waits for it
+// to exit. Codex stops its updater the same way: SIGTERM to its process group, which the
+// updater handles by shutting down. A package variable so tests replace it.
+var codexStopUpdater = func(codexHome string) error {
+	u, ok := runningCodexProc(codexHome, codexUpdaterPIDRel)
+	if !ok {
+		return nil
+	}
+	if err := syscall.Kill(-u.PID, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("stopping Codex's updater (pid %d): %w", u.PID, err)
+	}
+	deadline := time.Now().Add(codexUpdaterStopTimeout)
+	for codexDaemonAlive(u.PID) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("Codex's updater (pid %d) did not exit within %s", u.PID, codexUpdaterStopTimeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
+// codexUpdaterStopTimeout bounds the wait for the updater to exit. It has no turns to
+// drain, so it exits at once unless it is mid-install; a timeout leaves the restart to go
+// ahead and the check after it to name the updater if it kept its old settings.
+const codexUpdaterStopTimeout = 10 * time.Second
+
 // runningCodexDaemon returns the daemon recorded under codexHome when its process is
 // still alive. ok is false when there is no pid file, it cannot be read, or the process
 // it names has exited — a stale file Codex leaves behind after a crash or a reboot.
 func runningCodexDaemon(codexHome string) (codexDaemon, bool) {
-	b, err := os.ReadFile(filepath.Join(codexHome, codexDaemonPIDRel))
+	return runningCodexProc(codexHome, codexDaemonPIDRel)
+}
+
+// runningCodexUpdater is runningCodexDaemon for the auto-updater.
+func runningCodexUpdater(codexHome string) (codexDaemon, bool) {
+	return runningCodexProc(codexHome, codexUpdaterPIDRel)
+}
+
+// runningCodexProc reads one of Codex's pid files under codexHome, and the environment of
+// the process it names when that process is alive.
+func runningCodexProc(codexHome, pidRel string) (codexDaemon, bool) {
+	b, err := os.ReadFile(filepath.Join(codexHome, pidRel))
 	if err != nil {
 		return codexDaemon{}, false
 	}
@@ -169,12 +225,15 @@ func codexRun(bin, codexHome string, want map[string]string, args ...string) err
 		env = append(env, codexHomeEnv+"="+codexHome)
 	}
 	cmd.Env = env
+	// Only stderr is read. stdout goes nowhere rather than to a pipe, so a daemon that kept
+	// an inherited stdout open could not hold Wait. stderr is a pipe and might be held the
+	// same way: WaitDelay bounds that, and ErrWaitDelay, which Go returns only after a
+	// successful exit, is not a failed restart.
 	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-	// The daemon it starts detaches with its own stdio, but bound how long Wait waits for
-	// the pipes anyway, as openCodeRun does.
 	cmd.WaitDelay = time.Second
-	if _, err := cmd.Output(); err != nil {
+	if err := cmd.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		what := filepath.Base(bin) + " " + strings.Join(args, " ")
 		if ctx.Err() != nil {
 			return fmt.Errorf("%s: no answer in %s", what, codexRestartTimeout)
@@ -219,8 +278,8 @@ func noteCodexDaemonRestart(codexHome string, stdout io.Writer) *codexDaemon {
 		return nil
 	}
 	fmt.Fprintf(stdout, "Codex's background app-server is running (pid %d%s).\n"+
-		"  Applying this restarts it: Codex turns already running get up to a minute to finish,\n"+
-		"  and open Codex windows reconnect.\n",
+		"  Applying this restarts it: Codex turns already running get up to its shutdown grace\n"+
+		"  (a minute by default) to finish, and open Codex windows reconnect.\n",
 		d.PID, startedSuffix(d))
 	return &d
 }
@@ -235,11 +294,27 @@ func startedSuffix(d codexDaemon) string {
 // finishCodexChange restarts the daemon that was running before enable (configured) or
 // disable changed the file, then checks it again and says whether its proxy now matches
 // the change: cortexProxy after enable, anything but cortexProxy after disable. was is
-// what noteCodexDaemonRestart returned; nil leaves everything alone. A restart that fails
-// is reported on stderr; the change itself succeeded, so the caller still exits 0.
+// what noteCodexDaemonRestart returned; nil leaves everything alone. The auto-updater is
+// stopped first, so the restart starts a fresh one (see codexUpdaterPIDRel), and checked
+// after. A restart that fails is reported on stderr; the change itself succeeded, so the
+// caller still exits 0. Inside a Codex turn nothing is restarted (insideCodexTurn).
 func finishCodexChange(codexHome, cortexProxy string, want map[string]string, configured bool, was *codexDaemon, stdout, stderr io.Writer) {
 	if was == nil {
 		return
+	}
+	if insideCodexTurn() {
+		// The restart would drain the turn waiting on this command: it blocks for the
+		// whole grace, and the forced stop at its end can take this command down with it,
+		// leaving no daemon. The file is changed; the restart is left to a terminal.
+		fmt.Fprintf(stdout, "Not restarting Codex's background app-server (pid %d): this is running inside a Codex turn,\n"+
+			"  which the restart would have to wait for. Run this from a terminal outside Codex:\n"+
+			"    %s\n", was.PID, codexDaemonRestartCmd)
+		return
+	}
+	if err := codexStopUpdater(codexHome); err != nil {
+		// Not fatal: the restart still applies the change to the daemon, and the check
+		// below names an updater still on the old settings.
+		fmt.Fprintf(stderr, "agentop: %v\n", err)
 	}
 	fmt.Fprintf(stdout, "Restarting Codex's background app-server (pid %d)...\n", was.PID)
 	if err := codexRestartDaemon(codexHome, want); err != nil {
@@ -248,6 +323,34 @@ func finishCodexChange(codexHome, cortexProxy string, want map[string]string, co
 			"    %s\n", err, codexDaemonRestartCmd)
 		return
 	}
+	reportRestartedDaemon(codexHome, cortexProxy, configured, stdout)
+	reportRestartedUpdater(codexHome, cortexProxy, configured, stdout)
+}
+
+// insideCodexTurn reports whether this process runs as a tool call of a Codex turn.
+func insideCodexTurn() bool {
+	return strings.TrimSpace(os.Getenv(codexThreadIDEnv)) != ""
+}
+
+// reportRestartedUpdater names an updater whose proxy disagrees with the change, since
+// the daemon it starts after its next update inherits that proxy. No updater, one whose
+// environment cannot be read, or one that agrees, needs no line.
+func reportRestartedUpdater(codexHome, cortexProxy string, configured bool, stdout io.Writer) {
+	u, ok := runningCodexUpdater(codexHome)
+	if !ok || u.EnvErr != nil || cortexProxy == "" || sameProxy(u.Proxy, cortexProxy) == configured {
+		return
+	}
+	stale := "still uses Cortex's proxy"
+	if configured {
+		stale = "does not use Cortex's proxy"
+	}
+	fmt.Fprintf(stdout, "Codex's auto-updater (pid %d) %s, and the app-server it starts after an update\n"+
+		"  inherits that. Stop it, then restart the app-server so a new updater starts:\n"+
+		"    kill %d && %s\n", u.PID, stale, u.PID, codexDaemonRestartCmd)
+}
+
+// reportRestartedDaemon says whether the restarted daemon's proxy matches the change.
+func reportRestartedDaemon(codexHome, cortexProxy string, configured bool, stdout io.Writer) {
 	d, ok := runningCodexDaemon(codexHome)
 	switch {
 	case !ok:

@@ -5,18 +5,24 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const cortexProxyURL = "http://127.0.0.1:47600" // the forward proxy in cortexCfg
 
-// fakeCodexDaemon is the daemon a test sees: a pid file under its CODEX_HOME, a process
-// table that says that pid is alive, and an environment for it. restart, when not
-// failing, replaces it with newPID running with newEnv, as Codex's restart does.
+// fakeCodexDaemon is the Codex a test sees: a daemon and, when updaterPID is set, an
+// auto-updater, each with a pid file under its CODEX_HOME, a process table that says the
+// pid is alive, and an environment. restart, when not failing, replaces the daemon with
+// newPID running with newEnv and, as Codex's restart does, starts an updater only when
+// none is running — a running one keeps its pid and its old environment. stopUpdater ends
+// the updater unless stopErr says it refused.
 type fakeCodexDaemon struct {
 	pid    int
 	env    []string
@@ -27,31 +33,59 @@ type fakeCodexDaemon struct {
 	newGone    bool  // the restarted daemon exits straight away
 	restartErr error // the restart command fails
 
+	updaterPID    int
+	updaterEnv    []string
+	newUpdaterPID int   // the updater a restart starts when none is running
+	stopErr       error // stopping the updater fails, and it keeps running
+
 	restarts []map[string]string // the want each restart was given
+	steps    []string            // "stop-updater" and "restart", in the order they ran
 }
 
 // stubCodexDaemon points every daemon seam at f for one test, so nothing a test does can
-// restart a real daemon or read a real process: the pid is fake, and a real process with
-// that pid would otherwise be the one inspected.
+// restart a real daemon, stop a real updater or read a real process: the pids are fake,
+// and a real process with one of them would otherwise be the one inspected. CODEX_THREAD_ID
+// is cleared, so a test run from inside a Codex turn behaves like one run from a terminal.
 func stubCodexDaemon(t *testing.T, codexHome string, f *fakeCodexDaemon) {
 	t.Helper()
-	alive, environ, restart := codexDaemonAlive, codexEnviron, codexRestartDaemon
-	t.Cleanup(func() { codexDaemonAlive, codexEnviron, codexRestartDaemon = alive, environ, restart })
+	t.Setenv(codexThreadIDEnv, "")
+	alive, environ, restart, stop := codexDaemonAlive, codexEnviron, codexRestartDaemon, codexStopUpdater
+	t.Cleanup(func() {
+		codexDaemonAlive, codexEnviron, codexRestartDaemon, codexStopUpdater = alive, environ, restart, stop
+	})
 	if f.pid != 0 {
 		writeCodexDaemonPID(t, codexHome, f.pid)
 	}
-	codexDaemonAlive = func(pid int) bool { return pid == f.pid }
+	if f.updaterPID != 0 {
+		writeCodexPID(t, codexHome, codexUpdaterPIDRel, f.updaterPID)
+	}
+	codexDaemonAlive = func(pid int) bool { return pid != 0 && (pid == f.pid || pid == f.updaterPID) }
 	codexEnviron = func(pid int32) ([]string, error) {
-		if int(pid) != f.pid {
-			t.Errorf("read the environment of pid %d, which is not the fake daemon's", pid)
-			return nil, errors.New("not the fake daemon")
+		switch int(pid) {
+		case f.pid:
+			return f.env, f.envErr
+		case f.updaterPID:
+			return f.updaterEnv, nil
 		}
-		return f.env, f.envErr
+		t.Errorf("read the environment of pid %d, which is neither fake process", pid)
+		return nil, errors.New("not a fake process")
+	}
+	codexStopUpdater = func(home string) error {
+		if home != codexHome {
+			t.Errorf("stopped the updater of %s, want %s", home, codexHome)
+		}
+		f.steps = append(f.steps, "stop-updater")
+		if f.stopErr != nil {
+			return f.stopErr
+		}
+		f.updaterPID = 0
+		return nil
 	}
 	codexRestartDaemon = func(home string, want map[string]string) error {
 		if home != codexHome {
 			t.Errorf("restarted the daemon of %s, want %s", home, codexHome)
 		}
+		f.steps = append(f.steps, "restart")
 		f.restarts = append(f.restarts, want)
 		if f.restartErr != nil {
 			return f.restartErr
@@ -62,6 +96,11 @@ func stubCodexDaemon(t *testing.T, codexHome string, f *fakeCodexDaemon) {
 		} else {
 			writeCodexDaemonPID(t, codexHome, f.newPID)
 		}
+		if f.updaterPID == 0 && f.newUpdaterPID != 0 {
+			// A fresh updater reads the file the change just wrote, as the daemon does.
+			f.updaterPID, f.updaterEnv = f.newUpdaterPID, f.newEnv
+			writeCodexPID(t, codexHome, codexUpdaterPIDRel, f.newUpdaterPID)
+		}
 		return nil
 	}
 }
@@ -69,12 +108,18 @@ func stubCodexDaemon(t *testing.T, codexHome string, f *fakeCodexDaemon) {
 // writeCodexDaemonPID writes a daemon.pid under codexHome as Codex does.
 func writeCodexDaemonPID(t *testing.T, codexHome string, pid int) {
 	t.Helper()
-	dir := filepath.Join(codexHome, filepath.Dir(codexDaemonPIDRel))
+	writeCodexPID(t, codexHome, codexDaemonPIDRel, pid)
+}
+
+// writeCodexPID writes one of Codex's pid files, rel under codexHome.
+func writeCodexPID(t *testing.T, codexHome, rel string, pid int) {
+	t.Helper()
+	dir := filepath.Join(codexHome, filepath.Dir(rel))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	body := `{"pid":` + strconv.Itoa(pid) + `,"processStartTime":"Fri Oct 23 09:03:25 2026"}`
-	if err := os.WriteFile(filepath.Join(codexHome, codexDaemonPIDRel), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(codexHome, rel), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -123,7 +168,8 @@ func TestCodexEnable_RestartsARunningDaemon(t *testing.T) {
 	}
 	got := out.String()
 	wantAll(t, "enable output", got, "pid 5613", "Fri Oct 23 09:03:25 2026", "Applying this restarts it",
-		"open Codex windows reconnect", "restarted (pid 7001) and is using Cortex")
+		"up to its shutdown grace", "a minute by default", "open Codex windows reconnect",
+		"restarted (pid 7001) and is using Cortex")
 	if len(f.restarts) != 1 {
 		t.Fatalf("restarted %d times, want once", len(f.restarts))
 	}
@@ -136,6 +182,107 @@ func TestCodexEnable_RestartsARunningDaemon(t *testing.T) {
 	// The warning is said before the question, so it can be declined.
 	if strings.Index(got, "Applying this restarts it") > strings.Index(got, "Enabled —") {
 		t.Errorf("the restart is announced after the change:\n%s", got)
+	}
+}
+
+// Disable stops a running auto-updater before restarting, so the restart starts a fresh
+// one that read the new file. Without that the old updater kept Cortex's proxy, and the
+// daemon it started after the next update was back on Cortex (#1526 review, reproduced
+// on Codex 0.164.0 → 0.165.0).
+func TestCodexDisable_StopsTheUpdaterBeforeRestarting(t *testing.T) {
+	envPath, cfgPath := codexFixture(t, "")
+	enableCodex(t, envPath, cfgPath)
+	f := &fakeCodexDaemon{
+		pid: 5613, env: onCortex, newPID: 7001, newEnv: offCortex,
+		updaterPID: 5600, updaterEnv: onCortex, newUpdaterPID: 7002,
+	}
+	stubCodexDaemon(t, filepath.Dir(envPath), f)
+
+	var out, errb bytes.Buffer
+	if code := codexDisable(envPath, filepath.Join(filepath.Dir(envPath), "state.json"), true, &out, &errb); code != 0 {
+		t.Fatalf("disable exit %d: %s", code, errb.String())
+	}
+	if got := strings.Join(f.steps, ","); got != "stop-updater,restart" {
+		t.Errorf("steps = %s, want the updater stopped before the restart", got)
+	}
+	if f.updaterPID != 7002 {
+		t.Errorf("updater pid = %d, want the fresh one the restart started", f.updaterPID)
+	}
+	if strings.Contains(out.String(), "auto-updater") {
+		t.Errorf("named the fresh updater, which agrees with the change:\n%s", out.String())
+	}
+}
+
+// An updater that refuses to stop keeps its old environment through the restart, and is
+// named with the command that fixes it rather than reported as fixed.
+func TestCodexDisable_NamesAnUpdaterThatKeptCortex(t *testing.T) {
+	envPath, cfgPath := codexFixture(t, "")
+	enableCodex(t, envPath, cfgPath)
+	f := &fakeCodexDaemon{
+		pid: 5613, env: onCortex, newPID: 7001, newEnv: offCortex,
+		updaterPID: 5600, updaterEnv: onCortex, stopErr: errors.New("Codex's updater (pid 5600) did not exit within 10s"),
+	}
+	stubCodexDaemon(t, filepath.Dir(envPath), f)
+
+	var out, errb bytes.Buffer
+	if code := codexDisable(envPath, filepath.Join(filepath.Dir(envPath), "state.json"), true, &out, &errb); code != 0 {
+		t.Fatalf("disable exit %d: %s", code, errb.String())
+	}
+	wantAll(t, "stderr", errb.String(), "did not exit")
+	wantAll(t, "disable output", out.String(), "no longer uses Cortex",
+		"auto-updater (pid 5600) still uses Cortex's proxy", "kill 5600 && "+codexDaemonRestartCmd)
+}
+
+// Enable stops the updater too, so the two processes never disagree, and an install with
+// no updater (auto-update off) stops nothing and names nothing.
+func TestCodexEnable_UpdaterHandling(t *testing.T) {
+	t.Run("running updater is replaced", func(t *testing.T) {
+		envPath, cfgPath := codexFixture(t, "")
+		f := &fakeCodexDaemon{
+			pid: 5613, env: offCortex, newPID: 7001, newEnv: onCortex,
+			updaterPID: 5600, updaterEnv: offCortex, newUpdaterPID: 7002,
+		}
+		stubCodexDaemon(t, filepath.Dir(envPath), f)
+		var out, errb bytes.Buffer
+		if code := codexEnable(envPath, cfgPath, filepath.Join(filepath.Dir(envPath), "state.json"), true, &out, &errb); code != 0 {
+			t.Fatalf("enable exit %d: %s", code, errb.String())
+		}
+		if got := strings.Join(f.steps, ","); got != "stop-updater,restart" || f.updaterPID != 7002 {
+			t.Errorf("steps = %s, updater = %d; want stop-updater,restart and the fresh updater", got, f.updaterPID)
+		}
+	})
+	t.Run("no updater", func(t *testing.T) {
+		envPath, cfgPath := codexFixture(t, "")
+		f := &fakeCodexDaemon{pid: 5613, env: offCortex, newPID: 7001, newEnv: onCortex}
+		stubCodexDaemon(t, filepath.Dir(envPath), f)
+		var out, errb bytes.Buffer
+		if code := codexEnable(envPath, cfgPath, filepath.Join(filepath.Dir(envPath), "state.json"), true, &out, &errb); code != 0 {
+			t.Fatalf("enable exit %d: %s", code, errb.String())
+		}
+		if strings.Contains(out.String(), "auto-updater") || errb.Len() != 0 {
+			t.Errorf("spoke of an updater that is not running:\nstdout %s\nstderr %s", out.String(), errb.String())
+		}
+	})
+}
+
+// Run as a tool call inside a Codex turn, enable changes the file but restarts nothing:
+// the restart would wait for the very turn waiting on it. It says what to run instead.
+func TestCodexEnable_InsideACodexTurnDoesNotRestart(t *testing.T) {
+	envPath, cfgPath := codexFixture(t, "")
+	f := &fakeCodexDaemon{pid: 5613, env: offCortex, newPID: 7001, newEnv: onCortex, updaterPID: 5600, updaterEnv: offCortex}
+	stubCodexDaemon(t, filepath.Dir(envPath), f)
+	t.Setenv(codexThreadIDEnv, "019a0000-0000-7000-8000-000000000000")
+
+	var out, errb bytes.Buffer
+	if code := codexEnable(envPath, cfgPath, filepath.Join(filepath.Dir(envPath), "state.json"), true, &out, &errb); code != 0 {
+		t.Fatalf("enable exit %d: %s", code, errb.String())
+	}
+	if len(f.steps) != 0 {
+		t.Errorf("steps = %v, want nothing stopped or restarted from inside a Codex turn", f.steps)
+	}
+	wantAll(t, "enable output", out.String(), "Enabled —", "inside a Codex turn", "outside Codex", codexDaemonRestartCmd)
+	if readCodexEnv(t, envPath)["HTTPS_PROXY"] != cortexProxyURL {
+		t.Error("the file was not enabled")
 	}
 }
 
@@ -377,6 +524,69 @@ func TestCodexRun(t *testing.T) {
 	}
 	if err := codexRun("/bin/sh", home, nil, "-c", "exit 0"); err != nil {
 		t.Errorf("a zero exit returned %v", err)
+	}
+	// A restart leaves a daemon running, and a daemon that kept the command's stdout or
+	// stderr open must not turn a successful restart into a failure (#1526 review). The
+	// background sleep holds both for longer than WaitDelay.
+	if err := codexRun("/bin/sh", home, nil, "-c", "sleep 5 & exit 0"); err != nil {
+		t.Errorf("a successful command whose child kept its output open returned %v", err)
+	}
+	// The same child behind a failed command is still a failure.
+	if err := codexRun("/bin/sh", home, nil, "-c", "sleep 5 & exit 4"); err == nil || !strings.Contains(err.Error(), "exit status 4") {
+		t.Errorf("a failed command whose child kept its output open returned %v, want exit status 4", err)
+	}
+}
+
+// The real updater stop, against a process this test starts as its own process-group
+// leader, as Codex starts its updater: SIGTERM to the group, then a wait for it to exit.
+// An updater that is not running, or a stale pid file, needs nothing.
+func TestCodexStopUpdater_RealProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups")
+	}
+	home := t.TempDir()
+	if err := codexStopUpdater(home); err != nil {
+		t.Errorf("no pid file: %v", err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); <-exited })
+	writeCodexPID(t, home, codexUpdaterPIDRel, cmd.Process.Pid)
+
+	// codexDaemonAlive counts a zombie as alive, and only Wait reaps this child, so
+	// liveness here is whether Wait has returned.
+	prev := codexDaemonAlive
+	t.Cleanup(func() { codexDaemonAlive = prev })
+	codexDaemonAlive = func(pid int) bool {
+		if pid != cmd.Process.Pid {
+			return false
+		}
+		select {
+		case <-exited:
+			return false
+		default:
+			return true
+		}
+	}
+	start := time.Now()
+	if err := codexStopUpdater(home); err != nil {
+		t.Fatalf("stopping a live updater: %v", err)
+	}
+	select {
+	case <-exited:
+	default:
+		t.Fatal("codexStopUpdater returned with the updater still running")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("stop took %s; SIGTERM should end sleep at once", d)
+	}
+	if err := codexStopUpdater(home); err != nil {
+		t.Errorf("stale pid file: %v", err)
 	}
 }
 

@@ -166,12 +166,14 @@ someone set deliberately. The first run copies the original file to .env.bak
 and never overwrites that copy. disable removes only the keys it added.
 
 Codex's background app-server, which makes the model calls for every codex
-window, reads the file only when it starts. So when it is running, enable and
-disable restart it once after their change (codex app-server daemon restart):
-turns already running get up to its shutdown grace, a minute by default, to
-finish, and open Codex windows reconnect. When it is running they say so first
-and ask (--yes skips the question, not the warning). status shows whether the
-running app-server uses Cortex.
+window, reads the file only when it starts, and so does its auto-updater. So
+when the app-server is running, enable and disable stop the updater and restart
+the app-server once after their change (codex app-server daemon restart, which
+starts a fresh updater): turns already running get up to its shutdown grace, a
+minute by default, to finish, and open Codex windows reconnect. When it is
+running they say so first and ask (--yes skips the question, not the warning).
+Run from inside a Codex turn they restart nothing and print the command to run
+from a terminal. status shows whether the running app-server uses Cortex.
 
 Note: while enabled, Codex needs Cortex running — its requests go to the
 proxy address. "agentop configure codex disable" is the off switch.

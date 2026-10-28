@@ -111,12 +111,26 @@ restart: the next `codex` starts one that reads the new file. An `enable` that f
 to change does not restart; it says whether the running daemon uses Cortex, and how to
 restart it if not.
 
+**The auto-updater is restarted too.** An auto-updatable install runs a second background
+process, `codex app-server daemon pid-update-loop`, which also reads the dotenv file only when
+it starts. After installing an update it starts a new daemon, and that daemon inherits the
+updater's environment, but `codex app-server daemon restart` leaves a running updater alone.
+So `enable` and `disable` stop the updater first, and the restart starts a fresh one that has
+read the new file. Comparing `ps` before and after, both processes change. Without this, a
+`disable` came undone at the next Codex update, with the daemon back on Cortex's proxy. If the
+updater will not stop, they name it and the command that replaces it.
+
+**Not from inside Codex.** Run as a command inside a Codex turn — asking Codex to run `agentop
+configure codex enable` — they change the file but do not restart anything: the restart would
+wait for the very turn that is waiting for it. They print the restart command to run from a
+terminal instead. Codex marks such commands with `CODEX_THREAD_ID`, which is how they tell.
+
 **What a restart does to Codex sessions**, from Codex's source (0.163.0 and 0.164.0), not
 measured here: the old daemon stops taking new turns, gives running ones its shutdown grace — 60
-seconds by default — to finish, and saves its threads. The new daemon restores them and
+seconds by default, configurable up to 5 minutes — to finish, and saves its threads. The new daemon restores them and
 continues a local turn the grace cut off, saying "Resuming interrupted work". An open
 `codex` window shows that it is reconnecting and rejoins its thread on its own. So a restart
-interrupts Codex rather than ending it, and `enable` or `disable` can take up to that minute
+interrupts Codex rather than ending it, and `enable` or `disable` can take as long as that grace
 when a turn is running.
 
 If the restart fails, the file is still changed and the command still exits 0; it prints the
@@ -398,8 +412,9 @@ Not tested:
 ## Known issues
 
 - **Changing the routing restarts Codex's background server.** `enable` and `disable`
-  change a file Codex's app-server daemon reads only when it starts, so they restart a
-  daemon that is running, which interrupts running Codex turns for up to a minute. Changing
+  change a file Codex's app-server daemon and auto-updater read only when they start, so
+  they restart both when they are running, which interrupts running Codex turns for up to
+  the daemon's shutdown grace (a minute by default). Changing
   the file any other way — by hand, or with an agentop older than this — does not reach a
   running daemon until `codex app-server daemon restart`. See
   [Codex's background app-server](#codexs-background-app-server).
