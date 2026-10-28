@@ -64,13 +64,22 @@ func TestPickerRows_AnAgentWithSessionsButNoSpendHasARow(t *testing.T) {
 // LAST SEEN is what tells "not used today" from "broken".
 func TestRebuildAgentsTable_ASessionOnlyAgentShowsDashesForTheWindow(t *testing.T) {
 	m := morningAfterFixture()
+	// Other's one session, the default bucket, gets an age no named agent shares, so a Other that
+	// matched every session or none would read "just now" or a dash.
+	m.sessions[4].UpdatedAt = time.Now().Add(-5 * time.Hour)
 	m.rebuildAgentsTable()
 	rows := m.agentsTbl.Rows()
-	var oc []string
+	var oc, other []string
 	for _, r := range rows {
-		if r[0] == "opencode" {
+		switch r[0] {
+		case "opencode":
 			oc = r
+		case otherAgents:
+			other = r
 		}
+	}
+	if other == nil || other[2] != "5h ago" {
+		t.Errorf("Other row = %v, want LAST SEEN %q from the session that names no agent", other, "5h ago")
 	}
 	if oc == nil {
 		t.Fatalf("no opencode row in %v", rows)
