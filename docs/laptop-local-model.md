@@ -23,14 +23,14 @@ Before you start:
 Pick the model by how much memory your Mac has. The model's own size is
 small. What grows is the cache that holds the context: the bigger the window,
 the more memory it takes. When it does not fit in GPU memory, the Mac swaps
-and everything slows down. A 36 GB Mac, for example, runs `granite4.2:8b`
-slowly at a 64k window and stalls at 128k.
+and everything slows down. A 36 GB Mac, for example, stalls on
+`granite4.2:8b` at a 128k window. At 64k the model fits, but a smaller chip
+makes the first word slow to arrive (see **Speed** below).
 
 | Your Mac's memory | Model |
 |---|---|
 | 64 GB or more | `granite4.2:8b` |
-| 32–48 GB | `granite4.2:3b` |
-| Under 32 GB | `granite4:tiny-h` |
+| Under 64 GB | `granite4.2:3b` |
 
 Pick the window by agent. It must hold the agent's largest prompt. Anything
 bigger only costs memory and time.
@@ -39,6 +39,9 @@ bigger only costs memory and time.
 |---|---|---|
 | Bob | about 21k tokens | 32k |
 | Claude Code | over 64k tokens | 64k or more |
+
+Ollama has one window for every agent that uses it. If more than one agent
+uses it, set the largest of their windows.
 
 **Memory each model uses**, in GiB:
 
@@ -68,9 +71,9 @@ is slower.
 | `granite4.2:3b` | Thinks before answering; twice as fast as 8b | Weaker answers than 8b |
 | `granite4:tiny-h` | Fastest; memory hardly grows with the window | Older Granite 4.0; cannot think; not yet tried with an agent end to end |
 
-Ollama refuses a thinking request to `granite4:tiny-h`
-(`"granite4:tiny-h" does not support thinking`). If you see that error, use
-`granite4.2:3b`.
+Try `granite4:tiny-h` only if `granite4.2:3b` does not fit (see **Check what
+loaded** below). Ollama refuses a thinking request to it
+(`"granite4:tiny-h" does not support thinking`), and agents can send one.
 
 Do not use `granite3.3`. It mixes its reasoning into the answer, and the
 agent reads that as part of its work. Granite 4.2 keeps the two apart.
@@ -132,6 +135,8 @@ granite4.2:3b    4.7 GB    100% GPU     32768
 - **CONTEXT** is the window you really got, whatever was configured.
 - **PROCESSOR** should say `100% GPU`. Any CPU share means the model did not
   fit and will be slow. Leave room for macOS, the agent and your editor.
+  If it says `100% GPU` and is still too slow, the chip is the limit: use a
+  smaller model.
 
 ## Route the agent to it
 
@@ -153,7 +158,8 @@ agentop server use ollama --agent <agent>
   the agents pane does the same.
 
 To change the model later, run the same `add` with the new model and `--yes`,
-which replaces the entry.
+which replaces the entry. Running sessions keep the model they started with,
+so start a new session to use the new one.
 
 ## What happens next
 
