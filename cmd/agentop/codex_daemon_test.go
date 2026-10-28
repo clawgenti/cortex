@@ -44,11 +44,9 @@ type fakeCodexDaemon struct {
 
 // stubCodexDaemon points every daemon seam at f for one test, so nothing a test does can
 // restart a real daemon, stop a real updater or read a real process: the pids are fake,
-// and a real process with one of them would otherwise be the one inspected. CODEX_THREAD_ID
-// is cleared, so a test run from inside a Codex turn behaves like one run from a terminal.
+// and a real process with one of them would otherwise be the one inspected.
 func stubCodexDaemon(t *testing.T, codexHome string, f *fakeCodexDaemon) {
 	t.Helper()
-	t.Setenv(codexThreadIDEnv, "")
 	alive, environ, restart, stop := codexDaemonAlive, codexEnviron, codexRestartDaemon, codexStopUpdater
 	t.Cleanup(func() {
 		codexDaemonAlive, codexEnviron, codexRestartDaemon, codexStopUpdater = alive, environ, restart, stop
@@ -263,27 +261,6 @@ func TestCodexEnable_UpdaterHandling(t *testing.T) {
 			t.Errorf("spoke of an updater that is not running:\nstdout %s\nstderr %s", out.String(), errb.String())
 		}
 	})
-}
-
-// Run as a tool call inside a Codex turn, enable changes the file but restarts nothing:
-// the restart would wait for the very turn waiting on it. It says what to run instead.
-func TestCodexEnable_InsideACodexTurnDoesNotRestart(t *testing.T) {
-	envPath, cfgPath := codexFixture(t, "")
-	f := &fakeCodexDaemon{pid: 5613, env: offCortex, newPID: 7001, newEnv: onCortex, updaterPID: 5600, updaterEnv: offCortex}
-	stubCodexDaemon(t, filepath.Dir(envPath), f)
-	t.Setenv(codexThreadIDEnv, "019a0000-0000-7000-8000-000000000000")
-
-	var out, errb bytes.Buffer
-	if code := codexEnable(envPath, cfgPath, filepath.Join(filepath.Dir(envPath), "state.json"), true, &out, &errb); code != 0 {
-		t.Fatalf("enable exit %d: %s", code, errb.String())
-	}
-	if len(f.steps) != 0 {
-		t.Errorf("steps = %v, want nothing stopped or restarted from inside a Codex turn", f.steps)
-	}
-	wantAll(t, "enable output", out.String(), "Enabled —", "inside a Codex turn", "outside Codex", codexDaemonRestartCmd)
-	if readCodexEnv(t, envPath)["HTTPS_PROXY"] != cortexProxyURL {
-		t.Error("the file was not enabled")
-	}
 }
 
 // Declining changes nothing, so nothing is restarted, though the warning was shown.

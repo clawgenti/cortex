@@ -172,8 +172,7 @@ the app-server once after their change (codex app-server daemon restart, which
 starts a fresh updater): turns already running get up to its shutdown grace, a
 minute by default, to finish, and open Codex windows reconnect. When it is
 running they say so first and ask (--yes skips the question, not the warning).
-Run from inside a Codex turn they restart nothing and print the command to run
-from a terminal. status shows whether the running app-server uses Cortex.
+status shows whether the running app-server uses Cortex.
 
 Note: while enabled, Codex needs Cortex running — its requests go to the
 proxy address. "agentop configure codex disable" is the off switch.

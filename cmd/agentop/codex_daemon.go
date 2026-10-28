@@ -51,11 +51,6 @@ const codexDaemonPIDRel = "app-server-daemon/daemon.pid"
 // lets the restart start a fresh one, which reads the new file.
 const codexUpdaterPIDRel = "app-server-daemon/daemon-updater.pid"
 
-// codexThreadIDEnv is set by Codex in the environment of every command it runs for a
-// turn. Seeing it means agentop is a tool call inside Codex, and that Codex turn is one
-// the restart would have to drain.
-const codexThreadIDEnv = "CODEX_THREAD_ID"
-
 // codexDaemonRestartCmd is Codex's own command for applying a changed environment.
 const codexDaemonRestartCmd = "codex app-server daemon restart"
 
@@ -297,18 +292,9 @@ func startedSuffix(d codexDaemon) string {
 // what noteCodexDaemonRestart returned; nil leaves everything alone. The auto-updater is
 // stopped first, so the restart starts a fresh one (see codexUpdaterPIDRel), and checked
 // after. A restart that fails is reported on stderr; the change itself succeeded, so the
-// caller still exits 0. Inside a Codex turn nothing is restarted (insideCodexTurn).
+// caller still exits 0.
 func finishCodexChange(codexHome, cortexProxy string, want map[string]string, configured bool, was *codexDaemon, stdout, stderr io.Writer) {
 	if was == nil {
-		return
-	}
-	if insideCodexTurn() {
-		// The restart would drain the turn waiting on this command: it blocks for the
-		// whole grace, and the forced stop at its end can take this command down with it,
-		// leaving no daemon. The file is changed; the restart is left to a terminal.
-		fmt.Fprintf(stdout, "Not restarting Codex's background app-server (pid %d): this is running inside a Codex turn,\n"+
-			"  which the restart would have to wait for. Run this from a terminal outside Codex:\n"+
-			"    %s\n", was.PID, codexDaemonRestartCmd)
 		return
 	}
 	if err := codexStopUpdater(codexHome); err != nil {
@@ -325,11 +311,6 @@ func finishCodexChange(codexHome, cortexProxy string, want map[string]string, co
 	}
 	reportRestartedDaemon(codexHome, cortexProxy, configured, stdout)
 	reportRestartedUpdater(codexHome, cortexProxy, configured, stdout)
-}
-
-// insideCodexTurn reports whether this process runs as a tool call of a Codex turn.
-func insideCodexTurn() bool {
-	return strings.TrimSpace(os.Getenv(codexThreadIDEnv)) != ""
 }
 
 // reportRestartedUpdater names an updater whose proxy disagrees with the change, since

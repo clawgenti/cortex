@@ -120,11 +120,6 @@ read the new file. Comparing `ps` before and after, both processes change. Witho
 `disable` came undone at the next Codex update, with the daemon back on Cortex's proxy. If the
 updater will not stop, they name it and the command that replaces it.
 
-**Not from inside Codex.** Run as a command inside a Codex turn — asking Codex to run `agentop
-configure codex enable` — they change the file but do not restart anything: the restart would
-wait for the very turn that is waiting for it. They print the restart command to run from a
-terminal instead. Codex marks such commands with `CODEX_THREAD_ID`, which is how they tell.
-
 **What a restart does to Codex sessions**, from Codex's source (0.163.0 and 0.164.0), not
 measured here: the old daemon stops taking new turns, gives running ones its shutdown grace — 60
 seconds by default, configurable up to 5 minutes — to finish, and saves its threads. The new daemon restores them and
