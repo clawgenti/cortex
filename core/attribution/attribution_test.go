@@ -3,9 +3,11 @@ package attribution
 import (
 	"fmt"
 	"net/http"
+	"net/netip"
 	"testing"
 	"time"
 
+	"github.com/rossoctl/cortex/core/peerproc"
 	"github.com/rossoctl/cortex/core/pipeline"
 	"github.com/rossoctl/cortex/core/session"
 )
@@ -305,5 +307,55 @@ func TestProcessTablesAreBounded(t *testing.T) {
 	defer a.mu.Unlock()
 	if len(a.procs) > maxProcs || len(a.seen) > maxSeen {
 		t.Errorf("procs %d (max %d), seen %d (max %d)", len(a.procs), maxProcs, len(a.seen), maxSeen)
+	}
+}
+
+// fakeResolver is a peerproc.Resolver over a fixed table: one connection owner and parents.
+type fakeResolver struct {
+	owner peerproc.Proc
+	procs map[int32]peerproc.Proc
+	hints []int32
+	err   error
+}
+
+func (f *fakeResolver) ConnOwner(_, _ netip.AddrPort, hints ...int32) (peerproc.Proc, error) {
+	f.hints = hints
+	return f.owner, f.err
+}
+
+func (f *fakeResolver) ListenerOwner(netip.AddrPort, ...int32) (peerproc.Proc, error) {
+	return peerproc.Proc{}, peerproc.ErrNotFound
+}
+
+func (f *fakeResolver) Ancestry(pid int32, max int) ([]peerproc.Proc, error) {
+	var out []peerproc.Proc
+	for p, ok := f.procs[pid]; ok && len(out) < max; p, ok = f.procs[p.PPID] {
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// Lookup turns a connection into the chain Resolve takes, nearest first, and asks the kernel
+// about the processes that named a session first.
+func TestLookup_NamesTheClientsChain(t *testing.T) {
+	a, _ := newTest()
+	a.Resolve(req(claudeUA, "s1"), pchain(100))
+	claude := peerproc.Proc{PID: 100, PPID: 50, Start: time.Unix(100, 0), Exe: "/bin/claude"}
+	curl := peerproc.Proc{PID: 300, PPID: 100, Start: time.Unix(300, 0), Exe: "/usr/bin/curl"}
+	r := &fakeResolver{owner: curl, procs: map[int32]peerproc.Proc{100: claude, 300: curl}}
+	addr := netip.MustParseAddrPort("127.0.0.1:1")
+	chain, err := a.Lookup(r, addr, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chain) != 2 || chain[0].PID != 300 || chain[1].PID != 100 || chain[0].Start != time.Unix(300, 0).UnixNano() {
+		t.Errorf("chain = %+v, want curl then claude", chain)
+	}
+	if len(r.hints) != 1 || r.hints[0] != 100 {
+		t.Errorf("hints = %v, want the process that named a session", r.hints)
+	}
+	r.err = peerproc.ErrNotFound
+	if chain, err := a.Lookup(r, addr, addr); err == nil || chain != nil {
+		t.Errorf("an unnamed connection: %v %v, want an error and no chain", chain, err)
 	}
 }

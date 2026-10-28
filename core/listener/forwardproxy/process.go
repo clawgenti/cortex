@@ -16,10 +16,6 @@ import (
 	"github.com/rossoctl/cortex/core/tlsbridge"
 )
 
-// maxChain is how many processes a client's chain holds — the client and its parents —
-// enough to reach the agent from a tool its shell ran.
-const maxChain = 16
-
 // maxHints is how many processes known to have named a session a lookup looks at first.
 // On Linux each costs a scan of that process's open files.
 const maxHints = 8
@@ -132,19 +128,11 @@ func (s *Server) lookupChain(r *http.Request) []attribution.Proc {
 	if err != nil {
 		return nil
 	}
-	owner, err := s.Processes.ConnOwner(client, server, s.attributor().ProcessHints(maxHints)...)
+	chain, err := s.attributor().Lookup(s.Processes, client, server)
 	if err != nil {
 		slog.Debug("forward-proxy: client process not found, filing as without process attribution",
 			"client", r.RemoteAddr, "error", err)
 		return nil
-	}
-	procs, err := s.Processes.Ancestry(owner.PID, maxChain)
-	if err != nil || len(procs) == 0 {
-		procs = []peerproc.Proc{owner}
-	}
-	chain := make([]attribution.Proc, len(procs))
-	for i, p := range procs {
-		chain[i] = attribution.Proc{PID: p.PID, Start: p.Start.UnixNano(), Exe: p.Exe}
 	}
 	return chain
 }
