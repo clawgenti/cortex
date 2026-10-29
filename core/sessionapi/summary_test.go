@@ -379,9 +379,13 @@ func TestSummarizeEvent_ShapeIsGuarded(t *testing.T) {
 		// its timing: line from the projected event, splitting a response's duration
 		// into the origin's answer time and the body's (#1251). A scalar, so the struct
 		// copy keeps it; asserted above.
-		// 32 since Proc, ClientProc and SessionHeader, TIMELINE data: agentop folds a session's
+		// 30 since DialAddr, which is kept: agentop's detail pane can draw the dialed
+		// address beside Host the way it draws redirected: — and the moca egress
+		// conformance reads it off the projected row. A scalar, so the struct copy
+		// keeps it.
+		// 33 since Proc, ClientProc and SessionHeader, TIMELINE data: agentop folds a session's
 		// linked process rows by them. Asserted above.
-		{"SessionEvent", reflect.TypeOf(pipeline.SessionEvent{}), 32},
+		{"SessionEvent", reflect.TypeOf(pipeline.SessionEvent{}), 33},
 		// 25 since AgentRole, which is TIMELINE data: agentop's CONTEXT gauge reads it on every
 		// row the timeline serves. It needs no assertion of its own in the projection test
 		// beyond the equality one there — a scalar survives the struct copy, unlike the two
