@@ -51,6 +51,8 @@ type Timeline struct {
 	Tools     []Tool    `json:"tools"`
 	Returns   []Return  `json:"returns"`
 	Hosts     []Host    `json:"hosts"`
+	// Jobs are background shell commands. Omitted when empty, so an older agentop never sees it.
+	Jobs []Job `json:"jobs,omitempty"`
 
 	// scanned counts the message bytes searched for returns, so a test can pin that only
 	// messages new to an agent are read.
@@ -75,10 +77,14 @@ type Turn struct {
 	Start  time.Time  `json:"start"`
 	End    *time.Time `json:"end,omitempty"`
 	Finish string     `json:"finish,omitempty"`
-	// Error is a call that failed: an upstream error, a refusal, or the client giving up.
-	Error bool   `json:"error,omitempty"`
-	Lost  bool   `json:"lost,omitempty"`
-	Seq   uint64 `json:"seq"`
+	// Error is a call that failed: an upstream error, the client giving up, or a finish in
+	// failedFinish.
+	Error bool `json:"error,omitempty"`
+	Lost  bool `json:"lost,omitempty"`
+	// Resent is a call that sent the agent's previous call's conversation again, unchanged: a
+	// retry, so the time before it went to retrying rather than to the user, who added nothing.
+	Resent bool   `json:"resent,omitempty"`
+	Seq    uint64 `json:"seq"`
 }
 
 // Tool is one tool call: from the response that requested it to the agent's first request
@@ -93,6 +99,17 @@ type Tool struct {
 	Error   bool       `json:"error,omitempty"`
 	Lost    bool       `json:"lost,omitempty"`
 	Seq     uint64     `json:"seq"`
+}
+
+// Job is a background shell command: from the tool result that acknowledged it ("Command
+// running in background with ID: …") to the <task-notification> naming that id. Its tool call
+// ends at the acknowledgement, so without this the agent looks idle while the job runs.
+type Job struct {
+	Agent string     `json:"agent"`
+	ID    string     `json:"id"`
+	Start time.Time  `json:"start"`
+	End   *time.Time `json:"end,omitempty"`
+	Seq   uint64     `json:"seq"`
 }
 
 // Return is a subagent's result reaching another agent's context.
@@ -118,7 +135,7 @@ type Host struct {
 }
 
 // Build computes the timeline of events, which must be one session's events in Seq order.
-// now ages out requests that never got an answer; see hostLostAfter.
+// now ages out requests that never got an answer; see LoseUnanswered.
 func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 	t := &Timeline{ID: id, Agents: []Agent{}, Turns: []Turn{}, Tools: []Tool{}, Returns: []Return{}, Hosts: []Host{}}
 	if len(events) == 0 {
@@ -134,8 +151,101 @@ func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 		}
 	}
 	buildAgents(t, events)
-	buildHosts(t, events, now)
+	buildHosts(t, events)
+	endStrandedTools(t)
+	t.LoseUnanswered(now)
 	return t
+}
+
+// endStrandedTools ends each tool still open, and each background job its agent made no turn
+// after, at the first failed request to a model host that follows. buildAgents has already lost
+// every open tool whose agent moved on, so what is left had no later turn: the failure is the
+// agent's own attempt to report back, and where it stopped. On real sessions a cut VPN left a
+// 5-minute Bash drawn running for 7.7 hours and a background job for 10, out to the session's
+// last unrelated event. Only an opaque tunnel that failed counts: a CONNECT that could not be
+// dialed, which names no agent, so it is matched by host, any host a turn of the session went
+// to. A failed call that was parsed is some agent's own call, a turn or a side call such as the
+// titler, and is no one else's attempt. A failure before the last successful turn of the tool's
+// agent, or of an agent below it, is a blip that agent came back from, most often a subagent's
+// retry while its parent's Agent tool is still open, so it ends nothing. Another branch's
+// success does not count: a stranded subagent's tool still ends when the main agent carries on.
+//
+// shortcut: a blip in any other agent, a parent included, ends an open tool whose branch has no
+// later success (a background subagent's long Bash while the main agent retries), and two
+// agents stranded by one outage both end at its first failure; upgrade if CONNECTs come to
+// carry the agent id.
+func endStrandedTools(t *Timeline) {
+	turnSeq := map[uint64]bool{}
+	lastTurn := map[string]time.Time{}
+	parent := map[string]string{}
+	for _, a := range t.Agents {
+		parent[a.ID] = a.Parent
+	}
+	// An agent's last success counts for every agent above it too, so an Agent tool waiting on
+	// a subagent that retried past a blip stays open. The bound stops a cycle in parent ids.
+	lastOK := map[string]time.Time{}
+	for _, x := range t.Turns {
+		turnSeq[x.Seq] = true
+		if x.Start.After(lastTurn[x.Agent]) {
+			lastTurn[x.Agent] = x.Start
+		}
+		if x.End == nil || x.Error || x.Lost {
+			continue
+		}
+		for a, n := x.Agent, 0; a != "" && n <= len(t.Agents); a, n = parent[a], n+1 {
+			if x.Start.After(lastOK[a]) {
+				lastOK[a] = x.Start
+			}
+		}
+	}
+	model := map[string]bool{}
+	for _, h := range t.Hosts {
+		if turnSeq[h.Seq] {
+			model[h.Host] = true
+		}
+	}
+	firstFailure := func(agent string, after time.Time) *time.Time {
+		if lastOK[agent].After(after) {
+			after = lastOK[agent]
+		}
+		for _, h := range t.Hosts {
+			if h.Error && h.Kind == KindTunnel && model[h.Host] && h.Start.After(after) {
+				at := h.Start
+				return &at
+			}
+		}
+		return nil
+	}
+	for i := range t.Tools {
+		if x := &t.Tools[i]; x.End == nil {
+			x.End = firstFailure(x.Agent, x.Start)
+		}
+	}
+	for i := range t.Jobs {
+		if j := &t.Jobs[i]; j.End == nil {
+			after := j.Start
+			if last := lastTurn[j.Agent]; last.After(after) {
+				after = last
+			}
+			j.End = firstFailure(j.Agent, after)
+		}
+	}
+}
+
+// LoseUnanswered ends, as lost, each request still unanswered hostLostAfter before the later
+// of now and the session's newest event. The one part of a timeline that depends on the clock,
+// so a cache can keep the rest until the session records something new and run this on each
+// read. It writes h.End, so a cache runs it on a copy whose Hosts it owns.
+func (t *Timeline) LoseUnanswered(now time.Time) {
+	ref := t.End
+	if now.After(ref) {
+		ref = now
+	}
+	for i := range t.Hosts {
+		if h := &t.Hosts[i]; h.End == nil && ref.Sub(h.Start) > hostLostAfter {
+			loseHost(h)
+		}
+	}
 }
 
 // Clip keeps the spans that overlap [from, to]. Zero bounds are open. Agents are kept whole,
@@ -151,6 +261,7 @@ func (t *Timeline) Clip(from, to time.Time) {
 	t.Tools = slices.DeleteFunc(t.Tools, func(s Tool) bool { return !in(s.Start, s.End) })
 	t.Returns = slices.DeleteFunc(t.Returns, func(s Return) bool { return !in(s.At, &s.At) })
 	t.Hosts = slices.DeleteFunc(t.Hosts, func(s Host) bool { return !in(s.Start, s.End) })
+	t.Jobs = slices.DeleteFunc(t.Jobs, func(s Job) bool { return !in(s.Start, s.End) })
 }
 
 // HostKey is the row a host lands in: lowercased, with the default HTTPS port dropped, so a

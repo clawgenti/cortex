@@ -346,7 +346,7 @@ operator-facing TUI over the session API, and the component the root README lead
 with. See [`cmd/agentop/README.md`](cmd/agentop/README.md) for flags and keybindings.
 
 **Plugins are all opt-in.** Each one lives in a `cmd/*/plugins_<name>.go` file
-gated by `//go:build include_plugin_<name>` (17 such files in
+gated by `//go:build include_plugin_<name>` (19 such files in
 `cmd/cortex/`; `plugins_cpex.go` also needs the `cpex` tag); `main.go` imports no plugin package directly, so a build
 with no `-tags` registers no plugins at all and rejects every config it is handed.
 Tag sets come from [`scripts/profile-tags`](scripts/profile-tags/), one profile per
