@@ -119,17 +119,22 @@ requests the inference parser attributed to a Claude Code agent (`agentRole`),
 and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
 
 - A **turn** is one model call, request to end of response. Claude Code's
-  progress-label calls and tool-less side calls (titler, classifier) are left
-  out. `error` marks a call that failed: an upstream error, a refusal, the
-  client giving up, a finish of `content_filter`, `failed` or `cancelled`, or a
-  response that ended with no finish reason, which is a stream cut mid-reply.
-  `resent` marks a call that sent its agent's previous call's conversation again
-  unchanged: a retry.
+  progress-label calls (the prompt in the last non-system message) and
+  tool-less side calls (titler, classifier) are left out. `error` marks a call
+  that failed: an upstream error, a refusal, the client giving up, a finish of
+  `content_filter`, `failed` or `cancelled`, or a response that ended with no
+  finish reason, which is a stream cut mid-reply. `resent` marks a call that
+  sent its agent's previous call's conversation again unchanged: a retry.
 - A **tool** runs from the response that requested it to the agent's first
   request carrying its result (`inference.toolResults[].toolUseId`). A tool
   Claude Code started while the response was still streaming can have its
-  result recorded first; its end is clamped to its start. `preview` is up to
-  80 characters of the command, path or description.
+  result recorded first; its end is clamped to its start. A tool whose agent
+  never sent its result ends at the first CONNECT to a model host that failed
+  after it and after the last successful turn of its agent or any agent below
+  it: the agent's attempt to report back, cut off by an outage. A failure the
+  agent recovered from is a blip and ends nothing. Without one the tool has no
+  `end` and is still running. `preview` is up to 80 characters of
+  the command, path or description.
 - An **agent** links to the `Agent` tool call that started it by the id the
   call's result names (`agentId: …`). A fork's result names none, so a fork
   takes its parent's earliest unmatched spawn. Requests recorded before the
@@ -142,8 +147,9 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
   `<task-notification>` naming that id. Its tool call ends at the
   acknowledgement, so the job is what shows it still running. A job with no
   `end` is one no notification named: still running, or never reported, as a
-  server left running when its agent exited is. Absent when the session
-  started none.
+  server left running when its agent exited is. A job whose agent was cut off
+  ends where its tools do: at the first failed CONNECT to a model host after the
+  agent's last call. Absent when the session started none.
 
 **Hosts** are every outbound request paired with its response, every opaque
 tunnel, and every denial. `kind` is `llm`, `mcp`, `http` or `tunnel`, and

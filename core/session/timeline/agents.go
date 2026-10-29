@@ -14,8 +14,9 @@ import (
 
 // progressPrompt is the instruction Claude Code appends when it asks a model for a subagent's
 // 3-5 word status line. Those calls carry the subagent's whole context and tool list, so only
-// their last message tells them apart from the subagent's real turns. They are a third of all
-// subagent calls on real sessions, and drawing them would bury the turns that matter.
+// their last user message tells them apart from the subagent's real turns; Claude Code can send
+// system messages after it (a <total_tokens> count). They are a third of all subagent calls on
+// real sessions, and drawing them would bury the turns that matter.
 const progressPrompt = "Describe your most recent action in 3-5 words"
 
 // The two ways a background subagent's result reaches the agent that started it. Both name the
@@ -367,8 +368,10 @@ func isSideCall(inf *pipeline.InferenceExtension) bool {
 	if len(inf.Tools) == 0 && inf.ToolCount == 0 {
 		return true
 	}
-	if n := len(inf.Messages); n > 0 {
-		return strings.Contains(inf.Messages[n-1].Content, progressPrompt)
+	for i := len(inf.Messages) - 1; i >= 0; i-- {
+		if m := inf.Messages[i]; m.Role != "system" {
+			return strings.Contains(m.Content, progressPrompt)
+		}
 	}
 	return false
 }
