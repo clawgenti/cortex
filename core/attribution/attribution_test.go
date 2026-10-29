@@ -372,3 +372,24 @@ func TestResolve_AWorkersClaimCarriesBothProcesses(t *testing.T) {
 		t.Errorf("Proc %q ClientProc %q, want %q and %q", got.Proc, got.ClientProc, launcher[0].Key(), worker[0].Key())
 	}
 }
+
+// A full seen table frees its oldest quarter in one prune, so the next new ids insert without
+// pruning again: one deletion per new id left the table full and every insert scanning all of it.
+func TestSeenTable_PruneFreesTheOldestQuarter(t *testing.T) {
+	a, clk := newTest()
+	for i := range maxSeen {
+		record(a, clk, fmt.Sprintf("s%d", i))
+	}
+	record(a, clk, "new")
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if want := maxSeen - maxSeen/4 + 1; len(a.seen) != want {
+		t.Errorf("seen holds %d after one prune, want %d", len(a.seen), want)
+	}
+	if _, ok := a.seen["s0"]; ok {
+		t.Error("the oldest id survived the prune")
+	}
+	if _, ok := a.seen[fmt.Sprintf("s%d", maxSeen-1)]; !ok {
+		t.Error("the newest id was pruned")
+	}
+}

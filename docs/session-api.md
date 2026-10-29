@@ -67,8 +67,9 @@ knowing by name:
   each with the `first` and `last` request that named it; a call belongs to the
   first session its process named at or after it — and **`linkedAll`** when every
   request in it falls before one of them. A response goes where its request went. agentop hides a
-  `linkedAll` bucket and shows its calls inside those sessions; a bucket with
-  calls after its process's last claim stays a row of its own.
+  `linkedAll` bucket that links to one session and shows its calls inside it; a
+  bucket linked to two sessions, or with calls after its process's last claim,
+  stays a row of its own.
 - **`?archived=true`** adds history where the proxy runs a session archive
   (`session.archive`, laptop only): every session the archive holds and memory
   does not, marked `resident: false`, plus a top-level `archive` object —

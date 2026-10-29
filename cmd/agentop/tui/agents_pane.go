@@ -560,7 +560,7 @@ const agentsLastSeenWidth = len("Oct 23 15:04")
 func (m *model) agentLastSeen(label string) time.Time {
 	var last time.Time
 	for _, s := range m.sessions {
-		if (label == otherAgents && inOtherAgents(s)) || (label != otherAgents && agentRowLists(s, label)) {
+		if agentRowLists(s, label) {
 			if s.UpdatedAt.After(last) {
 				last = s.UpdatedAt
 			}
@@ -570,9 +570,16 @@ func (m *model) agentLastSeen(label string) time.Time {
 }
 
 // agentRowLists reports whether s is one of the rows the agent label lists: its own sessions and
-// pending buckets, less the buckets folded into a session.
+// pending buckets — or, for Other, every row naming no recognised agent — less the buckets folded
+// into a session.
 func agentRowLists(s session.SessionSummary, label string) bool {
-	return sessionAgent(s) == label && foldedInto(s) == ""
+	if foldedInto(s) != "" {
+		return false
+	}
+	if label == otherAgents {
+		return inOtherAgents(s)
+	}
+	return sessionAgent(s) == label
 }
 
 // sessionsNameAgents reports whether any listed session names its agent.

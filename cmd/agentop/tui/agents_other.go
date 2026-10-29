@@ -125,7 +125,7 @@ func foldOtherAgents(snap *usage.Snapshot) *usage.Snapshot {
 func (m *model) otherSessionsCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if inOtherAgents(s) {
+		if agentRowLists(s, otherAgents) {
 			n++
 		}
 	}

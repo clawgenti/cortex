@@ -287,3 +287,28 @@ func TestRebuildAgentsTable_LastSeenCoversTheRowsSessionsCounts(t *testing.T) {
 		t.Errorf("claude-code row = %v, want LAST SEEN from its own sessions, not the folded bucket", r)
 	}
 }
+
+// Other counts and dates the rows its list shows: a bucket folded into a session is hidden there,
+// so it adds to neither SESSIONS nor LAST SEEN. Reached when the proxy knows an agent this agentop
+// does not, so both the session and its bucket land under Other.
+func TestRebuildAgentsTable_OtherLeavesOutFoldedBuckets(t *testing.T) {
+	m := morningAfterFixture()
+	now := time.Now()
+	m.sessions[4].UpdatedAt = now.Add(-5 * time.Hour)
+	m.sessions = append(m.sessions,
+		session.SessionSummary{ID: "new-1", UpdatedAt: now.Add(-6 * time.Hour), Agent: "newagent"},
+		session.SessionSummary{ID: "pending:newagent@7.7", UpdatedAt: now.Add(-1 * time.Hour),
+			LinkedTo: []session.PendingLink{{Session: "new-1"}}, LinkedAll: true},
+	)
+	m.rebuildAgentsTable()
+	for _, r := range m.agentsTbl.Rows() {
+		if r[0] != otherAgents {
+			continue
+		}
+		if r[1] != "2" || r[2] != "5h ago" {
+			t.Errorf("Other row = %v, want SESSIONS 2 and LAST SEEN 5h ago: the folded bucket is not listed", r)
+		}
+		return
+	}
+	t.Fatalf("no Other row in %v", m.agentsTbl.Rows())
+}

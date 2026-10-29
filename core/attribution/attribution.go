@@ -11,6 +11,7 @@ package attribution
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -280,15 +281,16 @@ func (a *Attributor) pruneSeenLocked(now time.Time) {
 			delete(a.seen, id)
 		}
 	}
-	for len(a.seen) >= maxSeen {
-		var oldest string
-		var at time.Time
-		for id, t := range a.seen {
-			if oldest == "" || t.Before(at) {
-				oldest, at = id, t
-			}
-		}
-		delete(a.seen, oldest)
+	if len(a.seen) < maxSeen {
+		return
+	}
+	ids := make([]string, 0, len(a.seen))
+	for id := range a.seen {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return a.seen[ids[i]].Before(a.seen[ids[j]]) })
+	for _, id := range ids[:len(ids)/4] {
+		delete(a.seen, id)
 	}
 }
 

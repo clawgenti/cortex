@@ -793,7 +793,8 @@ agentop is for, and the other four are surfaces you visit and leave.
   session. When the process went on to name one, the bucket is folded into it: its
   row is hidden, and its calls appear in that session's timeline at the time they
   were made. A bucket whose process never named a session — or made calls after
-  its last one — is listed after the real sessions, under its agent. Its row shows
+  its last one, or whose calls belong to two sessions — is listed after the real
+  sessions, under its agent. Its row shows
   the agent under `SESSION` rather than the truncated id, and, when nothing else
   names it, `calls outside any session · pid <n>` under `TITLE`. The pid is the
   process the calls came from. Headers keep the full id, which is still what the

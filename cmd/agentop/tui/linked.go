@@ -11,11 +11,11 @@ import (
 )
 
 // A process's calls before it named a session are recorded in its pending bucket and linked
-// to the session at read time (session.Link). agentop folds them into that session: a fully
-// linked bucket's row is hidden from the list, and opening the session merges the calls into
-// its timeline at the time they happened, each event still saying it was its process's
-// (SessionID is the bucket's). A partly linked bucket stays a row of its own and also feeds
-// the sessions it links to.
+// to the session at read time (session.Link). agentop folds them into that session: a bucket
+// fully linked to one session has its row hidden from the list, and opening the session merges
+// the calls into its timeline at the time they happened, each event still saying it was its
+// process's (SessionID is the bucket's). Any other linked bucket stays a row of its own and also
+// feeds the sessions it links to.
 
 // linkedBucket is one bucket that feeds a session, with that bucket's links (OwnerAt decides
 // which of its calls are the session's).
