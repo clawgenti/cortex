@@ -1312,7 +1312,7 @@ agentop is for, and the other four are surfaces you visit and leave.
   (`+24m`) once squeezed, so the work keeps the width. Once it is not, an open
   call ends at the session's last event, the last moment anything was seen, and
   the window ends at its last activity. "all" squeezes each stretch over 30 minutes with
-  no model call or tool into a `┆`, coloured by the state that held most of it,
+  no model call or tool, an `AskUserQuestion` aside, into a `┆`, coloured by the state that held most of it,
   and the axis says how long it was; a host's `┆` is red when a request failed in
   it. `←`/`→` pick a moment, skipping those stretches, and the line under the
   chart lists the visible rows' tools that started then, and after them those

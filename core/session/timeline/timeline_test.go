@@ -814,6 +814,25 @@ func TestStrandedSubagentToolEndsAfterTheMainAgentRecovers(t *testing.T) {
 	}
 }
 
+// One outage strands two subagents mid-tool. Both results arrive once the network is back, and
+// the first one through is not the other's recovery: each tool ends at the failed dial.
+func TestOneOutageEndsEveryStrandedSiblingsTool(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "sp1", Name: "Agent"}, pipeline.InferenceToolCall{ID: "sp2", Name: "Agent"})
+	r.turn("a1", 2, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t1", Name: "Bash"})
+	r.turn("a2", 2, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t2", Name: "Bash"})
+	r.failedConnect("llm.example", 300)
+	r.turn("a2", 28800, 1, h, []pipeline.InferenceToolResult{result("t2", "ok")}, "end_turn")
+	r.turn("a1", 28801, 1, h, []pipeline.InferenceToolResult{result("t1", "ok")}, "end_turn")
+	tl := Build("s", r.events, at(28900))
+	for _, id := range []string{"t1", "t2"} {
+		if x := findTool(t, tl, id); x.End == nil || !x.End.Equal(at(300)) {
+			t.Errorf("%s = %+v, want it ended at the failed dial (300s)", id, x)
+		}
+	}
+}
+
 // A turn whose stream died is lost, not a success, so a subagent's lost turn does not move the
 // failure that ends the Agent tool waiting on it.
 func TestLostTurnIsNotASuccess(t *testing.T) {

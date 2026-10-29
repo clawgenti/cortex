@@ -172,8 +172,8 @@ func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 // open. Another branch's success does not count: a stranded subagent's tool still ends when the
 // main agent carries on. A background job its agent made no turn after ends the same way.
 //
-// shortcut: a blip in any other agent, a parent included, ends an open tool whose branch has no
-// later success (a background subagent's long Bash while the main agent retries), and two
+// shortcut: a blip in any other agent, a parent included, ends a tool whose branch has no
+// success before its result (a subagent's long Bash while the main agent retries), and two
 // agents stranded by one outage both end at its first failure; upgrade if CONNECTs come to
 // carry the agent id.
 func endStrandedTools(t *Timeline) {
