@@ -291,6 +291,7 @@ func (m *model) rebuildSessionsTable() {
 		full = append(full, b.searchRow())
 	}
 	q := m.searchQuery(paneSessions)
+	folded := m.foldedFigures()
 	for _, s := range m.sessions {
 		if !m.sessionListed(s, scope) || foldedInto(s) != "" {
 			continue
@@ -332,8 +333,8 @@ func (m *model) rebuildSessionsTable() {
 		// those at all.
 		b.cell(padLeft(fmt.Sprintf("%d", s.EventCount), eventsW))
 		// The buckets folded into this session are its calls; their figures are its too.
-		if fc, fa, ft := m.foldedFigures(s.ID); fc != 0 || fa != 0 || ft != 0 {
-			s.CostMicros, s.AvoidedMicros, s.TotalTokens = s.CostMicros+fc, s.AvoidedMicros+fa, s.TotalTokens+ft
+		if f, ok := folded[s.ID]; ok {
+			s.CostMicros, s.AvoidedMicros, s.TotalTokens = s.CostMicros+f.cost, s.AvoidedMicros+f.avoided, s.TotalTokens+f.tokens
 		}
 		b.cell(padLeft(sessionTokens(s.TotalTokens, m.events[s.ID]), tokensW))
 		cost := func() string { return sessionMoneyCellIn(s.CostMicros, s.Saturated, noLimit, s.Currencies) }

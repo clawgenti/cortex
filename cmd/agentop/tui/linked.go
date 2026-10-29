@@ -46,16 +46,28 @@ func foldedInto(s session.SessionSummary) string {
 	return s.LinkedTo[0].Session
 }
 
-// foldedFigures is what the buckets folded into id add to its row: cost, savings and tokens.
-func (m *model) foldedFigures(id string) (cost, avoided int64, tokens int) {
+// foldedFigure is what the buckets folded into one session add to its row.
+type foldedFigure struct {
+	cost, avoided int64
+	tokens        int
+}
+
+// foldedFigures is foldedFigure for every session some bucket folds into, keyed by session, in
+// one pass: the sessions table reads it per row, and a per-row walk of the list was rows², 46ms
+// a rebuild at 2,000 rows.
+func (m *model) foldedFigures() map[string]foldedFigure {
+	var out map[string]foldedFigure
 	for _, s := range m.sessions {
-		if foldedInto(s) == id {
-			cost += s.CostMicros
-			avoided += s.AvoidedMicros
-			tokens += s.TotalTokens
+		if id := foldedInto(s); id != "" {
+			if out == nil {
+				out = map[string]foldedFigure{}
+			}
+			f := out[id]
+			f.cost, f.avoided, f.tokens = f.cost+s.CostMicros, f.avoided+s.AvoidedMicros, f.tokens+s.TotalTokens
+			out[id] = f
 		}
 	}
-	return cost, avoided, tokens
+	return out
 }
 
 // withFolded is ids plus every bucket folded into one of them, for an erase.
