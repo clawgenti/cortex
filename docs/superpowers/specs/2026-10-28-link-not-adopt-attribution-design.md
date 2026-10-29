@@ -73,10 +73,11 @@ func (a *Attributor) Resolve(conn ConnKey, h http.Header, m *Memo) Attribution
 
 **2. Wire contract (`core/attribution/wire.go`)**
 
-- `Encode(Attribution) http.Header`, `Decode(http.Header) (Attribution, bool)`.
 - Headers: `x-cortex-agent`, `x-cortex-proc`, `x-cortex-session`, `x-cortex-source`.
 - **Strip, then inject.** Every listener removes these from client requests. `Decode`
   runs only for a hop configured as trusted. None is configured in this PR.
+- This PR ships the header names and `Strip` only. `Encode` and `Decode` land with the
+  relay that is their first caller.
 - Purpose: a local relay can later run `Resolve` at accept time and stamp these, with the
   recorder and agentop unchanged (#1437's relay, #1491's strip-then-inject contract).
 
