@@ -148,13 +148,32 @@ func TestOlderPage_MergesTheLinkedCallsItCovers(t *testing.T) {
 	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
 	page := []pipeline.SessionEvent{{SessionID: "s1", RequestID: "p1", At: at(10)}, {SessionID: "s1", RequestID: "p2", At: at(20)}}
 	linked := []pipeline.SessionEvent{{SessionID: "b", RequestID: "init", At: at(5)}, {SessionID: "b", RequestID: "later", At: at(500)}}
-	got := ids(pageLinked(page, linked, true))
+	got := ids(pageLinked(page, linked, true, at(30)))
 	if !slices.Equal(got, []string{"init", "p1", "p2"}) {
 		t.Errorf("oldest page = %v, want the handshake before it merged", got)
 	}
-	got = ids(pageLinked(page, linked, false))
+	got = ids(pageLinked(page, linked, false, at(30)))
 	if !slices.Equal(got, []string{"p1", "p2"}) {
-		t.Errorf("a middle page = %v, want only calls inside its span (none)", got)
+		t.Errorf("a middle page = %v, want none: the later call is at or after the held window", got)
+	}
+}
+
+// A linked call between an older page's last event and the oldest event already held goes on
+// that page: the held window takes calls from its own oldest event on, so nothing else shows it.
+func TestOlderPage_TakesTheLinkedCallsUpToTheHeldWindow(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	page := []pipeline.SessionEvent{{SessionID: "s1", RequestID: "p1", At: at(90)}, {SessionID: "s1", RequestID: "p2", At: at(100)}}
+	linked := []pipeline.SessionEvent{
+		{SessionID: "b", RequestID: "gap", At: at(150)},
+		{SessionID: "b", RequestID: "held", At: at(200)},
+	}
+	if got := ids(pageLinked(page, linked, false, at(200))); !slices.Equal(got, []string{"p1", "p2", "gap"}) {
+		t.Errorf("older page = %v, want the call between it and the held window", got)
+	}
+	tail := &pipeline.SessionView{Events: []pipeline.SessionEvent{{SessionID: "s1", At: at(200)}}, TotalEvents: 3}
+	if got := ids(inWindow(slices.Clone(linked), tail)); !slices.Equal(got, []string{"held"}) {
+		t.Errorf("tail window = %v, want only the call at its first event", got)
 	}
 }
 

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/rossoctl/cortex/cmd/agentop/apiclient"
 	"github.com/rossoctl/cortex/core/pipeline"
@@ -98,16 +99,17 @@ func inWindow(linked []pipeline.SessionEvent, view *pipeline.SessionView) []pipe
 	return slices.DeleteFunc(linked, func(e pipeline.SessionEvent) bool { return e.At.Before(first) })
 }
 
-// pageLinked is an older page with the linked calls inside its span merged in. oldest says the
-// page is the session's first, which also takes every linked call before it: a fresh launch's
-// handshake precedes the session's first request.
-func pageLinked(page, linked []pipeline.SessionEvent, oldest bool) []pipeline.SessionEvent {
+// pageLinked is an older page with the linked calls from its first event up to heldFrom, the
+// oldest event the session already holds of its own, merged in. oldest says the page is the
+// session's first, which also takes every linked call before it: a fresh launch's handshake
+// precedes the session's first request.
+func pageLinked(page, linked []pipeline.SessionEvent, oldest bool, heldFrom time.Time) []pipeline.SessionEvent {
 	if len(page) == 0 || len(linked) == 0 {
 		return page
 	}
-	from, to := page[0].At, page[len(page)-1].At
+	from := page[0].At
 	in := slices.DeleteFunc(slices.Clone(linked), func(e pipeline.SessionEvent) bool {
-		return e.At.After(to) || (!oldest && e.At.Before(from))
+		return !e.At.Before(heldFrom) || (!oldest && e.At.Before(from))
 	})
 	return mergeLinked(page, in)
 }
