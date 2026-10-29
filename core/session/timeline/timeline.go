@@ -170,7 +170,8 @@ func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 // retry while its parent's Agent tool is still open, so it ends nothing. Another branch's
 // success does not count: a stranded subagent's tool still ends when the main agent carries on.
 //
-// shortcut: a blip in one agent ends an open tool of a sibling with no later success, and two
+// shortcut: a blip in any other agent, a parent included, ends an open tool whose branch has no
+// later success (a background subagent's long Bash while the main agent retries), and two
 // agents stranded by one outage both end at its first failure; upgrade if CONNECTs come to
 // carry the agent id.
 func endStrandedTools(t *Timeline) {
