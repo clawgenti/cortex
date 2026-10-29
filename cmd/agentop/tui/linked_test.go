@@ -264,7 +264,7 @@ func TestApplyOlderPage_CountsOnlyTheSessionsOwnEvents(t *testing.T) {
 	page := pagedEvents(6, 2)
 	linked := page[0]
 	linked.SessionID, linked.Seq = "pending:claude-code@1.1", 1
-	m.applyOlderPage(olderPageLoadedMsg{id: "sess-1", gen: 3, events: append([]pipeline.SessionEvent{linked}, page...), serverOldest: 1, own: len(page)})
+	m.applyOlderPage(olderPageLoadedMsg{id: "sess-1", gen: 3, events: append([]pipeline.SessionEvent{linked}, page...), serverOldest: 1})
 	if n := m.olderNotFetched["sess-1"]; n != 3 {
 		t.Errorf("olderNotFetched = %d, want 3: 5 less the page's 2 own events", n)
 	}

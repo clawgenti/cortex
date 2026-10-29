@@ -293,8 +293,6 @@ type olderPageLoadedMsg struct {
 	gen          uint64
 	events       []pipeline.SessionEvent
 	serverOldest uint64
-	// own is how many of events are the session's own, the rest being linked calls.
-	own int
 }
 
 // olderPageFailedMsg reports a failed [o] fetch.

@@ -127,10 +127,6 @@ func (m *model) olderPageCmd(id string, before uint64, heldFrom time.Time, gen u
 	buckets := m.linkedInto(id)
 	return func() tea.Msg {
 		view, err := m.client.GetSessionPage(m.ctx, id, before, apiclient.SnapshotEventLimit)
-		own := 0
-		if err == nil {
-			own = len(view.Events)
-		}
 		if err == nil && len(buckets) > 0 {
 			// The calls linked into the session are merged here, so a long session's start-up
 			// calls are not only reachable through a row the list hides.
@@ -145,7 +141,7 @@ func (m *model) olderPageCmd(id string, before uint64, heldFrom time.Time, gen u
 			return olderPageFailedMsg{id: id, gen: gen, err: err}
 		}
 		return olderPageLoadedMsg{
-			id: id, gen: gen, events: view.Events, serverOldest: view.OldestSeq, own: own,
+			id: id, gen: gen, events: view.Events, serverOldest: view.OldestSeq,
 		}
 	}
 }
@@ -274,7 +270,13 @@ func (m *model) applyOlderPage(msg olderPageLoadedMsg) {
 	if m.olderNotFetched == nil {
 		m.olderNotFetched = map[string]int{}
 	}
-	if n := m.olderNotFetched[msg.id] - msg.own; n > 0 {
+	own := 0
+	for i := range msg.events {
+		if eventSession(msg.id, &msg.events[i]) == msg.id {
+			own++
+		}
+	}
+	if n := m.olderNotFetched[msg.id] - own; n > 0 {
 		m.olderNotFetched[msg.id] = n
 	} else {
 		m.olderNotFetched[msg.id] = 0
