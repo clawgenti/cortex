@@ -778,3 +778,38 @@ func TestRecoveredOrAnsweredFailureEndsNoTool(t *testing.T) {
 		t.Errorf("t1 = %+v, want it still running", x)
 	}
 }
+
+// The headline case: a subagent cut off mid-tool, and the main agent carrying on once the
+// network is back. The main agent's success is another branch's, so the subagent's tool still
+// ends at its failed report-back.
+func TestStrandedSubagentToolEndsAfterTheMainAgentRecovers(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "sp", Name: "Agent"})
+	r.turn("a1", 2, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t1", Name: "Bash"})
+	r.failedConnect("llm.example", 300)
+	r.turn("", 600, 1, append(h, user("agent failed")), []pipeline.InferenceToolResult{result("sp", "error")}, "end_turn")
+	tl := Build("s", r.events, at(36000))
+	if x := findTool(t, tl, "t1"); x.End == nil || !x.End.Equal(at(300)) {
+		t.Errorf("t1 = %+v, want it ended at a1's failed report-back (300s)", x)
+	}
+}
+
+// A turn whose stream died is lost, not a success, so a subagent's lost turn does not move the
+// failure that ends the Agent tool waiting on it.
+func TestLostTurnIsNotASuccess(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "sp", Name: "Agent"})
+	r.turn("a1", 2, 1, h, nil, "end_turn")
+	r.failedConnect("llm.example", 300)
+	for _, sec := range []float64{310, 320} { // unanswered; the second makes the first lost
+		r.add(pipeline.SessionEvent{At: at(sec), Phase: pipeline.SessionRequest, RequestID: r.id(), Host: "llm.example", Subagent: "a1",
+			Inference: &pipeline.InferenceExtension{AgentRole: pipeline.AgentRoleSubagent, Tools: tools, Messages: append(h, user("more"))}})
+	}
+	r.failedConnect("llm.example", 330)
+	tl := Build("s", r.events, at(36000))
+	if x := findTool(t, tl, "sp"); x.End == nil || !x.End.Equal(at(300)) {
+		t.Errorf("sp = %+v, want it ended at the first failure (300s)", x)
+	}
+}

@@ -130,10 +130,10 @@ and from the agent ids Claude Code sends (`subagent`, `parentSubagent`):
   Claude Code started while the response was still streaming can have its
   result recorded first; its end is clamped to its start. A tool whose agent
   never sent its result ends at the first CONNECT to a model host that failed
-  after it and after the session's last successful turn: the agent's attempt
-  to report back, cut off by an outage. A failure some agent recovered from is
-  a blip and ends nothing. Without one the tool has no `end` and is still
-  running. `preview` is up to 80 characters of
+  after it and after the last successful turn of its agent or any agent below
+  it: the agent's attempt to report back, cut off by an outage. A failure the
+  agent recovered from is a blip and ends nothing. Without one the tool has no
+  `end` and is still running. `preview` is up to 80 characters of
   the command, path or description.
 - An **agent** links to the `Agent` tool call that started it by the id the
   call's result names (`agentId: …`). A fork's result names none, so a fork
