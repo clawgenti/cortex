@@ -12,6 +12,7 @@
 package timeline
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -157,18 +158,19 @@ func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 	return t
 }
 
-// endStrandedTools ends each tool still open, and each background job its agent made no turn
-// after, at the first failed request to a model host that follows. buildAgents has already lost
-// every open tool whose agent moved on, so what is left had no later turn: the failure is the
-// agent's own attempt to report back, and where it stopped. On real sessions a cut VPN left a
-// 5-minute Bash drawn running for 7.7 hours and a background job for 10, out to the session's
-// last unrelated event. Only an opaque tunnel that failed counts: a CONNECT that could not be
-// dialed, which names no agent, so it is matched by host, any host a turn of the session went
-// to. A failed call that was parsed is some agent's own call, a turn or a side call such as the
-// titler, and is no one else's attempt. A failure before the last successful turn of the tool's
-// agent, or of an agent below it, is a blip that agent came back from, most often a subagent's
-// retry while its parent's Agent tool is still open, so it ends nothing. Another branch's
-// success does not count: a stranded subagent's tool still ends when the main agent carries on.
+// endStrandedTools ends a tool at the first CONNECT to a model host that could not be dialed
+// after it started, when that comes before the tool's result or the tool has none, and no turn
+// of the tool's agent or an agent below it succeeded between the two. The agent finished the
+// tool and tried to send its result, and the network was gone: a lid closed or a VPN dropped.
+// The result then reaches the proxy only once the network is back, hours later, or never. On
+// real sessions a 9-minute Bash drew as 8 hours, and one with no result ran to the session's
+// last unrelated event. Checked against Claude Code's transcripts, the first such failure fell
+// within 0.1s of the tool's real end every time; other failures (an upstream 502, a client
+// hanging up mid-handshake) did not, so only a failed dial counts. It names no agent, so it is
+// matched by host: any host a turn of the session went to. A success in between is a blip that
+// agent came back from, most often a subagent retrying while its parent's Agent tool is still
+// open. Another branch's success does not count: a stranded subagent's tool still ends when the
+// main agent carries on. A background job its agent made no turn after ends the same way.
 //
 // shortcut: a blip in any other agent, a parent included, ends an open tool whose branch has no
 // later success (a background subagent's long Bash while the main agent retries), and two
@@ -181,9 +183,9 @@ func endStrandedTools(t *Timeline) {
 	for _, a := range t.Agents {
 		parent[a.ID] = a.Parent
 	}
-	// An agent's last success counts for every agent above it too, so an Agent tool waiting on
-	// a subagent that retried past a blip stays open. The bound stops a cycle in parent ids.
-	lastOK := map[string]time.Time{}
+	// An agent's successes count for every agent above it too, so an Agent tool waiting on a
+	// subagent that retried past a blip stays open. The bound stops a cycle in parent ids.
+	ok := map[string][]time.Time{}
 	for _, x := range t.Turns {
 		turnSeq[x.Seq] = true
 		if x.Start.After(lastTurn[x.Agent]) {
@@ -193,9 +195,7 @@ func endStrandedTools(t *Timeline) {
 			continue
 		}
 		for a, n := x.Agent, 0; a != "" && n <= len(t.Agents); a, n = parent[a], n+1 {
-			if x.Start.After(lastOK[a]) {
-				lastOK[a] = x.Start
-			}
+			ok[a] = append(ok[a], x.Start)
 		}
 	}
 	model := map[string]bool{}
@@ -204,12 +204,20 @@ func endStrandedTools(t *Timeline) {
 			model[h.Host] = true
 		}
 	}
-	firstFailure := func(agent string, after time.Time) *time.Time {
-		if lastOK[agent].After(after) {
-			after = lastOK[agent]
+	// recovered reports a success of agent's after f and before until (nil: ever).
+	recovered := func(agent string, f time.Time, until *time.Time) bool {
+		for _, s := range ok[agent] {
+			if s.After(f) && (until == nil || s.Before(*until)) {
+				return true
+			}
 		}
+		return false
+	}
+	// stranded is the first failed dial to a model host in (from, until) agent did not recover from.
+	stranded := func(agent string, from time.Time, until *time.Time) *time.Time {
 		for _, h := range t.Hosts {
-			if h.Error && h.Kind == KindTunnel && model[h.Host] && h.Start.After(after) {
+			if h.Kind == KindTunnel && h.Status == http.StatusBadGateway && model[h.Host] && h.Start.After(from) &&
+				(until == nil || h.Start.Before(*until)) && !recovered(agent, h.Start, until) {
 				at := h.Start
 				return &at
 			}
@@ -217,8 +225,10 @@ func endStrandedTools(t *Timeline) {
 		return nil
 	}
 	for i := range t.Tools {
-		if x := &t.Tools[i]; x.End == nil {
-			x.End = firstFailure(x.Agent, x.Start)
+		if x := &t.Tools[i]; !x.Lost {
+			if at := stranded(x.Agent, x.Start, x.End); at != nil {
+				x.End = at
+			}
 		}
 	}
 	for i := range t.Jobs {
@@ -227,7 +237,7 @@ func endStrandedTools(t *Timeline) {
 			if last := lastTurn[j.Agent]; last.After(after) {
 				after = last
 			}
-			j.End = firstFailure(j.Agent, after)
+			j.End = stranded(j.Agent, after, nil)
 		}
 	}
 }

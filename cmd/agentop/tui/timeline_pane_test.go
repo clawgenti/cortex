@@ -1250,3 +1250,18 @@ func TestTimelineAll_LongLiveWaitIsCapped(t *testing.T) {
 		}
 	}
 }
+
+// A question the agent put to the user is the user's time: grey, not amber, and kept out of the
+// row's tool total.
+func TestTimelineWaits_AskUserQuestionIsWaitingOnYou(t *testing.T) {
+	tl := sampleTimeline() // main finishes a reply at 1200s; the user answers at 1500s
+	tl.Tools = append(tl.Tools, timeline.Tool{Agent: timeline.MainAgent, ID: "q1", Name: "AskUserQuestion", Start: tlAt(1200), End: tlPtr(1500), Seq: 35})
+	lay := buildTimelineLayout(tl, tlAt(0), tlAt(1800), 180, tlAt(3600))
+	if c := lay.agents[0].cells[cellOf(t, lay, 1300)]; !near(c.user, 1) || c.tool != 0 {
+		t.Errorf("while the question waited: %+v, want waiting on the user", c)
+	}
+	without := buildTimelineLayout(sampleTimeline(), tlAt(0), tlAt(1800), 180, tlAt(3600))
+	if got, want := lay.agents[0].toolTime, without.agents[0].toolTime; got != want {
+		t.Errorf("tool time = %s, want %s: the question is not tool time", got, want)
+	}
+}
