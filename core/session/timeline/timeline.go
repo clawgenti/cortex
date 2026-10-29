@@ -213,13 +213,23 @@ func endStrandedTools(t *Timeline) {
 		}
 		return false
 	}
+	// Collected once: every tool is checked against them, and a session has thousands of hosts
+	// but rarely more than a handful of failed dials.
+	var dials []time.Time
+	for _, h := range t.Hosts {
+		if h.Kind == KindTunnel && h.Status == http.StatusBadGateway && model[h.Host] {
+			dials = append(dials, h.Start)
+		}
+	}
+	slices.SortFunc(dials, time.Time.Compare)
 	// stranded is the first failed dial to a model host in (from, until) agent did not recover from.
 	stranded := func(agent string, from time.Time, until *time.Time) *time.Time {
-		for _, h := range t.Hosts {
-			if h.Kind == KindTunnel && h.Status == http.StatusBadGateway && model[h.Host] && h.Start.After(from) &&
-				(until == nil || h.Start.Before(*until)) && !recovered(agent, h.Start, until) {
-				at := h.Start
-				return &at
+		for _, f := range dials {
+			if until != nil && !f.Before(*until) {
+				break
+			}
+			if f.After(from) && !recovered(agent, f, until) {
+				return &f
 			}
 		}
 		return nil
