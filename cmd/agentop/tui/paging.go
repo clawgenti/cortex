@@ -75,8 +75,8 @@ func (m *model) loadOlderPage() tea.Cmd {
 	if id == "" || m.client == nil {
 		return nil
 	}
-	held := m.events[id]
-	if len(held) == 0 {
+	own := ownOldest(m.events[id], id)
+	if own == nil {
 		return nil
 	}
 
@@ -88,7 +88,7 @@ func (m *model) loadOlderPage() tea.Cmd {
 	// EVERY reason to refuse is checked before any state is created. Creating it first and
 	// validating after left a session paged-back — live appends suppressed, timeline
 	// silently frozen — after a single [o] that could never have fetched anything.
-	oldest := held[0].Seq
+	oldest := own.Seq
 	if oldest == 0 {
 		// A proxy that predates Seq. Paging cannot work against it, and saying so beats
 		// sending before=0 and silently refetching the tail forever.
@@ -104,7 +104,7 @@ func (m *model) loadOlderPage() tea.Cmd {
 		// The events already held are page one, whatever mixture of snapshot and streamed
 		// events they are. Tentative until a page arrives: fetched stays 0, and
 		// applyOlderPage tears this down if nothing comes back.
-		st = &pagingState{pageSizes: []int{len(held)}}
+		st = &pagingState{pageSizes: []int{len(m.events[id])}}
 		if m.paging == nil {
 			m.paging = map[string]*pagingState{}
 		}
@@ -216,7 +216,7 @@ func (m *model) applyOlderPage(msg olderPageLoadedMsg) {
 	//
 	// Refused here rather than by teaching ViewPage to reject high cursors, because the store
 	// cannot tell a re-created session from a trimmed one, and this check does not need to.
-	if len(held) > 0 && msg.events[len(msg.events)-1].At.After(held[0].At) {
+	if own := ownOldest(held, msg.id); own != nil && msg.events[len(msg.events)-1].At.After(own.At) {
 		m.setFlash("session restarted — [t] for the tail")
 		m.abandonIfTentative(msg.id, st)
 		return

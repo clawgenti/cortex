@@ -1038,9 +1038,9 @@ type SessionSummary struct {
 	// LastRequestAt is the time of the newest request this session holds, zero when it holds
 	// none. On a pending bucket it is what Link compares with a process's claims.
 	LastRequestAt time.Time `json:"lastRequestAt,omitzero"`
-	// LinkedTo, on a pending bucket, is the sessions its process went on to name, each with the
-	// time its calls up to belong to it; LinkedAll says every request in the bucket falls before
-	// one of them. Set by Link when the list is read, never stored. agentop folds a fully linked
+	// LinkedTo, on a pending bucket, is the sessions its process named that OwnerAt gives a
+	// call of the bucket, each with the span of its naming requests (Link says how close that
+	// is); LinkedAll says every request in the bucket falls before one of them. Set by Link when the list is read, never stored. agentop folds a fully linked
 	// bucket into those sessions and lists a partly linked one as its own row.
 	LinkedTo  []PendingLink `json:"linkedTo,omitempty"`
 	LinkedAll bool          `json:"linkedAll,omitempty"`

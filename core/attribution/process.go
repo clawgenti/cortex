@@ -2,7 +2,6 @@ package attribution
 
 import (
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/rossoctl/cortex/core/session"
@@ -302,15 +301,4 @@ func (a *Attributor) newestClaimLocked(st *procState, now time.Time) string {
 		}
 	}
 	return best
-}
-
-// pendingOwner is the agent a pending bucket belongs to — claude-code for both
-// pending:claude-code and pending:claude-code@4242.1 — and false for any other id.
-func pendingOwner(id string) (string, bool) {
-	rest, ok := strings.CutPrefix(id, session.PendingPrefix)
-	if !ok {
-		return "", false
-	}
-	agent, _, _ := strings.Cut(rest, "@")
-	return agent, true
 }

@@ -15,13 +15,9 @@ import (
 // so as a bare row it was "pending:openc…": a truncated id that named nothing and read as
 // unfinished. The id stays what every request and header keys on; only its rendering changes.
 func pendingBucket(id string) (agent, pid string, ok bool) {
-	rest, ok := strings.CutPrefix(id, session.PendingPrefix)
-	if !ok {
-		return "", "", false
-	}
-	agent, proc, _ := strings.Cut(rest, "@")
+	agent, proc, ok := session.ParsePending(id)
 	pid, _, _ = strings.Cut(proc, ".")
-	return agent, pid, agent != ""
+	return agent, pid, ok
 }
 
 // pendingTitle is what a pending bucket's title says when nothing else names it.

@@ -132,3 +132,14 @@ func eventSession(sessionID string, e *pipeline.SessionEvent) string {
 	}
 	return sessionID
 }
+
+// ownOldest is the oldest of held that sessionID recorded itself, nil when none is: paging
+// counts from it, because a linked bucket's events are numbered in their own bucket.
+func ownOldest(held []pipeline.SessionEvent, sessionID string) *pipeline.SessionEvent {
+	for i := range held {
+		if eventSession(sessionID, &held[i]) == sessionID {
+			return &held[i]
+		}
+	}
+	return nil
+}

@@ -98,6 +98,20 @@ func TestLink(t *testing.T) {
 			call(s, clk, "B", p, "b-1", true)
 			call(s, clk, "B", p, "b-2", true)
 			call(s, clk, "A", p, "a-2", true)
+		}, []string{"A"}, true},
+
+		{"/clear after the handshake: the later session owns none of the bucket's calls", func(s *Store, clk *procTestClock) {
+			call(s, clk, bucket, p, "init", false)
+			call(s, clk, "s1", p, "turn-1", true)
+			call(s, clk, "s2", p, "turn-2", true)
+		}, []string{"s1"}, true},
+
+		{"shortcut: a session named between two bucket calls links though it owns neither", func(s *Store, clk *procTestClock) {
+			call(s, clk, bucket, p, "startup", false)
+			call(s, clk, "A", p, "a-1", true)
+			call(s, clk, "B", p, "b-1", true)
+			call(s, clk, bucket, p, "late", false)
+			call(s, clk, "A", p, "a-2", true)
 		}, []string{"A", "B"}, true},
 
 		{"a claim before the bucket existed does not take it", func(s *Store, clk *procTestClock) {

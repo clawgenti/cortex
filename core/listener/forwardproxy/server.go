@@ -1498,9 +1498,6 @@ func (s *Server) resolvePluginSessionID(clientHeaders http.Header, chain []attri
 type pluginSession struct {
 	source pipeline.SessionSource
 	header string
-	// proc is the attributed process; chainSession its ancestor's session; record the
-	// bucket a row goes in when plugins hear no session (the default bucket).
-	proc, chainSession, record string
 }
 
 // hydrateSession resolves the plugin session for a request and, when there is one,
@@ -1537,14 +1534,14 @@ func (s *Server) resolvePluginSession(clientHeaders http.Header, chain []attribu
 // identity at all — the store's ActiveSession(), the in-cluster answer.
 func (s *Server) pluginSessionOf(at attribution.Attribution) (string, pluginSession) {
 	if sid := at.PluginID(); sid != "" {
-		return sid, pluginSession{source: at.Source, header: at.Header, proc: at.Proc}
+		return sid, pluginSession{source: at.Source, header: at.Header}
 	}
 	if at.Session == "" && at.Source != pipeline.SessionSourcePending && s.Sessions != nil {
 		if sid := s.Sessions.ActiveSession(); sid != "" {
-			return sid, pluginSession{source: pipeline.SessionSourceActive, proc: at.Proc}
+			return sid, pluginSession{source: pipeline.SessionSourceActive}
 		}
 	}
-	return "", pluginSession{proc: at.Proc, chainSession: at.ChainSession, record: at.RecordID()}
+	return "", pluginSession{}
 }
 
 // attribute is the attributor's answer for a request, or what an attributor with nothing

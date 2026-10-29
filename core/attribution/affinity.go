@@ -69,7 +69,7 @@ func (a *Attributor) sessionForClientLocked(client string, now time.Time) string
 		owner := a.owners[id]
 		if owner == "" {
 			var ok bool
-			if owner, ok = pendingOwner(id); !ok {
+			if owner, _, ok = session.ParsePending(id); !ok {
 				continue
 			}
 		}

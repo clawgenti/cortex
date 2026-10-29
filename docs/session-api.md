@@ -38,7 +38,7 @@ tool results.
   "procs": ["41963.1791718279766260000"], "lastRequestAt": "…"
 }, {
   "id": "pending:claude-code@41963.1791718279766260000", "eventCount": 12, "…": "…",
-  "linkedTo": [{"session": "…", "until": "…"}], "linkedAll": true
+  "linkedTo": [{"session": "…", "first": "…", "last": "…"}], "linkedAll": true
 }]}
 ```
 
@@ -63,9 +63,10 @@ knowing by name:
   are recorded under `pending:<agent>@<pid>.<start>` (or `pending:<agent>` when
   the process could not be looked up), carrying their `proc`. Nothing renames a
   bucket. Instead, when the list is read, a bucket whose process later named a
-  session gets **`linkedTo`** — each session it names, with the time its calls up
-  to belong there (`until`) — and **`linkedAll`** when every request in it falls
-  before one of them. A response goes where its request went. agentop hides a
+  session gets **`linkedTo`** — the sessions it named that its calls belong to,
+  each with the `first` and `last` request that named it; a call belongs to the
+  first session its process named at or after it — and **`linkedAll`** when every
+  request in it falls before one of them. A response goes where its request went. agentop hides a
   `linkedAll` bucket and shows its calls inside those sessions; a bucket with
   calls after its process's last claim stays a row of its own.
 - **`?archived=true`** adds history where the proxy runs a session archive
