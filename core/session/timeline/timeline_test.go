@@ -751,11 +751,30 @@ func TestStrandedJobEndsAtTheAgentsLastFailure(t *testing.T) {
 	h := []pipeline.InferenceMessage{user("go")}
 	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t1", Name: "Bash"})
 	r.turn("", 2, 1, h, []pipeline.InferenceToolResult{result("t1", "Command running in background with ID: bk42.")}, "end_turn")
-	r.failedConnect("llm.example", 1) // before the agent's last turn: not where it stopped
-	r.turn("", 500, 1, append(h, user("more")), nil, "end_turn")
+	r.failedConnect("llm.example", 100)                  // after the job started, before the agent's last turn: not where it stopped
+	r.turn("", 500, 1, append(h, user("more")), nil, "") // cut mid-reply: the agent's last turn, and a failed one
 	r.failedConnect("llm.example", 900)
 	tl := Build("s", r.events, at(36000))
 	if len(tl.Jobs) != 1 || tl.Jobs[0].End == nil || !tl.Jobs[0].End.Equal(at(900)) {
 		t.Errorf("jobs = %+v, want bk42 ended at 900s", tl.Jobs)
+	}
+}
+
+// A failure some agent recovered from is a blip, not where anyone was cut off: the parent's
+// Agent tool stays open while its subagent retries past one failed CONNECT. A failed request
+// that reached the model host is not a CONNECT that could not be dialed.
+func TestRecoveredOrAnsweredFailureEndsNoTool(t *testing.T) {
+	var r rec
+	h := []pipeline.InferenceMessage{user("go")}
+	r.turn("", 0, 1, h, nil, "tool_use", pipeline.InferenceToolCall{ID: "t1", Name: "Agent"})
+	r.turn("a1", 2, 1, h, nil, "end_turn")
+	r.failedConnect("llm.example", 10)
+	r.turn("a1", 11, 1, append(h, user("x")), nil, "end_turn")
+	id := r.id()
+	r.add(pipeline.SessionEvent{At: at(20), Phase: pipeline.SessionRequest, RequestID: id, Host: "llm.example"})
+	r.add(pipeline.SessionEvent{At: at(20), Phase: pipeline.SessionResponse, RequestID: id, Host: "llm.example", StatusCode: 404})
+	tl := Build("s", r.events, at(30))
+	if x := findTool(t, tl, "t1"); x.End != nil {
+		t.Errorf("t1 = %+v, want it still running", x)
 	}
 }

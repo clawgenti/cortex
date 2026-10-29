@@ -162,20 +162,27 @@ func Build(id string, events []pipeline.SessionEvent, now time.Time) *Timeline {
 // every open tool whose agent moved on, so what is left had no later turn: the failure is the
 // agent's own attempt to report back, and where it stopped. On real sessions a cut VPN left a
 // 5-minute Bash drawn running for 7.7 hours and a background job for 10, out to the session's
-// last unrelated event. Only a failure with no inference parse counts: a CONNECT that could not
-// be dialed, which names no agent, so it is matched by host, any host a turn of the session went
+// last unrelated event. Only an opaque tunnel that failed counts: a CONNECT that could not be
+// dialed, which names no agent, so it is matched by host, any host a turn of the session went
 // to. A failed call that was parsed is some agent's own call, a turn or a side call such as the
-// titler, and is no one else's attempt.
+// titler, and is no one else's attempt. A failure before the session's last successful turn is
+// a blip the network came back from, most often a subagent's retry while its parent's Agent
+// tool is still open, so it ends nothing.
 //
-// shortcut: two agents stranded by one outage both end at its first failure; upgrade if CONNECTs
-// come to carry the agent id.
+// shortcut: two agents stranded by one outage both end at its first failure, and a stranded
+// tool stays open if any agent succeeds after the outage; upgrade if CONNECTs come to carry the
+// agent id.
 func endStrandedTools(t *Timeline) {
 	turnSeq := map[uint64]bool{}
 	lastTurn := map[string]time.Time{}
+	var lastOK time.Time
 	for _, x := range t.Turns {
 		turnSeq[x.Seq] = true
 		if x.Start.After(lastTurn[x.Agent]) {
 			lastTurn[x.Agent] = x.Start
+		}
+		if x.End != nil && !x.Error && x.Start.After(lastOK) {
+			lastOK = x.Start
 		}
 	}
 	model := map[string]bool{}
@@ -185,8 +192,11 @@ func endStrandedTools(t *Timeline) {
 		}
 	}
 	firstFailure := func(after time.Time) *time.Time {
+		if lastOK.After(after) {
+			after = lastOK
+		}
 		for _, h := range t.Hosts {
-			if h.Error && h.Kind != KindLLM && model[h.Host] && h.Start.After(after) {
+			if h.Error && h.Kind == KindTunnel && model[h.Host] && h.Start.After(after) {
 				at := h.Start
 				return &at
 			}
