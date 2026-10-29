@@ -262,3 +262,28 @@ func TestAgentsPane_StartupSecondLookDoesNotOutliveItsConnection(t *testing.T) {
 		t.Errorf("the previous pod's owed look opened the picker on the next pod's list: %v", m.pane)
 	}
 }
+
+// An agent's rows are what sessionAgent names, pending buckets included, less those folded into a
+// session: LAST SEEN is taken over the same rows SESSIONS counts. A Codex daemon started before
+// `enable` lists only its pending bucket, which is the case LAST SEEN exists to tell from "broken".
+func TestRebuildAgentsTable_LastSeenCoversTheRowsSessionsCounts(t *testing.T) {
+	m := morningAfterFixture()
+	now := time.Now()
+	m.sessions = append(m.sessions,
+		session.SessionSummary{ID: "pending:codex@123.456", UpdatedAt: now.Add(-2 * time.Hour)},
+		session.SessionSummary{ID: "pending:claude-code@9.9", UpdatedAt: now.Add(-3 * time.Hour),
+			LinkedTo: []session.PendingLink{{Session: "claude-1"}}, LinkedAll: true},
+	)
+	m.sessions[0].UpdatedAt, m.sessions[1].UpdatedAt = now.Add(-5*time.Hour), now.Add(-5*time.Hour)
+	m.rebuildAgentsTable()
+	got := map[string][]string{}
+	for _, r := range m.agentsTbl.Rows() {
+		got[r[0]] = r
+	}
+	if r := got["codex"]; len(r) < 3 || r[1] != "1" || r[2] != relTime(now, now.Add(-2*time.Hour)) {
+		t.Errorf("codex row = %v, want SESSIONS 1 and LAST SEEN from its pending bucket", r)
+	}
+	if r := got["claude-code"]; len(r) < 3 || r[1] != "2" || r[2] != relTime(now, now.Add(-5*time.Hour)) {
+		t.Errorf("claude-code row = %v, want LAST SEEN from its own sessions, not the folded bucket", r)
+	}
+}

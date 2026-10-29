@@ -11,6 +11,7 @@ import (
 	"github.com/rossoctl/cortex/cmd/agentop/money"
 	"github.com/rossoctl/cortex/cmd/agentop/tui/table"
 	"github.com/rossoctl/cortex/core/cost/usage"
+	"github.com/rossoctl/cortex/core/session"
 )
 
 // agentRow is one coding agent's totals for the whole window, as the AGENTS pane shows them.
@@ -540,7 +541,7 @@ func (m *model) agentSessionsCell(label string) string {
 		n = m.otherSessionsCount()
 	} else {
 		for _, s := range m.sessions {
-			if sessionAgent(s) == label && foldedInto(s) == "" {
+			if agentRowLists(s, label) {
 				n++
 			}
 		}
@@ -559,13 +560,19 @@ const agentsLastSeenWidth = len("Oct 23 15:04")
 func (m *model) agentLastSeen(label string) time.Time {
 	var last time.Time
 	for _, s := range m.sessions {
-		if (label == otherAgents && inOtherAgents(s)) || (label != otherAgents && s.Agent == label) {
+		if (label == otherAgents && inOtherAgents(s)) || (label != otherAgents && agentRowLists(s, label)) {
 			if s.UpdatedAt.After(last) {
 				last = s.UpdatedAt
 			}
 		}
 	}
 	return last
+}
+
+// agentRowLists reports whether s is one of the rows the agent label lists: its own sessions and
+// pending buckets, less the buckets folded into a session.
+func agentRowLists(s session.SessionSummary, label string) bool {
+	return sessionAgent(s) == label && foldedInto(s) == ""
 }
 
 // sessionsNameAgents reports whether any listed session names its agent.
