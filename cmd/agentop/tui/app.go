@@ -263,7 +263,7 @@ type sessionsLoadedMsg []session.SessionSummary
 
 type pipelineLoadedMsg *apiclient.PipelineView
 type snapshotLoadedMsg struct {
-	// olderNotFetched is how many events precede the ones in this response, from the
+	// olderNotFetched is how many events precede the session's own in this response, from the
 	// server's own count of the session. Non-zero means the timeline starts where the
 	// window starts, not where the session does — a distinction the operator cannot
 	// otherwise make, and the one that made a 5000-event session look like a 3-row one.
@@ -293,6 +293,8 @@ type olderPageLoadedMsg struct {
 	gen          uint64
 	events       []pipeline.SessionEvent
 	serverOldest uint64
+	// own is how many of events are the session's own, the rest being linked calls.
+	own int
 }
 
 // olderPageFailedMsg reports a failed [o] fetch.
@@ -1288,11 +1290,11 @@ func (m *model) snapshotCmd(id string) tea.Cmd {
 		if err != nil {
 			return errMsg{where: "snapshot " + id, err: err}
 		}
-		view.Events = mergeLinked(view.Events, inWindow(fetchLinked(m.ctx, m.client, id, windows), view))
 		older := 0
 		if view.TotalEvents > len(view.Events) {
 			older = view.TotalEvents - len(view.Events)
 		}
+		view.Events = mergeLinked(view.Events, inWindow(fetchLinked(m.ctx, m.client, id, windows), view))
 		return snapshotLoadedMsg{
 			id: id, events: view.Events, olderNotFetched: older, serverOldest: view.OldestSeq,
 			projected: view.View == apiclient.SummaryView, gen: gen,

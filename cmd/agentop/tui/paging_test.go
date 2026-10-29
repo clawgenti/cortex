@@ -71,7 +71,7 @@ func heldSeqs(m *model) []uint64 {
 func TestApplyOlderPage_PrependsInOrder(t *testing.T) {
 	m := pagedModel(t, pagedEvents(11, 10))
 
-	m.applyOlderPage(olderPageLoadedMsg{id: "sess-1", events: pagedEvents(1, 10), serverOldest: 1})
+	m.applyOlderPage(olderPageLoadedMsg{id: "sess-1", events: pagedEvents(1, 10), serverOldest: 1, own: 10})
 
 	got := heldSeqs(m)
 	if len(got) != 20 {

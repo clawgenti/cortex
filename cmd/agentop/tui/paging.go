@@ -127,6 +127,10 @@ func (m *model) olderPageCmd(id string, before uint64, heldFrom time.Time, gen u
 	buckets := m.linkedInto(id)
 	return func() tea.Msg {
 		view, err := m.client.GetSessionPage(m.ctx, id, before, apiclient.SnapshotEventLimit)
+		own := 0
+		if err == nil {
+			own = len(view.Events)
+		}
 		if err == nil && len(buckets) > 0 {
 			// The calls linked into the session are merged here, so a long session's start-up
 			// calls are not only reachable through a row the list hides.
@@ -141,7 +145,7 @@ func (m *model) olderPageCmd(id string, before uint64, heldFrom time.Time, gen u
 			return olderPageFailedMsg{id: id, gen: gen, err: err}
 		}
 		return olderPageLoadedMsg{
-			id: id, gen: gen, events: view.Events, serverOldest: view.OldestSeq,
+			id: id, gen: gen, events: view.Events, serverOldest: view.OldestSeq, own: own,
 		}
 	}
 }
@@ -259,8 +263,8 @@ func (m *model) applyOlderPage(msg olderPageLoadedMsg) {
 	// The count is decremented rather than recomputed from the server's total, because
 	// the total counts events at BOTH ends: once the cap has dropped a newer page,
 	// total-minus-held would report those as older and send the operator looking for them
-	// in the wrong direction. Pages are contiguous going back, so subtracting what just
-	// arrived is exact — give or take events appended since, which only ever makes this
+	// in the wrong direction. Pages are contiguous going back, so subtracting the page's own
+	// events is exact — give or take events appended since, which only ever makes this
 	// an undercount of what is now available.
 	//
 	// Created if absent, because writing to a nil map panics and this map is not always
@@ -270,7 +274,7 @@ func (m *model) applyOlderPage(msg olderPageLoadedMsg) {
 	if m.olderNotFetched == nil {
 		m.olderNotFetched = map[string]int{}
 	}
-	if n := m.olderNotFetched[msg.id] - len(msg.events); n > 0 {
+	if n := m.olderNotFetched[msg.id] - msg.own; n > 0 {
 		m.olderNotFetched[msg.id] = n
 	} else {
 		m.olderNotFetched[msg.id] = 0
